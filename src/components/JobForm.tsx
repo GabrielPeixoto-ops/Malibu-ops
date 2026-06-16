@@ -591,6 +591,7 @@ const filteredCustomers = useMemo(
       client_billing_config: overrideOpen ? buildOverrideConfig(overrideBilling) as unknown as SubcontractorConfig : null,
       google_review: form.google_review,
       google_review_employee_ids: form.google_review_employee_ids,
+      override_revenue: null,
     }
     const crewData = crew.filter((r) => r.employee_id).map((r) => ({
       employee_id: r.employee_id,
