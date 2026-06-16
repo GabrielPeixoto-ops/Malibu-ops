@@ -28,6 +28,7 @@ interface InvoiceJob {
   extra_man_employee_id: string | null
   break_minutes: number
   discount: number
+  override_revenue: number | null
   client_billing_config: Record<string, unknown> | null
   google_review: boolean
   google_review_employee_ids: string[]

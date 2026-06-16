@@ -86,6 +86,7 @@ interface CalendarJob {
   extra_men_hours: number
   break_minutes: number
   discount: number
+  override_revenue: number | null
   client_billing_config: Record<string, unknown> | null
   actual_start_time: string | null
   actual_finish_time: string | null
