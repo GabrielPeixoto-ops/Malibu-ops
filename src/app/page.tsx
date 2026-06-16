@@ -27,7 +27,10 @@ function addDays(d: Date, n: number): Date {
 }
 
 function toISO(d: Date): string {
-  return d.toISOString().split('T')[0]
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 function fmtDay(d: Date): string {
@@ -116,6 +119,22 @@ const fmt = (n: number) =>
   n.toLocaleString('en-AU', { style: 'currency', currency: 'AUD', minimumFractionDigits: 0, maximumFractionDigits: 0 })
 
 const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+const ENTITY_COLORS: Record<string, string> = {
+  private:  '#D4AF37',
+  tmaat:    '#EC4899',
+  holloway: '#1E3A8A',
+  peter:    '#22C55E',
+}
+
+function getEntityColor(job: CalendarJob): string | undefined {
+  if (job.source === 'private') return ENTITY_COLORS.private
+  const name = (job.subcontractor?.name ?? job.contract?.name ?? '').toLowerCase()
+  for (const [key, color] of Object.entries(ENTITY_COLORS)) {
+    if (key !== 'private' && name.includes(key)) return color
+  }
+  return undefined
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function entityLabel(job: CalendarJob): string {
@@ -493,11 +512,13 @@ function MonthView({
               <div className="space-y-0.5">
                 {dayJobs.slice(0, 3).map((job) => {
                   const s = STATUS_CARD[job.status]
+                  const ec = getEntityColor(job)
                   return (
                     <button
                       key={job.id}
                       onClick={() => onJobClick(job.id)}
                       className={`w-full text-left text-xs px-1.5 py-0.5 rounded border truncate ${s.bg} ${s.text} hover:opacity-80`}
+                      style={ec ? { borderLeftColor: ec, borderLeftWidth: '3px' } : undefined}
                     >
                       #{job.job_number} {entityLabel(job)}
                     </button>
@@ -531,6 +552,7 @@ function JobCard({
 }) {
   const s = STATUS_CARD[job.status]
   const revenue = calcJobRevenue(job)
+  const entityColor = getEntityColor(job)
 
   const isOverdue = (job.status === 'scheduled' || job.status === 'confirmed') && job.date <= today
   const isLate = job.status === 'in_progress' && job.date < today
@@ -544,7 +566,10 @@ function JobCard({
   const canFinish = job.status === 'in_progress'
 
   return (
-    <div className={`w-full rounded-lg border text-xs ${s.bg} ${s.text} ${alertRing}`}>
+    <div
+      className={`w-full rounded-lg border text-xs ${s.bg} ${s.text} ${alertRing}`}
+      style={entityColor ? { borderLeftColor: entityColor, borderLeftWidth: '3px' } : undefined}
+    >
       {/* Clickable info area */}
       <button
         onClick={onClick}
