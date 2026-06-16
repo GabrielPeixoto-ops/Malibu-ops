@@ -171,7 +171,7 @@ export interface JobSummary {
   margin: number | null
 }
 
-type JobSummaryInput = Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'additional_rate' | 'rate_card_key' | 'formula_vars' | 'discount' | 'extra_men_hours' | 'break_minutes'> & {
+type JobSummaryInput = Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'additional_rate' | 'rate_card_key' | 'formula_vars' | 'discount' | 'extra_men_hours' | 'break_minutes' | 'override_revenue'> & {
   source?: JobSource
   client_billing_config?: SubcontractorConfig | null
   google_review?: boolean
