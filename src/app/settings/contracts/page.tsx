@@ -17,6 +17,32 @@ const billingOptions = [
   { value: 'formula', label: 'Formula' },
 ]
 
+const COLOR_SWATCHES = ['#D4AF37', '#EC4899', '#60A5FA', '#4ADE80', '#F97316', '#A855F7', '#F43F5E', '#22D3EE', '#6B6660']
+
+function ColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      {COLOR_SWATCHES.map((c) => (
+        <button
+          key={c}
+          type="button"
+          title={c}
+          onClick={() => onChange(c)}
+          className={`w-6 h-6 rounded-full shrink-0 transition-all ${value === c ? 'ring-2 ring-offset-1 ring-offset-panel ring-parchment scale-110' : 'hover:scale-110'}`}
+          style={{ background: c }}
+        />
+      ))}
+      <input
+        type="color"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        title="Custom color"
+        className="w-7 h-6 rounded cursor-pointer border border-wire bg-transparent p-0"
+      />
+    </div>
+  )
+}
+
 function emptyForm() {
   return {
     name: '',
@@ -29,6 +55,7 @@ function emptyForm() {
     expression: '',
     defaults: '{}',
     google_review_bonus: false,
+    color_hex: '#6B6660',
     client_company_name: '',
     contact_name: '',
     contact_email: '',
@@ -65,6 +92,7 @@ function formFromContract(c: Contract): ReturnType<typeof emptyForm> {
   f.name = c.name
   f.billing_type = c.billing_type as BillingType
   f.google_review_bonus = c.google_review_bonus ?? false
+  f.color_hex = c.color_hex ?? '#6B6660'
   f.client_company_name = c.client_company_name ?? ''
   f.contact_name = c.contact_name ?? ''
   f.contact_email = c.contact_email ?? ''
@@ -218,6 +246,7 @@ export default function ContractsPage() {
       billing_type: form.billing_type,
       billing_config: buildBillingConfig(form),
       google_review_bonus: form.google_review_bonus,
+      color_hex: form.color_hex || '#6B6660',
       client_company_name: form.client_company_name.trim() || null,
       contact_name: form.contact_name.trim() || null,
       contact_email: form.contact_email.trim() || null,
@@ -292,8 +321,13 @@ export default function ContractsPage() {
               {contracts.map((c) => (
                 <tr key={c.id} className="hover:bg-panel transition-colors">
                   <td className="px-4 py-3">
-                    <div className="font-medium text-parchment">{c.name}</div>
-                    {c.client_company_name && <div className="text-xs text-dim">{c.client_company_name}</div>}
+                    <div className="flex items-center gap-2">
+                      <span className="w-3 h-3 rounded-full shrink-0" style={{ background: c.color_hex ?? '#6B6660' }} />
+                      <div>
+                        <div className="font-medium text-parchment">{c.name}</div>
+                        {c.client_company_name && <div className="text-xs text-dim">{c.client_company_name}</div>}
+                      </div>
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-warm text-xs hidden md:table-cell">
                     {c.contact_name && <div>{c.contact_name}</div>}
@@ -326,6 +360,15 @@ export default function ContractsPage() {
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? `Edit: ${editing.name}` : 'New Contract'}>
         <div className="space-y-4">
           <Input label="Contract name" value={form.name} onChange={(e) => setField('name', e.target.value)} placeholder="e.g. Two Men And A Truck" />
+
+          <div>
+            <label className="text-xs font-semibold text-dim uppercase tracking-wide block mb-2">Card Color (Dashboard)</label>
+            <div className="flex items-center gap-3">
+              <span className="w-6 h-6 rounded-full shrink-0 border border-wire" style={{ background: form.color_hex }} />
+              <ColorPicker value={form.color_hex} onChange={(c) => setField('color_hex', c)} />
+            </div>
+          </div>
+
           <div className="flex gap-4 flex-wrap">
             <label className="flex items-center gap-2 text-sm font-medium text-warm cursor-pointer">
               <input type="checkbox" checked={form.is_active} onChange={(e) => setField('is_active', e.target.checked)} className={checkboxCls} />

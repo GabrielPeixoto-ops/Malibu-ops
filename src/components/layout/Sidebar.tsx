@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Briefcase, Users, Truck, UserCircle, LayoutDashboard, X, Menu, Plus, DollarSign, Building2, FileText, Tag } from 'lucide-react'
+import { Briefcase, Users, Truck, UserCircle, LayoutDashboard, X, Menu, Plus, DollarSign, Building2, FileText, Tag, Palette } from 'lucide-react'
 import { useState } from 'react'
 import MalibuLogo from '@/components/ui/MalibuLogo'
 
@@ -17,6 +17,7 @@ const navItems = [
   { href: '/settings/customers', label: 'Customers', icon: UserCircle },
   { href: '/settings/private-pricing', label: 'Private Pricing', icon: Tag },
   { href: '/settings/fleet', label: 'Fleet', icon: Truck },
+  { href: '/settings/entity-colors', label: 'Entity Colors', icon: Palette },
 ]
 
 export default function Sidebar() {

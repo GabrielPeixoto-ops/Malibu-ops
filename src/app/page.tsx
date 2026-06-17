@@ -98,7 +98,7 @@ interface CalendarJob {
   contract_rate_id: string | null
   subcontractor: Subcontractor | null
   customer: { name: string; billing_type: string | null; billing_config: Record<string, unknown> | null } | null
-  contract: { name: string; billing_type: string; billing_config: Record<string, unknown> } | null
+  contract: { name: string; billing_type: string; billing_config: Record<string, unknown>; color_hex: string | null } | null
   contract_client: { name: string } | null
   job_crew: CrewRow[]
   job_materials: MaterialRow[]
@@ -125,19 +125,12 @@ const fmt = (n: number) =>
 
 const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-const ENTITY_COLORS: Record<string, string> = {
-  private:  '#D4AF37',
-  tmaat:    '#EC4899',
-  holloway: '#60A5FA',
-  peter:    '#4ADE80',
-}
+const FALLBACK_COLOR = '#6B6660'
 
-function getEntityColor(job: CalendarJob): string | undefined {
-  if (job.source === 'private') return ENTITY_COLORS.private
-  const name = (job.subcontractor?.name ?? job.contract?.name ?? '').toLowerCase()
-  for (const [key, color] of Object.entries(ENTITY_COLORS)) {
-    if (key !== 'private' && name.includes(key)) return color
-  }
+function getEntityColor(job: CalendarJob, privateColor: string | null): string | undefined {
+  if (job.source === 'private') return privateColor ?? '#D4AF37'
+  if (job.source === 'subcontract') return job.subcontractor?.color_hex ?? FALLBACK_COLOR
+  if (job.source === 'contract') return job.contract?.color_hex ?? FALLBACK_COLOR
   return undefined
 }
 
@@ -175,6 +168,7 @@ export default function DashboardPage() {
   const [dayRef, setDayRef] = useState<Date>(() => new Date())
   const [jobs, setJobs] = useState<CalendarJob[]>([])
   const [loading, setLoading] = useState(true)
+  const [privateColor, setPrivateColor] = useState<string | null>(null)
 
   const today = toISO(new Date())
 
@@ -210,6 +204,15 @@ export default function DashboardPage() {
   }
 
   useEffect(() => {
+    supabase
+      .from('entity_colors')
+      .select('color_hex')
+      .eq('entity_key', 'private')
+      .maybeSingle()
+      .then(({ data }) => { if (data?.color_hex) setPrivateColor(data.color_hex) })
+  }, [])
+
+  useEffect(() => {
     setLoading(true)
     void load()
     async function load() {
@@ -225,7 +228,7 @@ export default function DashboardPage() {
           subcontractor_rate_id, contract_rate_id,
           subcontractor:subcontractors(*),
           customer:customers(name, billing_type, billing_config),
-          contract:contracts(name, billing_type, billing_config),
+          contract:contracts(name, billing_type, billing_config, color_hex),
           contract_client:contract_clients(name),
           job_crew(employee_id, hours, cof_share, employee:employees(id, name, hourly_rate)),
           job_materials(quantity, cost_price, sale_price)
@@ -377,7 +380,7 @@ export default function DashboardPage() {
       {loading ? (
         <p className="text-warm text-sm py-8 text-center">Loading…</p>
       ) : view === 'day' ? (
-        <DayView jobs={jobsByDate.get(toISO(dayRef)) ?? []} today={today} onJobClick={(id) => router.push(`/jobs/${id}/edit`)} onStart={openStart} onFinish={openFinish} />
+        <DayView jobs={jobsByDate.get(toISO(dayRef)) ?? []} today={today} onJobClick={(id) => router.push(`/jobs/${id}/edit`)} onStart={openStart} onFinish={openFinish} privateColor={privateColor} />
       ) : view === 'week' ? (
         <WeekView
           days={weekDays}
@@ -392,6 +395,7 @@ export default function DashboardPage() {
           onDragEnd={() => { setDraggingJobId(null); setDragOverDate(null) }}
           onDragOver={setDragOverDate}
           onDrop={handleJobDrop}
+          privateColor={privateColor}
         />
       ) : (
         <MonthView
@@ -406,6 +410,7 @@ export default function DashboardPage() {
           onDragEnd={() => { setDraggingJobId(null); setDragOverDate(null) }}
           onDragOver={setDragOverDate}
           onDrop={handleJobDrop}
+          privateColor={privateColor}
         />
       )}
 
@@ -453,7 +458,7 @@ function SourceBadge({ source }: { source: JobSource }) {
 // ─── Week view ────────────────────────────────────────────────────────────────
 function WeekView({
   days, jobsByDate, today, onJobClick, onStart, onFinish,
-  draggingJobId, dragOverDate, onDragStart, onDragEnd, onDragOver, onDrop,
+  draggingJobId, dragOverDate, onDragStart, onDragEnd, onDragOver, onDrop, privateColor,
 }: {
   days: Date[]
   jobsByDate: Map<string, CalendarJob[]>
@@ -467,6 +472,7 @@ function WeekView({
   onDragEnd: () => void
   onDragOver: (date: string) => void
   onDrop: (date: string) => void
+  privateColor: string | null
 }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-wire bg-surface">
@@ -517,6 +523,7 @@ function WeekView({
                     isDragging={draggingJobId === job.id}
                     onDragStart={() => onDragStart(job.id)}
                     onDragEnd={onDragEnd}
+                    privateColor={privateColor}
                   />
                 ))}
               </div>
@@ -531,7 +538,7 @@ function WeekView({
 // ─── Month view ───────────────────────────────────────────────────────────────
 function MonthView({
   grid, monthRef, jobsByDate, today, onJobClick,
-  draggingJobId, dragOverDate, onDragStart, onDragEnd, onDragOver, onDrop,
+  draggingJobId, dragOverDate, onDragStart, onDragEnd, onDragOver, onDrop, privateColor,
 }: {
   grid: Date[]
   monthRef: Date
@@ -544,6 +551,7 @@ function MonthView({
   onDragEnd: () => void
   onDragOver: (date: string) => void
   onDrop: (date: string) => void
+  privateColor: string | null
 }) {
   const currentMonth = monthRef.getMonth()
 
@@ -589,7 +597,7 @@ function MonthView({
               <div className="space-y-0.5">
                 {dayJobs.slice(0, 3).map((job) => {
                   const s = STATUS_CARD[job.status]
-                  const ec = getEntityColor(job)
+                  const ec = getEntityColor(job, privateColor)
                   return (
                     <button
                       key={job.id}
@@ -621,7 +629,7 @@ function MonthView({
 
 // ─── Job card (week view) ─────────────────────────────────────────────────────
 function JobCard({
-  job, today, onClick, onStart, onFinish, isDragging, onDragStart, onDragEnd,
+  job, today, onClick, onStart, onFinish, isDragging, onDragStart, onDragEnd, privateColor,
 }: {
   job: CalendarJob
   today: string
@@ -631,10 +639,11 @@ function JobCard({
   isDragging?: boolean
   onDragStart?: () => void
   onDragEnd?: () => void
+  privateColor: string | null
 }) {
   const s = STATUS_CARD[job.status]
   const revenue = calcJobRevenue(job)
-  const entityColor = getEntityColor(job)
+  const entityColor = getEntityColor(job, privateColor)
 
   const _now = new Date()
   const _currentTime = `${String(_now.getHours()).padStart(2,'0')}:${String(_now.getMinutes()).padStart(2,'0')}`
@@ -727,12 +736,14 @@ function DayView({
   onJobClick,
   onStart,
   onFinish,
+  privateColor,
 }: {
   jobs: CalendarJob[]
   today: string
   onJobClick: (id: string) => void
   onStart: (id: string) => void
   onFinish: (id: string) => void
+  privateColor: string | null
 }) {
   if (jobs.length === 0) {
     return (
@@ -746,7 +757,7 @@ function DayView({
     <div className="bg-surface rounded-xl border border-wire divide-y divide-wire">
       {jobs.map((job) => {
         const s = STATUS_CARD[job.status]
-        const ec = getEntityColor(job)
+        const ec = getEntityColor(job, privateColor)
         const revenue = calcJobRevenue(job)
         const canStart = job.status === 'scheduled' || job.status === 'confirmed'
         const canFinish = job.status === 'in_progress'

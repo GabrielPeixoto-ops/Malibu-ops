@@ -59,6 +59,7 @@ export interface Subcontractor {
   billing_type: BillingType
   config: SubcontractorConfig
   google_review_bonus: boolean
+  color_hex: string | null
   created_at?: string
 }
 
@@ -131,6 +132,7 @@ export interface Contract {
   billing_type: string
   billing_config: SubcontractorConfig
   google_review_bonus: boolean
+  color_hex: string | null
   client_company_name: string | null
   contact_name: string | null
   contact_email: string | null

@@ -17,6 +17,32 @@ const billingOptions = [
   { value: 'formula', label: 'Formula' },
 ]
 
+const COLOR_SWATCHES = ['#D4AF37', '#EC4899', '#60A5FA', '#4ADE80', '#F97316', '#A855F7', '#F43F5E', '#22D3EE', '#6B6660']
+
+function ColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      {COLOR_SWATCHES.map((c) => (
+        <button
+          key={c}
+          type="button"
+          title={c}
+          onClick={() => onChange(c)}
+          className={`w-6 h-6 rounded-full shrink-0 transition-all ${value === c ? 'ring-2 ring-offset-1 ring-offset-panel ring-parchment scale-110' : 'hover:scale-110'}`}
+          style={{ background: c }}
+        />
+      ))}
+      <input
+        type="color"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        title="Custom color"
+        className="w-7 h-6 rounded cursor-pointer border border-wire bg-transparent p-0"
+      />
+    </div>
+  )
+}
+
 function emptyForm() {
   return {
     name: '',
@@ -29,6 +55,7 @@ function emptyForm() {
     expression: '',
     defaults: '{}',
     google_review_bonus: false,
+    color_hex: '#6B6660',
   }
 }
 
@@ -56,6 +83,7 @@ function formFromSub(sub: Subcontractor): ReturnType<typeof emptyForm> {
   f.name = sub.name
   f.billing_type = sub.billing_type
   f.google_review_bonus = sub.google_review_bonus ?? false
+  f.color_hex = sub.color_hex ?? '#6B6660'
   if (sub.billing_type === 'percent') {
     f.percent = String((sub.config as PercentConfig).percent)
   } else if (sub.billing_type === 'ratecard') {
@@ -179,7 +207,7 @@ export default function SubcontractorsPage() {
   async function handleSave() {
     if (!form.name.trim()) { setError('Name is required'); return }
     setSaving(true)
-    const payload = { name: form.name.trim(), billing_type: form.billing_type, config: buildConfig(form), google_review_bonus: form.google_review_bonus }
+    const payload = { name: form.name.trim(), billing_type: form.billing_type, config: buildConfig(form), google_review_bonus: form.google_review_bonus, color_hex: form.color_hex || '#6B6660' }
     if (editing) {
       await supabase.from('subcontractors').update(payload).eq('id', editing.id)
     } else {
@@ -226,7 +254,12 @@ export default function SubcontractorsPage() {
               )}
               {subs.map((sub) => (
                 <tr key={sub.id} className="hover:bg-panel transition-colors">
-                  <td className="px-4 py-3 font-medium text-parchment">{sub.name}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className="w-3 h-3 rounded-full shrink-0" style={{ background: sub.color_hex ?? '#6B6660' }} />
+                      <span className="font-medium text-parchment">{sub.name}</span>
+                    </div>
+                  </td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${billingBadge(sub.billing_type)}`}>
                       {sub.billing_type}
@@ -262,6 +295,14 @@ export default function SubcontractorsPage() {
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Edit Subcontractor' : 'New Subcontractor'}>
         <div className="space-y-4">
           <Input label="Name" value={form.name} onChange={(e) => setField('name', e.target.value)} placeholder="e.g. TMAAT" />
+
+          <div>
+            <label className="text-xs font-semibold text-dim uppercase tracking-wide block mb-2">Card Color (Dashboard)</label>
+            <div className="flex items-center gap-3">
+              <span className="w-6 h-6 rounded-full shrink-0 border border-wire" style={{ background: form.color_hex }} />
+              <ColorPicker value={form.color_hex} onChange={(c) => setField('color_hex', c)} />
+            </div>
+          </div>
 
           <label className="flex items-center gap-2 text-sm font-medium text-warm cursor-pointer">
             <input type="checkbox" checked={form.google_review_bonus} onChange={(e) => setField('google_review_bonus', e.target.checked)} className={checkboxCls} />
