@@ -251,6 +251,15 @@ export interface JobMaterial {
   sale_price: number
 }
 
+export interface JobExtraMan {
+  id: string
+  job_id: string
+  employee_id: string | null
+  start_time: string | null
+  finish_time: string | null
+  created_at?: string
+}
+
 export interface JobPhoto {
   id: string
   job_id: string

@@ -66,6 +66,14 @@ interface MaterialRow {
   sale_price: string
 }
 
+interface ExtraManRow {
+  _id: string
+  dbId?: string
+  employee_id: string
+  start_time: string
+  finish_time: string
+}
+
 interface PhotoLocal {
   _id: string
   dbId?: string
@@ -303,6 +311,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
   const catalogRef = useRef<HTMLDivElement>(null)
   const [form, setForm] = useState<FormState>(defaultForm())
   const [crew, setCrew] = useState<CrewRow[]>([])
+  const [extraMen, setExtraMan] = useState<ExtraManRow[]>([])
   const [materials, setMaterials] = useState<MaterialRow[]>([])
   const [photos, setPhotos] = useState<PhotoLocal[]>([])
   const [photoCaption, setPhotoCaption] = useState('')
@@ -440,8 +449,8 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             discount: j.discount?.toString() ?? '',
             notes: j.notes ?? '',
             completion_notes: j.completion_notes ?? '',
-            actual_start_time: j.actual_start_time ?? '',
-            actual_finish_time: j.actual_finish_time ?? '',
+            actual_start_time: j.actual_start_time ?? (j.scheduled_time ?? ''),
+            actual_finish_time: j.actual_finish_time ?? (j.scheduled_finish_time ?? ''),
             scheduled_time: j.scheduled_time ?? '',
             scheduled_finish_time: j.scheduled_finish_time ?? '',
             reference_number: j.reference_number ?? '',
@@ -484,6 +493,17 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             cof_share: c.cof_share,
             cof_hours: c.cof_hours > 0 ? c.cof_hours.toString() : '0.5',
           })))
+
+          try {
+            const { data: emData } = await supabase.from('job_extra_men').select('*').eq('job_id', jobId).order('created_at')
+            setExtraMan((emData ?? []).map((r: { id: string; employee_id: string | null; start_time: string | null; finish_time: string | null }) => ({
+              _id: r.id,
+              dbId: r.id,
+              employee_id: r.employee_id ?? '',
+              start_time: r.start_time ?? '',
+              finish_time: r.finish_time ?? '',
+            })))
+          } catch { /* migration not yet applied */ }
 
           setMaterials(j.job_materials.map((m) => ({
             _id: crypto.randomUUID(),
@@ -614,6 +634,12 @@ const filteredCustomers = useMemo(
     if (form.source === 'private' && !selectedPrivateRateInput) return null
     if (form.source === 'contract' && !selectedEntity) return null
 
+    const extraMenForBilling = extraMen
+      .filter((r) => r.employee_id && r.start_time.length === 5 && r.finish_time.length === 5)
+      .map((r) => ({ employee_id: r.employee_id, hours: Math.max(0, calcCrewHours(r.start_time, r.finish_time)) }))
+      .filter((r) => r.hours > 0)
+    const extraMenTotalHours = extraMenForBilling.reduce((s, r) => s + r.hours, 0)
+
     const jobData = {
       cof: parseFloat(form.cof) || null,
       cof_final: form.cof_final.trim() ? parseFloat(form.cof_final) : null,
@@ -621,7 +647,7 @@ const filteredCustomers = useMemo(
       additional_rate: parseFloat(form.additional_rate) || null,
       rate_card_key: form.rate_card_key || null,
       formula_vars: Object.fromEntries(Object.entries(form.formula_vars).map(([k, v]) => [k, parseFloat(v) || 0])),
-      extra_men_hours: parseFloat(form.extra_men_hours) || 0,
+      extra_men_hours: extraMenTotalHours > 0 ? extraMenTotalHours : (parseFloat(form.extra_men_hours) || 0),
       break_minutes: parseFloat(form.break_minutes) || 0,
       discount: parseFloat(form.discount) || 0,
       source: form.source,
@@ -655,9 +681,10 @@ const filteredCustomers = useMemo(
       employees,
       form.source !== 'subcontract' && form.source !== 'private' ? selectedEntity : null,
       form.source === 'private' ? selectedPrivateRateInput : null,
-      { subcontractorRatePerHour: selectedSubRatePH, contractRatePerHour: selectedContractRatePH }
+      { subcontractorRatePerHour: selectedSubRatePH, contractRatePerHour: selectedContractRatePH },
+      extraMenForBilling
     )
-  }, [form, crew, materials, selectedSub, selectedEntity, selectedPrivateRateInput, employees, overrideOpen, overrideBilling, subRates, contractRates])
+  }, [form, crew, extraMen, materials, selectedSub, selectedEntity, selectedPrivateRateInput, employees, overrideOpen, overrideBilling, subRates, contractRates])
 
   // ── COF suggestion from actual times ──────────────────────────────────────
   const suggestedCofFinal = useMemo<number | null>(() => {
@@ -748,6 +775,17 @@ const filteredCustomers = useMemo(
     }))
   }
   function removeCrew(_id: string) { setCrew((c) => c.filter((r) => r._id !== _id)) }
+
+  // ── Extra men helpers ──────────────────────────────────────────────────────
+  function addExtraMan() {
+    setExtraMan((em) => [...em, { _id: crypto.randomUUID(), employee_id: '', start_time: '', finish_time: '' }])
+  }
+  function updateExtraMan(_id: string, field: 'employee_id' | 'start_time' | 'finish_time', value: string) {
+    setExtraMan((em) => em.map((r) => r._id === _id ? { ...r, [field]: value } : r))
+  }
+  function removeExtraMan(_id: string) {
+    setExtraMan((em) => em.filter((r) => r._id !== _id))
+  }
 
   // ── Material helpers ───────────────────────────────────────────────────────
   function addMaterial() {
@@ -861,6 +899,12 @@ const filteredCustomers = useMemo(
 
     const clientBillingConfig = overrideOpen ? buildOverrideConfig(overrideBilling) : null
 
+    const extraMenRows = extraMen.filter((r) => r.employee_id && r.start_time && r.finish_time)
+    const computedExtraMenHours = extraMenRows.reduce((s, r) => {
+      const h = calcCrewHours(r.start_time, r.finish_time)
+      return s + (h > 0 ? h : 0)
+    }, 0)
+
     const payload = {
       job_number: form.job_number.trim(),
       date: form.date,
@@ -881,7 +925,7 @@ const filteredCustomers = useMemo(
       formula_vars: Object.keys(form.formula_vars).length
         ? Object.fromEntries(Object.entries(form.formula_vars).map(([k, v]) => [k, parseFloat(v) || 0]))
         : null,
-      extra_men_hours: parseFloat(form.extra_men_hours) || 0,
+      extra_men_hours: computedExtraMenHours > 0 ? computedExtraMenHours : (parseFloat(form.extra_men_hours) || 0),
       extra_man_employee_id: form.extra_man_employee_id || null,
       break_minutes: parseFloat(form.break_minutes) || 0,
       discount: parseFloat(form.discount) || 0,
@@ -943,6 +987,17 @@ const filteredCustomers = useMemo(
       if (crewRows.length) await supabase.from('job_crew').insert(crewRows.map((r) => ({ ...r, job_id: jobId })))
       if (matRows.length) await supabase.from('job_materials').insert(matRows.map((m) => ({ ...m, job_id: jobId })))
       if (truckFleetIds.length) await supabase.from('job_trucks').insert(truckFleetIds.map((fid) => ({ job_id: jobId, fleet_id: fid })))
+      try {
+        await supabase.from('job_extra_men').delete().eq('job_id', jobId)
+        if (extraMenRows.length) {
+          await supabase.from('job_extra_men').insert(extraMenRows.map((r) => ({
+            job_id: jobId,
+            employee_id: r.employee_id || null,
+            start_time: r.start_time || null,
+            finish_time: r.finish_time || null,
+          })))
+        }
+      } catch { /* migration not yet applied */ }
     } else {
       const { data: job, error: insErr } = await supabase.from('jobs').insert(payload).select().single()
       if (insErr || !job) throw insErr ?? new Error('Insert failed')
@@ -951,6 +1006,16 @@ const filteredCustomers = useMemo(
       if (matRows.length) await supabase.from('job_materials').insert(matRows.map((m) => ({ ...m, job_id: newId })))
       if (truckFleetIds.length) await supabase.from('job_trucks').insert(truckFleetIds.map((fid) => ({ job_id: newId, fleet_id: fid })))
       if (photos.length) await supabase.from('job_photos').insert(photos.map((p) => ({ job_id: newId, url: p.url, caption: p.caption || null, category: p.category })))
+      try {
+        if (extraMenRows.length) {
+          await supabase.from('job_extra_men').insert(extraMenRows.map((r) => ({
+            job_id: newId,
+            employee_id: r.employee_id || null,
+            start_time: r.start_time || null,
+            finish_time: r.finish_time || null,
+          })))
+        }
+      } catch { /* migration not yet applied */ }
     }
 
     if (!isEdit) {
@@ -2059,20 +2124,53 @@ const filteredCustomers = useMemo(
                 )}
               </div>
               <Input id="rfv-break" label="Break (min)" type="number" step="1" value={form.break_minutes ?? ''} onChange={(e) => setField('break_minutes', e.target.value)} placeholder="0" disabled={isReviewed} />
-              <Input id="rfv-extra-men" label="Extra Men (hrs)" type="number" min="0" step="0.25" value={form.extra_men_hours ?? ''} onChange={(e) => setField('extra_men_hours', e.target.value)} placeholder="0" disabled={isReviewed} />
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Extra Man</label>
-                <select value={form.extra_man_employee_id ?? ''} onChange={(e) => setField('extra_man_employee_id', e.target.value)} disabled={isReviewed} className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:bg-gray-50 disabled:text-gray-500">
-                  <option value="">— none —</option>
-                  {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-                </select>
-              </div>
             </div>
 
             {/* Actual times */}
             <div className="grid grid-cols-2 gap-3 mb-3">
               <Input id="rfv-start" label="Actual Start" type="time" value={form.actual_start_time ?? ''} onChange={(e) => setField('actual_start_time', e.target.value)} disabled={isReviewed} />
               <Input id="rfv-finish" label="Actual Finish" type="time" value={form.actual_finish_time ?? ''} onChange={(e) => setField('actual_finish_time', e.target.value)} disabled={isReviewed} />
+            </div>
+
+            {/* Extra Men */}
+            <div className="mb-3 pt-2 border-t border-gray-100">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium text-gray-700">Extra Men</label>
+                {!isReviewed && (
+                  <button type="button" onClick={addExtraMan} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium">
+                    <Plus size={13} /> Add Extra Man
+                  </button>
+                )}
+              </div>
+              {extraMen.length === 0 && <p className="text-xs text-gray-400">No extra men added.</p>}
+              <div className="space-y-2">
+                {extraMen.map((row) => {
+                  const hasTime = row.start_time.length === 5 && row.finish_time.length === 5
+                  const computed = hasTime ? Math.max(0, calcCrewHours(row.start_time, row.finish_time)) : null
+                  return (
+                    <div key={row._id} className="flex items-center gap-2 flex-wrap">
+                      <select
+                        value={row.employee_id}
+                        onChange={(e) => updateExtraMan(row._id, 'employee_id', e.target.value)}
+                        disabled={isReviewed}
+                        className="flex-1 min-w-0 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:bg-gray-50"
+                      >
+                        <option value="">Select employee…</option>
+                        {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                      </select>
+                      <input type="time" value={row.start_time} onChange={(e) => updateExtraMan(row._id, 'start_time', e.target.value)} disabled={isReviewed} className="w-28 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:bg-gray-50" />
+                      <span className="text-gray-400 text-xs">–</span>
+                      <input type="time" value={row.finish_time} onChange={(e) => updateExtraMan(row._id, 'finish_time', e.target.value)} disabled={isReviewed} className="w-28 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:bg-gray-50" />
+                      {computed !== null && <span className="text-sm text-gray-500 tabular-nums w-10">{computed}h</span>}
+                      {!isReviewed && (
+                        <button type="button" onClick={() => removeExtraMan(row._id)} className="text-gray-300 hover:text-red-500">
+                          <Trash2 size={15} />
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
             </div>
 
             {/* Completion notes */}
@@ -2124,13 +2222,14 @@ const filteredCustomers = useMemo(
                     <div className="flex flex-wrap gap-1.5">
                       {(() => {
                         const crewEmpIds = crew.filter((r) => r.employee_id).map((r) => r.employee_id)
-                        const allIds = form.extra_man_employee_id && !crewEmpIds.includes(form.extra_man_employee_id)
-                          ? [...crewEmpIds, form.extra_man_employee_id]
-                          : crewEmpIds
+                        const extraMenEmpIds = extraMen.filter((r) => r.employee_id).map((r) => r.employee_id)
+                        const legacyId = form.extra_man_employee_id && !crewEmpIds.includes(form.extra_man_employee_id) && !extraMenEmpIds.includes(form.extra_man_employee_id) ? form.extra_man_employee_id : null
+                        const allIds = [...new Set([...crewEmpIds, ...extraMenEmpIds, ...(legacyId ? [legacyId] : [])])]
                         return allIds.map((empId) => {
                           const emp = employees.find((e) => e.id === empId)
                           if (!emp) return null
                           const checked = form.google_review_employee_ids.includes(emp.id)
+                          const isExtra = !crewEmpIds.includes(empId)
                           return (
                             <button
                               key={emp.id}
@@ -2146,12 +2245,12 @@ const filteredCustomers = useMemo(
                                 checked ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-white text-gray-600 border-gray-300 hover:border-amber-300'
                               }`}
                             >
-                              {checked ? '★ ' : ''}{emp.name}{empId === form.extra_man_employee_id && !crewEmpIds.includes(empId) ? ' (extra)' : ''}
+                              {checked ? '★ ' : ''}{emp.name}{isExtra ? ' (extra)' : ''}
                             </button>
                           )
                         })
                       })()}
-                      {crew.filter((r) => r.employee_id).length === 0 && !form.extra_man_employee_id && (
+                      {crew.filter((r) => r.employee_id).length === 0 && extraMen.filter((r) => r.employee_id).length === 0 && !form.extra_man_employee_id && (
                         <p className="text-xs text-gray-400">Add crew members above to select recipients.</p>
                       )}
                     </div>
@@ -2329,18 +2428,38 @@ const filteredCustomers = useMemo(
           </div>
         </Card>
 
-        {/* ── Extra Men (in_progress + completion) ─────────────────────── */}
+        {/* ── Extra Men (in_progress only — completion shows inside Final Review) */}
         {showExtraMen && !isCompletionMode && (
-          <Card title="Extra Men">
-            <div className="grid grid-cols-2 gap-3">
-              <Input label="Extra Men (hrs)" type="number" min="0" step="0.25" value={form.extra_men_hours ?? ''} onChange={(e) => setField('extra_men_hours', e.target.value)} placeholder="0" disabled={isReviewed} />
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Extra Man Employee</label>
-                <select value={form.extra_man_employee_id ?? ''} onChange={(e) => setField('extra_man_employee_id', e.target.value)} disabled={isReviewed} className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500">
-                  <option value="">— none —</option>
-                  {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-                </select>
-              </div>
+          <Card title="Extra Men" action={
+            <button type="button" onClick={addExtraMan} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium">
+              <Plus size={14} /> Add
+            </button>
+          }>
+            {extraMen.length === 0 && <p className="text-sm text-gray-400 text-center py-2">No extra men added.</p>}
+            <div className="space-y-2">
+              {extraMen.map((row) => {
+                const hasTime = row.start_time.length === 5 && row.finish_time.length === 5
+                const computed = hasTime ? Math.max(0, calcCrewHours(row.start_time, row.finish_time)) : null
+                return (
+                  <div key={row._id} className="flex items-center gap-2 flex-wrap">
+                    <select
+                      value={row.employee_id}
+                      onChange={(e) => updateExtraMan(row._id, 'employee_id', e.target.value)}
+                      className="flex-1 min-w-0 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Select employee…</option>
+                      {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                    </select>
+                    <input type="time" value={row.start_time} onChange={(e) => updateExtraMan(row._id, 'start_time', e.target.value)} className="w-28 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <span className="text-gray-400 text-xs">–</span>
+                    <input type="time" value={row.finish_time} onChange={(e) => updateExtraMan(row._id, 'finish_time', e.target.value)} className="w-28 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    {computed !== null && <span className="text-sm text-gray-500 tabular-nums w-10">{computed}h</span>}
+                    <button type="button" onClick={() => removeExtraMan(row._id)} className="text-gray-300 hover:text-red-500">
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                )
+              })}
             </div>
           </Card>
         )}

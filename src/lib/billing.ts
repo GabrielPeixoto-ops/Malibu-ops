@@ -129,7 +129,8 @@ export function calculatePayroll(
   crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours?: number }>,
   employees: Employee[],
   cofHours = 0,
-  googleReviewEmployeeIds: string[] = []
+  googleReviewEmployeeIds: string[] = [],
+  extraMen: Array<{ employee_id: string; hours: number }> = []
 ): PayrollResult {
   const MIN_CALL = 2
   const REVIEW_BONUS = 0.5
@@ -155,6 +156,20 @@ export function calculatePayroll(
       hourly_rate: emp.hourly_rate,
       pay: paid_hours * emp.hourly_rate,
       google_review_bonus: hasReviewBonus || undefined,
+    })
+  }
+
+  for (const em of extraMen) {
+    const emp = empMap.get(em.employee_id)
+    if (!emp || em.hours <= 0) continue
+    const paid_hours = Math.max(em.hours, MIN_CALL)
+    entries.push({
+      employee_id: emp.id,
+      employee_name: emp.name,
+      hours: em.hours,
+      paid_hours,
+      hourly_rate: emp.hourly_rate,
+      pay: paid_hours * emp.hourly_rate,
     })
   }
 
@@ -194,7 +209,8 @@ export function calculateJobSummary(
   employees: Employee[],
   clientEntity?: { billing_type: string; billing_config: SubcontractorConfig } | null,
   privateRate?: PrivateRateInput | null,
-  rateOptions?: { subcontractorRatePerHour?: number | null; contractRatePerHour?: number | null }
+  rateOptions?: { subcontractorRatePerHour?: number | null; contractRatePerHour?: number | null },
+  extraMen?: Array<{ employee_id: string; hours: number }>
 ): JobSummary {
   const source = job.source ?? 'subcontract'
 
@@ -218,7 +234,7 @@ export function calculateJobSummary(
   const totalRevenue = subRevenue + materialsRevenue - discount
   const cofHours = Number(job.cof_final ?? job.cof) || 0
   const reviewIds = job.google_review ? (job.google_review_employee_ids ?? []) : []
-  const { total: payrollTotal, entries: payrollEntries } = calculatePayroll(crew, employees, cofHours, reviewIds)
+  const { total: payrollTotal, entries: payrollEntries } = calculatePayroll(crew, employees, cofHours, reviewIds, extraMen ?? [])
   const googleReviewBonuses = payrollEntries
     .filter((e) => e.google_review_bonus)
     .map((e) => ({ employee_id: e.employee_id, employee_name: e.employee_name }))
