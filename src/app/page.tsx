@@ -398,7 +398,7 @@ export default function DashboardPage() {
       {loading ? (
         <p className="text-gray-400 text-sm py-8 text-center">Loading…</p>
       ) : view === 'day' ? (
-        <DayView jobs={jobsByDate.get(toISO(dayRef)) ?? []} onJobClick={(id) => router.push(`/jobs/${id}/edit`)} onStart={openStart} onFinish={openFinish} />
+        <DayView jobs={jobsByDate.get(toISO(dayRef)) ?? []} today={today} onJobClick={(id) => router.push(`/jobs/${id}/edit`)} onStart={openStart} onFinish={openFinish} />
       ) : view === 'week' ? (
         <WeekView
           days={weekDays}
@@ -658,7 +658,12 @@ function JobCard({
   const revenue = calcJobRevenue(job)
   const entityColor = getEntityColor(job)
 
-  const isOverdue = (job.status === 'scheduled' || job.status === 'confirmed') && job.date <= today
+  const _now = new Date()
+  const _currentTime = `${String(_now.getHours()).padStart(2,'0')}:${String(_now.getMinutes()).padStart(2,'0')}`
+  const isOverdue = (job.status === 'scheduled' || job.status === 'confirmed') && (
+    job.date < today ||
+    (job.date === today && !!job.scheduled_time && job.scheduled_time <= _currentTime)
+  )
   const isLate = job.status === 'in_progress' && job.date < today
   const alertRing = isOverdue
     ? 'ring-2 ring-red-500 animate-pulse'
@@ -707,7 +712,7 @@ function JobCard({
       {/* Quick-action buttons */}
       {(canStart || canFinish) && (
         <div className="px-1.5 pb-1.5">
-          {canStart && (
+          {canStart && isOverdue && (
             <button
               onClick={(e) => { e.stopPropagation(); onStart(job.id) }}
               className="w-full text-center text-xs font-semibold py-1 rounded bg-amber-500 hover:bg-amber-600 text-white"
@@ -742,11 +747,13 @@ function SummaryCard({ label, value, color = 'text-gray-900' }: { label: string;
 // ─── Day view ─────────────────────────────────────────────────────────────────
 function DayView({
   jobs,
+  today,
   onJobClick,
   onStart,
   onFinish,
 }: {
   jobs: CalendarJob[]
+  today: string
   onJobClick: (id: string) => void
   onStart: (id: string) => void
   onFinish: (id: string) => void
@@ -768,6 +775,12 @@ function DayView({
         const canStart = job.status === 'scheduled' || job.status === 'confirmed'
         const canFinish = job.status === 'in_progress'
         const time = job.actual_start_time ?? job.scheduled_time
+        const _dNow = new Date()
+        const _dCurrentTime = `${String(_dNow.getHours()).padStart(2,'0')}:${String(_dNow.getMinutes()).padStart(2,'0')}`
+        const isDayOverdue = canStart && (
+          job.date < today ||
+          (job.date === today && !!job.scheduled_time && job.scheduled_time <= _dCurrentTime)
+        )
 
         return (
           <div key={job.id} className="flex items-stretch gap-0">
@@ -802,7 +815,7 @@ function DayView({
                     <span className="text-base font-bold text-gray-900">{fmt(revenue)}</span>
                   )}
                   <div className="flex gap-2">
-                    {canStart && (
+                    {canStart && isDayOverdue && (
                       <button
                         onClick={() => onStart(job.id)}
                         className="px-3 py-1 text-xs font-semibold rounded-lg bg-amber-500 hover:bg-amber-600 text-white"
