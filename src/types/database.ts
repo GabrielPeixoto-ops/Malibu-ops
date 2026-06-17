@@ -178,6 +178,7 @@ export interface Job {
   contract_client_id: string | null
   client_billing_config: SubcontractorConfig | null
   scheduled_time: string | null
+  scheduled_finish_time: string | null
   reference_number: string | null
   private_rate_id: string | null
   private_rate_custom: boolean

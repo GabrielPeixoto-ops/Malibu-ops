@@ -175,9 +175,22 @@ export default function DashboardPage() {
   const today = toISO(new Date())
 
   const [modal, setModal] = useState<{ type: 'start' | 'finish'; jobId: string; time: string } | null>(null)
+  const [draggingJobId, setDraggingJobId] = useState<string | null>(null)
+  const [dragOverDate, setDragOverDate] = useState<string | null>(null)
 
   function openStart(jobId: string) { setModal({ type: 'start', jobId, time: nowHHMM() }) }
   function openFinish(jobId: string) { setModal({ type: 'finish', jobId, time: nowHHMM() }) }
+
+  async function handleJobDrop(newDate: string) {
+    if (!draggingJobId) return
+    const job = jobs.find((j) => j.id === draggingJobId)
+    if (!job || job.date === newDate) { setDraggingJobId(null); setDragOverDate(null); return }
+    const jobId = draggingJobId
+    setJobs((prev) => prev.map((j) => j.id === jobId ? { ...j, date: newDate } : j))
+    setDraggingJobId(null)
+    setDragOverDate(null)
+    await supabase.from('jobs').update({ date: newDate }).eq('id', jobId)
+  }
 
   async function confirmModal() {
     if (!modal) return
@@ -357,7 +370,20 @@ export default function DashboardPage() {
       ) : view === 'day' ? (
         <DayView jobs={jobsByDate.get(toISO(dayRef)) ?? []} onJobClick={(id) => router.push(`/jobs/${id}/edit`)} onStart={openStart} onFinish={openFinish} />
       ) : view === 'week' ? (
-        <WeekView days={weekDays} jobsByDate={jobsByDate} today={today} onJobClick={(id) => router.push(`/jobs/${id}/edit`)} onStart={openStart} onFinish={openFinish} />
+        <WeekView
+          days={weekDays}
+          jobsByDate={jobsByDate}
+          today={today}
+          onJobClick={(id) => router.push(`/jobs/${id}/edit`)}
+          onStart={openStart}
+          onFinish={openFinish}
+          draggingJobId={draggingJobId}
+          dragOverDate={dragOverDate}
+          onDragStart={setDraggingJobId}
+          onDragEnd={() => { setDraggingJobId(null); setDragOverDate(null) }}
+          onDragOver={setDragOverDate}
+          onDrop={handleJobDrop}
+        />
       ) : (
         <MonthView
           grid={monthGrid}
@@ -365,6 +391,12 @@ export default function DashboardPage() {
           jobsByDate={jobsByDate}
           today={today}
           onJobClick={(id) => router.push(`/jobs/${id}/edit`)}
+          draggingJobId={draggingJobId}
+          dragOverDate={dragOverDate}
+          onDragStart={setDraggingJobId}
+          onDragEnd={() => { setDraggingJobId(null); setDragOverDate(null) }}
+          onDragOver={setDragOverDate}
+          onDrop={handleJobDrop}
         />
       )}
 
@@ -411,12 +443,8 @@ function SourceBadge({ source }: { source: JobSource }) {
 
 // ─── Week view ────────────────────────────────────────────────────────────────
 function WeekView({
-  days,
-  jobsByDate,
-  today,
-  onJobClick,
-  onStart,
-  onFinish,
+  days, jobsByDate, today, onJobClick, onStart, onFinish,
+  draggingJobId, dragOverDate, onDragStart, onDragEnd, onDragOver, onDrop,
 }: {
   days: Date[]
   jobsByDate: Map<string, CalendarJob[]>
@@ -424,6 +452,12 @@ function WeekView({
   onJobClick: (id: string) => void
   onStart: (id: string) => void
   onFinish: (id: string) => void
+  draggingJobId: string | null
+  dragOverDate: string | null
+  onDragStart: (id: string) => void
+  onDragEnd: () => void
+  onDragOver: (date: string) => void
+  onDrop: (date: string) => void
 }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
@@ -453,13 +487,28 @@ function WeekView({
             const iso = toISO(day)
             const dayJobs = jobsByDate.get(iso) ?? []
             const isToday = iso === today
+            const isDragOver = dragOverDate === iso
             return (
               <div
                 key={iso}
-                className={`p-1.5 border-r last:border-r-0 border-gray-100 space-y-1 ${isToday ? 'bg-blue-50/40' : ''}`}
+                className={`p-1.5 border-r last:border-r-0 border-gray-100 space-y-1 transition-colors
+                  ${isToday ? 'bg-blue-50/40' : ''}
+                  ${isDragOver ? 'bg-blue-100/70 ring-2 ring-inset ring-blue-400' : ''}`}
+                onDragOver={(e) => { e.preventDefault(); onDragOver(iso) }}
+                onDrop={(e) => { e.preventDefault(); onDrop(iso) }}
               >
                 {dayJobs.map((job) => (
-                  <JobCard key={job.id} job={job} today={today} onClick={() => onJobClick(job.id)} onStart={onStart} onFinish={onFinish} />
+                  <JobCard
+                    key={job.id}
+                    job={job}
+                    today={today}
+                    onClick={() => onJobClick(job.id)}
+                    onStart={onStart}
+                    onFinish={onFinish}
+                    isDragging={draggingJobId === job.id}
+                    onDragStart={() => onDragStart(job.id)}
+                    onDragEnd={onDragEnd}
+                  />
                 ))}
               </div>
             )
@@ -472,17 +521,20 @@ function WeekView({
 
 // ─── Month view ───────────────────────────────────────────────────────────────
 function MonthView({
-  grid,
-  monthRef,
-  jobsByDate,
-  today,
-  onJobClick,
+  grid, monthRef, jobsByDate, today, onJobClick,
+  draggingJobId, dragOverDate, onDragStart, onDragEnd, onDragOver, onDrop,
 }: {
   grid: Date[]
   monthRef: Date
   jobsByDate: Map<string, CalendarJob[]>
   today: string
   onJobClick: (id: string) => void
+  draggingJobId: string | null
+  dragOverDate: string | null
+  onDragStart: (id: string) => void
+  onDragEnd: () => void
+  onDragOver: (date: string) => void
+  onDrop: (date: string) => void
 }) {
   const currentMonth = monthRef.getMonth()
 
@@ -504,15 +556,19 @@ function MonthView({
           const dayJobs = jobsByDate.get(iso) ?? []
           const isToday = iso === today
           const isCurrentMonth = day.getMonth() === currentMonth
+          const isDragOver = dragOverDate === iso
 
           return (
             <div
               key={iso}
               className={`
-                min-h-[80px] p-1.5 border-r border-b last-of-type:border-r-0 border-gray-100
+                min-h-[80px] p-1.5 border-r border-b last-of-type:border-r-0 border-gray-100 transition-colors
                 ${isToday ? 'bg-blue-50/50' : ''}
                 ${!isCurrentMonth ? 'bg-gray-50/50' : ''}
+                ${isDragOver ? 'bg-blue-100/70 ring-2 ring-inset ring-blue-400' : ''}
               `}
+              onDragOver={(e) => { e.preventDefault(); onDragOver(iso) }}
+              onDrop={(e) => { e.preventDefault(); onDrop(iso) }}
             >
               <div
                 className={`text-xs font-medium w-6 h-6 flex items-center justify-center rounded-full mb-1
@@ -529,9 +585,15 @@ function MonthView({
                   return (
                     <button
                       key={job.id}
+                      draggable
+                      onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.stopPropagation(); onDragStart(job.id) }}
+                      onDragEnd={onDragEnd}
                       onClick={() => onJobClick(job.id)}
-                      className={`w-full text-left text-xs px-1.5 py-0.5 rounded border truncate ${s.bg} ${s.text} hover:opacity-80`}
-                      style={ec ? { borderLeftColor: ec, borderLeftWidth: '3px' } : undefined}
+                      className={`w-full text-left text-xs px-1.5 py-0.5 rounded border truncate ${s.bg} ${s.text} hover:opacity-80 cursor-grab`}
+                      style={{
+                        ...(ec ? { borderLeftColor: ec, borderLeftWidth: '3px' } : {}),
+                        opacity: draggingJobId === job.id ? 0.4 : 1,
+                      }}
                     >
                       #{job.job_number} {entityLabel(job)}
                     </button>
@@ -551,17 +613,16 @@ function MonthView({
 
 // ─── Job card (week view) ─────────────────────────────────────────────────────
 function JobCard({
-  job,
-  today,
-  onClick,
-  onStart,
-  onFinish,
+  job, today, onClick, onStart, onFinish, isDragging, onDragStart, onDragEnd,
 }: {
   job: CalendarJob
   today: string
   onClick: () => void
   onStart: (id: string) => void
   onFinish: (id: string) => void
+  isDragging?: boolean
+  onDragStart?: () => void
+  onDragEnd?: () => void
 }) {
   const s = STATUS_CARD[job.status]
   const revenue = calcJobRevenue(job)
@@ -580,8 +641,14 @@ function JobCard({
 
   return (
     <div
-      className={`w-full rounded-lg border text-xs ${s.bg} ${s.text} ${alertRing}`}
-      style={entityColor ? { borderLeftColor: entityColor, borderLeftWidth: '3px' } : undefined}
+      className={`w-full rounded-lg border text-xs ${s.bg} ${s.text} ${alertRing} cursor-grab`}
+      style={{
+        ...(entityColor ? { borderLeftColor: entityColor, borderLeftWidth: '3px' } : {}),
+        opacity: isDragging ? 0.4 : 1,
+      }}
+      draggable
+      onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart?.() }}
+      onDragEnd={onDragEnd}
     >
       {/* Clickable info area */}
       <button

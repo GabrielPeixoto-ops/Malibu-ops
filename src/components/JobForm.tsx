@@ -99,6 +99,7 @@ interface FormState {
   actual_start_time: string
   actual_finish_time: string
   scheduled_time: string
+  scheduled_finish_time: string
   reference_number: string
   // Private billing
   private_rate_id: string
@@ -202,6 +203,7 @@ function defaultForm(): FormState {
     actual_start_time: '',
     actual_finish_time: '',
     scheduled_time: '',
+    scheduled_finish_time: '',
     reference_number: '',
     private_rate_id: '',
     private_rate_custom: false,
@@ -360,7 +362,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             extra_men_hours: number; extra_man_employee_id: string | null; break_minutes: number
             discount: number; notes: string | null; completion_notes: string | null
             actual_start_time: string | null; actual_finish_time: string | null
-            scheduled_time: string | null; reference_number: string | null
+            scheduled_time: string | null; scheduled_finish_time: string | null; reference_number: string | null
             private_rate_id: string | null; private_rate_custom: boolean
             private_rate_custom_desc: string | null; private_rate_custom_price: number | null
             google_review: boolean; google_review_employee_ids: string[]
@@ -422,6 +424,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             actual_start_time: j.actual_start_time ?? '',
             actual_finish_time: j.actual_finish_time ?? '',
             scheduled_time: j.scheduled_time ?? '',
+            scheduled_finish_time: j.scheduled_finish_time ?? '',
             reference_number: j.reference_number ?? '',
             private_rate_id: j.private_rate_id ?? '',
             private_rate_custom: j.private_rate_custom ?? false,
@@ -628,6 +631,30 @@ const filteredCustomers = useMemo(
     )
   }, [form, crew, materials, selectedSub, selectedEntity, selectedPrivateRateInput, employees, overrideOpen, overrideBilling])
 
+  // ── COF suggestion from actual times ──────────────────────────────────────
+  const suggestedCofFinal = useMemo<number | null>(() => {
+    if (!form.actual_start_time || !form.actual_finish_time) return null
+    const [sh, sm] = form.actual_start_time.split(':').map(Number)
+    const [eh, em] = form.actual_finish_time.split(':').map(Number)
+    const totalMins = (eh * 60 + em) - (sh * 60 + sm)
+    if (totalMins <= 0) return null
+    const breakMins = parseFloat(form.break_minutes) || 0
+    const hrs = Math.round(((totalMins - breakMins) / 60) * 100) / 100
+    return hrs > 0 ? hrs : null
+  }, [form.actual_start_time, form.actual_finish_time, form.break_minutes])
+
+  useEffect(() => {
+    if (!form.actual_start_time || !form.actual_finish_time) return
+    const [sh, sm] = form.actual_start_time.split(':').map(Number)
+    const [eh, em] = form.actual_finish_time.split(':').map(Number)
+    const totalMins = (eh * 60 + em) - (sh * 60 + sm)
+    if (totalMins <= 0) return
+    const breakMins = parseFloat(form.break_minutes) || 0
+    const hrs = Math.round(((totalMins - breakMins) / 60) * 100) / 100
+    if (hrs > 0) setForm((f) => ({ ...f, cof_final: hrs.toString() }))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.actual_start_time, form.actual_finish_time])
+
   // ── Field helpers ──────────────────────────────────────────────────────────
   function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -833,6 +860,7 @@ const filteredCustomers = useMemo(
       actual_start_time: form.actual_start_time || null,
       actual_finish_time: form.actual_finish_time || null,
       scheduled_time: form.scheduled_time || null,
+      scheduled_finish_time: form.scheduled_finish_time || null,
       reference_number: form.reference_number.trim() || null,
       private_rate_id: form.source === 'private' && !form.private_rate_custom ? (form.private_rate_id || null) : null,
       private_rate_custom: form.source === 'private' ? form.private_rate_custom : false,
@@ -1986,7 +2014,14 @@ const filteredCustomers = useMemo(
 
             {/* Adjustment fields */}
             <div className="grid grid-cols-2 gap-3 mb-3">
-              <Input id="rfv-cof-final" label="COF Final (hrs)" type="number" min="0" step="0.25" value={form.cof_final ?? ''} onChange={(e) => setField('cof_final', e.target.value)} placeholder={form.cof || '—'} disabled={isReviewed} />
+              <div>
+                <Input id="rfv-cof-final" label="COF Final (hrs)" type="number" min="0" step="0.25" value={form.cof_final ?? ''} onChange={(e) => setField('cof_final', e.target.value)} placeholder={form.cof || '—'} disabled={isReviewed} />
+                {suggestedCofFinal !== null && !isReviewed && (
+                  <button type="button" onClick={() => setField('cof_final', suggestedCofFinal.toString())} className="mt-1 text-xs text-blue-600 hover:text-blue-800">
+                    ↑ Use {suggestedCofFinal}h from actual times
+                  </button>
+                )}
+              </div>
               <Input id="rfv-break" label="Break (min)" type="number" step="1" value={form.break_minutes ?? ''} onChange={(e) => setField('break_minutes', e.target.value)} placeholder="0" disabled={isReviewed} />
               <Input id="rfv-extra-men" label="Extra Men (hrs)" type="number" min="0" step="0.25" value={form.extra_men_hours ?? ''} onChange={(e) => setField('extra_men_hours', e.target.value)} placeholder="0" disabled={isReviewed} />
               <div>
@@ -2051,30 +2086,36 @@ const filteredCustomers = useMemo(
                   <div>
                     <p className="text-xs text-gray-400 mb-1.5">Who received the review <span className="text-amber-600">(+0.5h each)</span></p>
                     <div className="flex flex-wrap gap-1.5">
-                      {crew.filter((r) => r.employee_id).map((r) => {
-                        const emp = employees.find((e) => e.id === r.employee_id)
-                        if (!emp) return null
-                        const checked = form.google_review_employee_ids.includes(emp.id)
-                        return (
-                          <button
-                            key={emp.id}
-                            type="button"
-                            onClick={() => setField(
-                              'google_review_employee_ids',
-                              checked
-                                ? form.google_review_employee_ids.filter((id) => id !== emp.id)
-                                : [...form.google_review_employee_ids, emp.id]
-                            )}
-                            disabled={isReviewed}
-                            className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors disabled:opacity-50 ${
-                              checked ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-white text-gray-600 border-gray-300 hover:border-amber-300'
-                            }`}
-                          >
-                            {checked ? '★ ' : ''}{emp.name}
-                          </button>
-                        )
-                      })}
-                      {crew.filter((r) => r.employee_id).length === 0 && (
+                      {(() => {
+                        const crewEmpIds = crew.filter((r) => r.employee_id).map((r) => r.employee_id)
+                        const allIds = form.extra_man_employee_id && !crewEmpIds.includes(form.extra_man_employee_id)
+                          ? [...crewEmpIds, form.extra_man_employee_id]
+                          : crewEmpIds
+                        return allIds.map((empId) => {
+                          const emp = employees.find((e) => e.id === empId)
+                          if (!emp) return null
+                          const checked = form.google_review_employee_ids.includes(emp.id)
+                          return (
+                            <button
+                              key={emp.id}
+                              type="button"
+                              onClick={() => setField(
+                                'google_review_employee_ids',
+                                checked
+                                  ? form.google_review_employee_ids.filter((id) => id !== emp.id)
+                                  : [...form.google_review_employee_ids, emp.id]
+                              )}
+                              disabled={isReviewed}
+                              className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors disabled:opacity-50 ${
+                                checked ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-white text-gray-600 border-gray-300 hover:border-amber-300'
+                              }`}
+                            >
+                              {checked ? '★ ' : ''}{emp.name}{empId === form.extra_man_employee_id && !crewEmpIds.includes(empId) ? ' (extra)' : ''}
+                            </button>
+                          )
+                        })
+                      })()}
+                      {crew.filter((r) => r.employee_id).length === 0 && !form.extra_man_employee_id && (
                         <p className="text-xs text-gray-400">Add crew members above to select recipients.</p>
                       )}
                     </div>
@@ -2152,7 +2193,7 @@ const filteredCustomers = useMemo(
 
         {/* ── Job Info ──────────────────────────────────────────────────── */}
         <Card title="Job Info">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Input
               label="Job #"
               value={form.job_number ?? ''}
@@ -2168,13 +2209,24 @@ const filteredCustomers = useMemo(
               disabled={isReviewed}
             />
             <Input
-              label="Time"
+              label="Start Time"
               type="time"
               value={form.scheduled_time ?? ''}
               onChange={(e) => setField('scheduled_time', e.target.value)}
               disabled={isReviewed}
             />
+            <Input
+              label="Finish Time"
+              type="time"
+              value={form.scheduled_finish_time ?? ''}
+              onChange={(e) => setField('scheduled_finish_time', e.target.value)}
+              disabled={isReviewed}
+            />
           </div>
+          {form.scheduled_time && form.scheduled_finish_time && (() => {
+            const dur = calcCrewHours(form.scheduled_time, form.scheduled_finish_time)
+            return dur > 0 ? <p className="mt-1.5 text-xs text-gray-400">Est. duration: {dur}h</p> : null
+          })()}
           {isEdit && (
             <div className="mt-3">
               <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
