@@ -90,6 +90,7 @@ interface CalendarJob {
   break_minutes: number
   discount: number
   override_revenue: number | null
+  scheduled_time: string | null
   client_billing_config: Record<string, unknown> | null
   actual_start_time: string | null
   actual_finish_time: string | null
@@ -164,9 +165,10 @@ export default function DashboardPage() {
   const router = useRouter()
   const supabase = createClient()
 
-  const [view, setView] = useState<'week' | 'month'>('week')
+  const [view, setView] = useState<'week' | 'month' | 'day'>('week')
   const [weekStart, setWeekStart] = useState<Date>(() => getMonday(new Date()))
   const [monthRef, setMonthRef] = useState<Date>(() => firstOfMonth(new Date()))
+  const [dayRef, setDayRef] = useState<Date>(() => new Date())
   const [jobs, setJobs] = useState<CalendarJob[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -193,9 +195,10 @@ export default function DashboardPage() {
   // ── Fetch jobs ─────────────────────────────────────────────────────────────
   useEffect(() => {
     setLoading(true)
+    void load()
     async function load() {
-      const start = view === 'week' ? toISO(weekStart) : toISO(firstOfMonth(monthRef))
-      const end = view === 'week' ? toISO(addDays(weekStart, 6)) : toISO(lastOfMonth(monthRef))
+      const start = view === 'week' ? toISO(weekStart) : view === 'day' ? toISO(dayRef) : toISO(firstOfMonth(monthRef))
+      const end = view === 'week' ? toISO(addDays(weekStart, 6)) : view === 'day' ? toISO(dayRef) : toISO(lastOfMonth(monthRef))
 
       // Step 1: load jobs — clean query without fleet join
       const { data, error } = await supabase
@@ -203,7 +206,7 @@ export default function DashboardPage() {
         .select(`
           id, job_number, date, status, source, notes, cof, cof_final, additional_hours,
           additional_rate, rate_card_key, formula_vars, extra_men_hours, break_minutes, discount,
-          actual_start_time, actual_finish_time, client_billing_config,
+          actual_start_time, actual_finish_time, scheduled_time, override_revenue, client_billing_config,
           subcontractor:subcontractors(*),
           customer:customers(name, billing_type, billing_config),
           contract:contracts(name, billing_type, billing_config),
@@ -240,8 +243,7 @@ export default function DashboardPage() {
       setJobs(baseJobs.map((j) => ({ ...j, job_trucks: truckMap.get(j.id) ?? [] })) as CalendarJob[])
       setLoading(false)
     }
-    load()
-  }, [view, weekStart, monthRef])
+  }, [view, weekStart, monthRef, dayRef])
 
   // ── Week summary ───────────────────────────────────────────────────────────
   const weekSummary = useMemo(() => {
@@ -270,15 +272,18 @@ export default function DashboardPage() {
   // ── Navigation ─────────────────────────────────────────────────────────────
   function prevPeriod() {
     if (view === 'week') setWeekStart((d) => addDays(d, -7))
+    else if (view === 'day') setDayRef((d) => addDays(d, -1))
     else setMonthRef((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))
   }
   function nextPeriod() {
     if (view === 'week') setWeekStart((d) => addDays(d, 7))
+    else if (view === 'day') setDayRef((d) => addDays(d, 1))
     else setMonthRef((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1))
   }
   function goToday() {
     setWeekStart(getMonday(new Date()))
     setMonthRef(firstOfMonth(new Date()))
+    setDayRef(new Date())
   }
 
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
@@ -297,7 +302,7 @@ export default function DashboardPage() {
             onClick={goToday}
             className="text-sm font-semibold text-gray-700 min-w-[160px] text-center hover:text-blue-600"
           >
-            {view === 'week' ? fmtWeekRange(weekStart) : fmtMonthYear(monthRef)}
+            {view === 'week' ? fmtWeekRange(weekStart) : view === 'day' ? dayRef.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : fmtMonthYear(monthRef)}
           </button>
           <button onClick={nextPeriod} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500">
             <ChevronRight size={18} />
@@ -306,6 +311,12 @@ export default function DashboardPage() {
 
         <div className="flex items-center gap-2">
           <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+            <button
+              onClick={() => setView('day')}
+              className={`px-3 py-1.5 ${view === 'day' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+            >
+              Day
+            </button>
             <button
               onClick={() => setView('week')}
               className={`px-3 py-1.5 ${view === 'week' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
@@ -343,6 +354,8 @@ export default function DashboardPage() {
       {/* ── Calendar ─────────────────────────────────────────────────────── */}
       {loading ? (
         <p className="text-gray-400 text-sm py-8 text-center">Loading…</p>
+      ) : view === 'day' ? (
+        <DayView jobs={jobsByDate.get(toISO(dayRef)) ?? []} onJobClick={(id) => router.push(`/jobs/${id}/edit`)} onStart={openStart} onFinish={openFinish} />
       ) : view === 'week' ? (
         <WeekView days={weekDays} jobsByDate={jobsByDate} today={today} onJobClick={(id) => router.push(`/jobs/${id}/edit`)} onStart={openStart} onFinish={openFinish} />
       ) : (
@@ -625,6 +638,102 @@ function SummaryCard({ label, value, color = 'text-gray-900' }: { label: string;
     <div className="bg-white rounded-xl border border-gray-200 px-4 py-3">
       <div className="text-xs text-gray-500 mb-1">{label}</div>
       <div className={`text-lg font-bold ${color}`}>{value}</div>
+    </div>
+  )
+}
+
+// ─── Day view ─────────────────────────────────────────────────────────────────
+function DayView({
+  jobs,
+  onJobClick,
+  onStart,
+  onFinish,
+}: {
+  jobs: CalendarJob[]
+  onJobClick: (id: string) => void
+  onStart: (id: string) => void
+  onFinish: (id: string) => void
+}) {
+  if (jobs.length === 0) {
+    return (
+      <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400 text-sm">
+        No jobs for this day.
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
+      {jobs.map((job) => {
+        const s = STATUS_CARD[job.status]
+        const ec = getEntityColor(job)
+        const revenue = calcJobRevenue(job)
+        const canStart = job.status === 'scheduled' || job.status === 'confirmed'
+        const canFinish = job.status === 'in_progress'
+        const time = job.actual_start_time ?? job.scheduled_time
+
+        return (
+          <div key={job.id} className="flex items-stretch gap-0">
+            {ec && <div className="w-1 shrink-0 rounded-l-xl" style={{ backgroundColor: ec }} />}
+            <div className="flex-1 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-bold text-gray-900">#{job.job_number}</span>
+                    <SourceBadge source={job.source} />
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${s.bg} ${s.text}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
+                      {job.status.replace('_', ' ')}
+                    </span>
+                    {time && <span className="text-xs text-gray-400">@ {time}</span>}
+                  </div>
+                  <div className="mt-1 text-sm text-gray-700 font-medium">{entityLabel(job)}</div>
+                  {job.notes && <div className="mt-1 text-xs text-gray-400 line-clamp-1">{job.notes}</div>}
+                  {job.job_crew.length > 0 && (
+                    <div className="mt-1 text-xs text-gray-500">
+                      Crew: {job.job_crew.map((c) => c.employee?.name ?? '?').join(', ')}
+                    </div>
+                  )}
+                  {(job.job_trucks ?? []).length > 0 && (
+                    <div className="mt-0.5 text-xs font-mono text-gray-500">
+                      {(job.job_trucks ?? []).map((jt) => jt.fleet?.registration ?? jt.fleet?.name).filter(Boolean).join(' + ')}
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-col items-end gap-2 shrink-0">
+                  {revenue !== null && (
+                    <span className="text-base font-bold text-gray-900">{fmt(revenue)}</span>
+                  )}
+                  <div className="flex gap-2">
+                    {canStart && (
+                      <button
+                        onClick={() => onStart(job.id)}
+                        className="px-3 py-1 text-xs font-semibold rounded-lg bg-amber-500 hover:bg-amber-600 text-white"
+                      >
+                        Start
+                      </button>
+                    )}
+                    {canFinish && (
+                      <button
+                        onClick={() => onFinish(job.id)}
+                        className="px-3 py-1 text-xs font-semibold rounded-lg bg-green-600 hover:bg-green-700 text-white"
+                      >
+                        Finish
+                      </button>
+                    )}
+                    <button
+                      onClick={() => onJobClick(job.id)}
+                      className="px-3 py-1 text-xs font-semibold rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
+                    >
+                      Open
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
