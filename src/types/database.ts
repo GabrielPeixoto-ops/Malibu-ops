@@ -150,6 +150,26 @@ export interface ContractClient {
   created_at?: string
 }
 
+export interface SubcontractorRate {
+  id: string
+  subcontractor_id: string
+  name: string
+  rate_per_hour: number
+  is_active: boolean
+  sort_order: number
+  created_at?: string
+}
+
+export interface ContractRate {
+  id: string
+  contract_id: string
+  name: string
+  rate_per_hour: number
+  is_active: boolean
+  sort_order: number
+  created_at?: string
+}
+
 export interface Job {
   id: string
   job_number: string
@@ -199,6 +219,8 @@ export interface Job {
   subcontractor_service_type: string | null
   subcontractor_trucks: string | null
   subcontractor_crew_size: number | null
+  subcontractor_rate_id: string | null
+  contract_rate_id: string | null
   created_at?: string
   subcontractor?: Subcontractor
   customer?: Customer

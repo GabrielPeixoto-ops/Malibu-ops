@@ -80,10 +80,14 @@ function jobVars(job: Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'addi
 /** Revenue Malibu receives FROM a subcontractor (source = 'subcontract') */
 export function calculateJobRevenue(
   job: Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'additional_rate' | 'rate_card_key' | 'formula_vars' | 'extra_men_hours' | 'break_minutes' | 'override_revenue'>,
-  sub: Subcontractor
+  sub: Subcontractor,
+  ratePerHour?: number | null
 ): number {
   if (job.override_revenue != null && job.override_revenue > 0) return job.override_revenue
   const { cofHours, additionalHours, additionalRate, extraMenHours, breakHours } = jobVars(job)
+  if (ratePerHour != null && ratePerHour > 0) {
+    return ratePerHour * (cofHours + additionalHours - breakHours) + extraMenHours * additionalRate
+  }
   return applyBillingConfig(cofHours, additionalHours, additionalRate, extraMenHours, breakHours, job.rate_card_key, job.formula_vars, sub.billing_type, sub.config)
 }
 
@@ -91,10 +95,14 @@ export function calculateJobRevenue(
 export function calculateClientRevenue(
   job: Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'additional_rate' | 'rate_card_key' | 'formula_vars' | 'extra_men_hours' | 'break_minutes' | 'override_revenue'> & { client_billing_config?: SubcontractorConfig | null },
   entityBillingType: string,
-  entityBillingConfig: SubcontractorConfig
+  entityBillingConfig: SubcontractorConfig,
+  ratePerHour?: number | null
 ): number {
   if (job.override_revenue != null && job.override_revenue > 0) return job.override_revenue
   const { cofHours, additionalHours, additionalRate, extraMenHours, breakHours } = jobVars(job)
+  if (ratePerHour != null && ratePerHour > 0) {
+    return ratePerHour * (cofHours + additionalHours - breakHours) + extraMenHours * additionalRate
+  }
   // Per-job override merges over entity config; if override supplies billing_type, it takes precedence
   const override = job.client_billing_config as (SubcontractorConfig & { billing_type?: string }) | null
   const billingType = override?.billing_type ?? entityBillingType
@@ -185,20 +193,22 @@ export function calculateJobSummary(
   materials: Array<{ quantity: number; cost_price: number; sale_price: number }>,
   employees: Employee[],
   clientEntity?: { billing_type: string; billing_config: SubcontractorConfig } | null,
-  privateRate?: PrivateRateInput | null
+  privateRate?: PrivateRateInput | null,
+  rateOptions?: { subcontractorRatePerHour?: number | null; contractRatePerHour?: number | null }
 ): JobSummary {
   const source = job.source ?? 'subcontract'
 
   let subRevenue = 0
   if (source === 'subcontract') {
-    subRevenue = sub ? calculateJobRevenue(job, sub) : 0
+    subRevenue = sub ? calculateJobRevenue(job, sub, rateOptions?.subcontractorRatePerHour) : 0
   } else if (source === 'private' && privateRate) {
     subRevenue = privateRate.rate_per_hour * privateRate.cofHours
   } else if (clientEntity) {
     subRevenue = calculateClientRevenue(
       { ...job, client_billing_config: job.client_billing_config ?? null },
       clientEntity.billing_type,
-      clientEntity.billing_config
+      clientEntity.billing_config,
+      rateOptions?.contractRatePerHour
     )
   }
 

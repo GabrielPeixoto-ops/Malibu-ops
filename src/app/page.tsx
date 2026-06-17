@@ -94,6 +94,8 @@ interface CalendarJob {
   client_billing_config: Record<string, unknown> | null
   actual_start_time: string | null
   actual_finish_time: string | null
+  subcontractor_rate_id: string | null
+  contract_rate_id: string | null
   subcontractor: Subcontractor | null
   customer: { name: string; billing_type: string | null; billing_config: Record<string, unknown> | null } | null
   contract: { name: string; billing_type: string; billing_config: Record<string, unknown> } | null
@@ -101,6 +103,9 @@ interface CalendarJob {
   job_crew: CrewRow[]
   job_materials: MaterialRow[]
   job_trucks: Array<{ fleet: { name: string; registration: string | null } | null }>
+  // populated post-fetch
+  subcontractor_rate_ph: number | null
+  contract_rate_ph: number | null
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -149,14 +154,15 @@ function entityLabel(job: CalendarJob): string {
 
 function calcJobRevenue(job: CalendarJob): number | null {
   if (job.source === 'subcontract') {
-    return job.subcontractor ? calculateJobRevenue(job, job.subcontractor) : null
+    return job.subcontractor ? calculateJobRevenue(job, job.subcontractor, job.subcontractor_rate_ph) : null
   }
   const entity = job.source === 'private' ? job.customer : job.contract
   if (!entity?.billing_type || !entity?.billing_config) return null
   return calculateClientRevenue(
     { ...job, client_billing_config: job.client_billing_config as SubcontractorConfig | null },
     entity.billing_type,
-    entity.billing_config as unknown as SubcontractorConfig
+    entity.billing_config as unknown as SubcontractorConfig,
+    job.source === 'contract' ? job.contract_rate_ph : null
   )
 }
 
@@ -220,6 +226,7 @@ export default function DashboardPage() {
           id, job_number, date, status, source, notes, cof, cof_final, additional_hours,
           additional_rate, rate_card_key, formula_vars, extra_men_hours, break_minutes, discount,
           actual_start_time, actual_finish_time, scheduled_time, override_revenue, client_billing_config,
+          subcontractor_rate_id, contract_rate_id,
           subcontractor:subcontractors(*),
           customer:customers(name, billing_type, billing_config),
           contract:contracts(name, billing_type, billing_config),
@@ -233,7 +240,7 @@ export default function DashboardPage() {
 
       if (error) console.error('dashboard jobs query error:', error.message)
 
-      const baseJobs = (data ?? []) as unknown as Omit<CalendarJob, 'job_trucks'>[]
+      const baseJobs = (data ?? []) as unknown as Omit<CalendarJob, 'job_trucks' | 'subcontractor_rate_ph' | 'contract_rate_ph'>[]
 
       // Step 2: truck plates — isolated query, skipped silently if tables don't exist
       const truckMap = new Map<string, CalendarJob['job_trucks']>()
@@ -253,7 +260,30 @@ export default function DashboardPage() {
         }
       }
 
-      setJobs(baseJobs.map((j) => ({ ...j, job_trucks: truckMap.get(j.id) ?? [] })) as CalendarJob[])
+      // Step 3: rate per hour — isolated queries, skipped if tables don't exist yet
+      const subRatePHMap = new Map<string, number>()
+      const contractRatePHMap = new Map<string, number>()
+      const uniqueSubRateIds = [...new Set(baseJobs.map(j => j.subcontractor_rate_id).filter(Boolean) as string[])]
+      const uniqueContractRateIds = [...new Set(baseJobs.map(j => j.contract_rate_id).filter(Boolean) as string[])]
+      if (uniqueSubRateIds.length > 0) {
+        try {
+          const { data: srRows } = await supabase.from('subcontractor_rates').select('id, rate_per_hour').in('id', uniqueSubRateIds)
+          for (const r of (srRows ?? []) as Array<{ id: string; rate_per_hour: number }>) subRatePHMap.set(r.id, r.rate_per_hour)
+        } catch { /* table not yet migrated */ }
+      }
+      if (uniqueContractRateIds.length > 0) {
+        try {
+          const { data: crRows } = await supabase.from('contract_rates').select('id, rate_per_hour').in('id', uniqueContractRateIds)
+          for (const r of (crRows ?? []) as Array<{ id: string; rate_per_hour: number }>) contractRatePHMap.set(r.id, r.rate_per_hour)
+        } catch { /* table not yet migrated */ }
+      }
+
+      setJobs(baseJobs.map((j) => ({
+        ...j,
+        job_trucks: truckMap.get(j.id) ?? [],
+        subcontractor_rate_ph: j.subcontractor_rate_id ? (subRatePHMap.get(j.subcontractor_rate_id) ?? null) : null,
+        contract_rate_ph: j.contract_rate_id ? (contractRatePHMap.get(j.contract_rate_id) ?? null) : null,
+      })) as CalendarJob[])
       setLoading(false)
     }
   }, [view, weekStart, monthRef, dayRef])

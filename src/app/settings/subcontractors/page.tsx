@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic'
 import { useEffect, useState } from 'react'
 import { Plus, Pencil, Trash2, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import type { Subcontractor, BillingType, PercentConfig, RateCardConfig, FormulaConfig } from '@/types/database'
+import type { Subcontractor, SubcontractorRate, BillingType, PercentConfig, RateCardConfig, FormulaConfig } from '@/types/database'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
@@ -87,6 +87,10 @@ export default function SubcontractorsPage() {
   const [form, setForm] = useState(emptyForm())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [subRates, setSubRates] = useState<SubcontractorRate[]>([])
+  const [newRateName, setNewRateName] = useState('')
+  const [newRatePH, setNewRatePH] = useState('')
+  const [addingRate, setAddingRate] = useState(false)
 
   async function fetchSubs() {
     const { data } = await supabase.from('subcontractors').select('*').order('name')
@@ -96,9 +100,17 @@ export default function SubcontractorsPage() {
 
   useEffect(() => { fetchSubs() }, [])
 
+  async function fetchRates(subId: string) {
+    const { data } = await supabase.from('subcontractor_rates').select('*').eq('subcontractor_id', subId).order('sort_order')
+    setSubRates((data ?? []) as SubcontractorRate[])
+  }
+
   function openCreate() {
     setEditing(null)
     setForm(emptyForm())
+    setSubRates([])
+    setNewRateName('')
+    setNewRatePH('')
     setError('')
     setModalOpen(true)
   }
@@ -106,8 +118,34 @@ export default function SubcontractorsPage() {
   function openEdit(sub: Subcontractor) {
     setEditing(sub)
     setForm(formFromSub(sub))
+    setSubRates([])
+    setNewRateName('')
+    setNewRatePH('')
     setError('')
     setModalOpen(true)
+    fetchRates(sub.id)
+  }
+
+  async function handleAddRate() {
+    if (!newRateName.trim() || !newRatePH || !editing) return
+    setAddingRate(true)
+    await supabase.from('subcontractor_rates').insert({
+      subcontractor_id: editing.id,
+      name: newRateName.trim(),
+      rate_per_hour: parseFloat(newRatePH),
+      is_active: true,
+      sort_order: subRates.length,
+    })
+    setNewRateName('')
+    setNewRatePH('')
+    setAddingRate(false)
+    fetchRates(editing.id)
+  }
+
+  async function handleDeleteRate(rateId: string) {
+    if (!editing) return
+    await supabase.from('subcontractor_rates').delete().eq('id', rateId)
+    fetchRates(editing.id)
   }
 
   function setField<K extends keyof ReturnType<typeof emptyForm>>(key: K, val: ReturnType<typeof emptyForm>[K]) {
@@ -345,6 +383,47 @@ export default function SubcontractorsPage() {
               Cancel
             </Button>
           </div>
+
+          {editing && (
+            <div className="border-t border-gray-200 pt-4 mt-2">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-gray-700">Rates</h3>
+                <span className="text-xs text-gray-400">rate × COF hours = revenue</span>
+              </div>
+              <div className="space-y-1 mb-3">
+                {subRates.map((r) => (
+                  <div key={r.id} className="flex items-center justify-between px-3 py-1.5 bg-gray-50 rounded-lg">
+                    <div>
+                      <span className="text-sm text-gray-700">{r.name}</span>
+                      <span className="ml-2 text-xs text-gray-400">${r.rate_per_hour}/hr</span>
+                    </div>
+                    <button onClick={() => handleDeleteRate(r.id)} className="text-gray-300 hover:text-red-500"><X size={14} /></button>
+                  </div>
+                ))}
+                {subRates.length === 0 && <p className="text-xs text-gray-400">No rates yet.</p>}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newRateName}
+                  onChange={(e) => setNewRateName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddRate()}
+                  placeholder="Rate name (e.g. 2 Men + Truck)"
+                  className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <input
+                  type="number"
+                  value={newRatePH}
+                  onChange={(e) => setNewRatePH(e.target.value)}
+                  placeholder="$/hr"
+                  className="w-20 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <Button size="sm" onClick={handleAddRate} disabled={!newRateName.trim() || !newRatePH || addingRate}>
+                  {addingRate ? '…' : 'Add'}
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       </Modal>
     </div>

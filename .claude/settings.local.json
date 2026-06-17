@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(kill 13571)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/jobs)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/jobs/new)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/settings/subcontractors)",
+      "Bash(open *)",
+      "Bash(curl -s 'https://ianqvenzoymjkjjrnzjy.supabase.co/rest/v1/customers?name=ilike.Teste&select=id,name,billing_type,billing_config' -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlhbnF2ZW56b3ltamtqanJuemp5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyNjQ2MjEsImV4cCI6MjA5Njg0MDYyMX0.aY2hpuR8nmeMPjt0MS7QPrRXwtLSXVyeJ9iulGdUPII' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlhbnF2ZW56b3ltamtqanJuemp5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyNjQ2MjEsImV4cCI6MjA5Njg0MDYyMX0.aY2hpuR8nmeMPjt0MS7QPrRXwtLSXVyeJ9iulGdUPII')",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s -X PATCH https://ianqvenzoymjkjjrnzjy.supabase.co/rest/v1/customers?id=eq.e46dc10c-0989-45e3-9013-22f586225650 -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlhbnF2ZW56b3ltamtqanJuemp5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyNjQ2MjEsImV4cCI6MjA5Njg0MDYyMX0.aY2hpuR8nmeMPjt0MS7QPrRXwtLSXVyeJ9iulGdUPII' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlhbnF2ZW56b3ltamtqanJuemp5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyNjQ2MjEsImV4cCI6MjA5Njg0MDYyMX0.aY2hpuR8nmeMPjt0MS7QPrRXwtLSXVyeJ9iulGdUPII' -H 'Content-Type: application/json' -H 'Prefer: return=representation' -d '{\"billing_type\":\"ratecard\",\"billing_config\":{\"gst\":false,\"rates\":{\"Standard\":100}}}')",
+      "Bash(curl -s 'https://ianqvenzoymjkjjrnzjy.supabase.co/rest/v1/jobs?select=id&limit=1' -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlhbnF2ZW56b3ltamtqanJuemp5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyNjQ2MjEsImV4cCI6MjA5Njg0MDYyMX0.aY2hpuR8nmeMPjt0MS7QPrRXwtLSXVyeJ9iulGdUPII' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlhbnF2ZW56b3ltamtqanJuemp5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyNjQ2MjEsImV4cCI6MjA5Njg0MDYyMX0.aY2hpuR8nmeMPjt0MS7QPrRXwtLSXVyeJ9iulGdUPII')",
+      "Bash(curl -s -X POST https://ianqvenzoymjkjjrnzjy.supabase.co/rest/v1/jobs -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlhbnF2ZW56b3ltamtqanJuemp5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyNjQ2MjEsImV4cCI6MjA5Njg0MDYyMX0.aY2hpuR8nmeMPjt0MS7QPrRXwtLSXVyeJ9iulGdUPII' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlhbnF2ZW56b3ltamtqanJuemp5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyNjQ2MjEsImV4cCI6MjA5Njg0MDYyMX0.aY2hpuR8nmeMPjt0MS7QPrRXwtLSXVyeJ9iulGdUPII' -H 'Content-Type: application/json' -H 'Prefer: return=minimal' -d '{\"job_number\":\"TEST-P1\",\"date\":\"__TRACKED_VAR__\",\"status\":\"scheduled\",\"source\":\"private\",\"customer_id\":\"__TRACKED_VAR__\",\"subcontractor_id\":null,\"rate_card_key\":\"Standard\",\"cof\":3,\"extra_men_hours\":0,\"break_minutes\":0,\"discount\":0}')",
+      "Bash(echo \"exit: $?\")",
+      "Bash(curl -s 'https://ianqvenzoymjkjjrnzjy.supabase.co/rest/v1/jobs?job_number=eq.3&select=id,job_number,date,status,source,rate_card_key,cof,customer:customers\\(name,billing_type,billing_config\\)' -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlhbnF2ZW56b3ltamtqanJuemp5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyNjQ2MjEsImV4cCI6MjA5Njg0MDYyMX0.aY2hpuR8nmeMPjt0MS7QPrRXwtLSXVyeJ9iulGdUPII' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlhbnF2ZW56b3ltamtqanJuemp5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyNjQ2MjEsImV4cCI6MjA5Njg0MDYyMX0.aY2hpuR8nmeMPjt0MS7QPrRXwtLSXVyeJ9iulGdUPII')",
+      "Bash(screencapture -x /tmp/dashboard.png)",
+      "Bash(screencapture -x /tmp/jobs.png)",
+      "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless=new --disable-gpu --screenshot=/tmp/dashboard.png --window-size=1400,900 --virtual-time-budget=3000 http://localhost:3000)",
+      "Read(//tmp/**)",
+      "Bash(npx tsc *)",
+      "Bash(supabase --version)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(npm i *)",
+      "Bash(sudo npm i -g vercel)",
+      "Bash(npx vercel *)",
+      "Bash(npx next *)"
+    ]
+  }
+}

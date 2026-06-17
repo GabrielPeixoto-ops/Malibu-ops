@@ -12,6 +12,7 @@ import { calculateJobSummary, extractFormulaVars, type JobSummary, type PrivateR
 import type {
   Contract,
   ContractClient,
+  ContractRate,
   Customer,
   Employee,
   FormulaConfig,
@@ -24,6 +25,7 @@ import type {
   RateCardConfig,
   Subcontractor,
   SubcontractorConfig,
+  SubcontractorRate,
 } from '@/types/database'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
@@ -123,6 +125,8 @@ interface FormState {
   subcontractor_service_type: string
   subcontractor_trucks: string
   subcontractor_crew_size: string
+  subcontractor_rate_id: string
+  contract_rate_id: string
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -223,6 +227,8 @@ function defaultForm(): FormState {
     subcontractor_service_type: '',
     subcontractor_trucks: '',
     subcontractor_crew_size: '',
+    subcontractor_rate_id: '',
+    contract_rate_id: '',
   }
 }
 
@@ -288,6 +294,8 @@ export default function JobForm({ jobId }: { jobId?: string }) {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [contracts, setContracts] = useState<(Contract & { contract_clients: ContractClient[] })[]>([])
   const [privateRates, setPrivateRates] = useState<PrivateRate[]>([])
+  const [subRates, setSubRates] = useState<SubcontractorRate[]>([])
+  const [contractRates, setContractRates] = useState<ContractRate[]>([])
   const [fleet, setFleet] = useState<Fleet[]>([])
   const [jobTruckIds, setJobTruckIds] = useState<string[]>([])
   const [catalog, setCatalog] = useState<MaterialCatalog[]>([])
@@ -340,6 +348,15 @@ export default function JobForm({ jobId }: { jobId?: string }) {
       setFleet((fleetRes.data ?? []) as unknown as Fleet[])
       setCatalog((catalogRes.data ?? []) as unknown as MaterialCatalog[])
 
+      try {
+        const { data: srData } = await supabase.from('subcontractor_rates').select('*').eq('is_active', true).order('sort_order')
+        setSubRates((srData ?? []) as SubcontractorRate[])
+      } catch { /* migration not applied yet */ }
+      try {
+        const { data: crData } = await supabase.from('contract_rates').select('*').eq('is_active', true).order('sort_order')
+        setContractRates((crData ?? []) as ContractRate[])
+      } catch { /* migration not applied yet */ }
+
       if (isEdit && jobId) {
         const [jobRes, photosRes, trucksRes] = await Promise.all([
           supabase.from('jobs').select('*, job_crew(*), job_materials(*)').eq('id', jobId).single(),
@@ -374,6 +391,8 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             subcontractor_service_type: string | null
             subcontractor_trucks: string | null
             subcontractor_crew_size: number | null
+            subcontractor_rate_id: string | null
+            contract_rate_id: string | null
             job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; start_time: string | null; end_time: string | null }>
             job_materials: Array<{ material_name: string; quantity: number; cost_price: number; sale_price: number }>
           }
@@ -444,6 +463,8 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             subcontractor_service_type: j.subcontractor_service_type ?? '',
             subcontractor_trucks: j.subcontractor_trucks ?? '',
             subcontractor_crew_size: j.subcontractor_crew_size != null ? j.subcontractor_crew_size.toString() : '',
+            subcontractor_rate_id: j.subcontractor_rate_id ?? '',
+            contract_rate_id: j.contract_rate_id ?? '',
           })
 
           if (j.client_billing_config) {
@@ -620,6 +641,12 @@ const filteredCustomers = useMemo(
       cost_price: parseFloat(m.cost_price) || 0,
       sale_price: parseFloat(m.sale_price) || 0,
     }))
+    const selectedSubRatePH = form.source === 'subcontract'
+      ? (subRates.find((r) => r.id === form.subcontractor_rate_id)?.rate_per_hour ?? null)
+      : null
+    const selectedContractRatePH = form.source === 'contract'
+      ? (contractRates.find((r) => r.id === form.contract_rate_id)?.rate_per_hour ?? null)
+      : null
     return calculateJobSummary(
       jobData,
       form.source === 'subcontract' ? selectedSub : null,
@@ -627,9 +654,10 @@ const filteredCustomers = useMemo(
       matsData,
       employees,
       form.source !== 'subcontract' && form.source !== 'private' ? selectedEntity : null,
-      form.source === 'private' ? selectedPrivateRateInput : null
+      form.source === 'private' ? selectedPrivateRateInput : null,
+      { subcontractorRatePerHour: selectedSubRatePH, contractRatePerHour: selectedContractRatePH }
     )
-  }, [form, crew, materials, selectedSub, selectedEntity, selectedPrivateRateInput, employees, overrideOpen, overrideBilling])
+  }, [form, crew, materials, selectedSub, selectedEntity, selectedPrivateRateInput, employees, overrideOpen, overrideBilling, subRates, contractRates])
 
   // ── COF suggestion from actual times ──────────────────────────────────────
   const suggestedCofFinal = useMemo<number | null>(() => {
@@ -670,6 +698,8 @@ const filteredCustomers = useMemo(
       contract_client_id: src === 'contract' ? f.contract_client_id : '',
       formula_vars: {},
       rate_card_key: '',
+      subcontractor_rate_id: '',
+      contract_rate_id: '',
       ...(src !== 'private' ? {
         private_rate_id: '',
         private_rate_custom: false,
@@ -691,7 +721,7 @@ const filteredCustomers = useMemo(
       const keys = extractFormulaVars(expression)
       fvars = Object.fromEntries(keys.map((k) => [k, String(defaults[k] ?? '')]))
     }
-    setForm((f) => ({ ...f, subcontractor_id: subId, formula_vars: fvars, rate_card_key: '', cof: '', additional_hours: '', additional_rate: '' }))
+    setForm((f) => ({ ...f, subcontractor_id: subId, formula_vars: fvars, rate_card_key: '', subcontractor_rate_id: '', cof: '', additional_hours: '', additional_rate: '' }))
   }
 
   function handleContractChange(contractId: string) {
@@ -702,7 +732,7 @@ const filteredCustomers = useMemo(
       const keys = extractFormulaVars(expression)
       fvars = Object.fromEntries(keys.map((k) => [k, String(defaults[k] ?? '')]))
     }
-    setForm((f) => ({ ...f, contract_id: contractId, contract_client_id: '', formula_vars: fvars, rate_card_key: '' }))
+    setForm((f) => ({ ...f, contract_id: contractId, contract_client_id: '', formula_vars: fvars, rate_card_key: '', contract_rate_id: '' }))
   }
 
   // ── Crew helpers ───────────────────────────────────────────────────────────
@@ -880,6 +910,8 @@ const filteredCustomers = useMemo(
       subcontractor_service_type: form.source === 'subcontract' ? (form.subcontractor_service_type.trim() || null) : null,
       subcontractor_trucks: form.source === 'subcontract' ? (form.subcontractor_trucks.trim() || null) : null,
       subcontractor_crew_size: form.source === 'subcontract' ? (parseInt(form.subcontractor_crew_size) || null) : null,
+      subcontractor_rate_id: form.source === 'subcontract' ? (form.subcontractor_rate_id || null) : null,
+      contract_rate_id: form.source === 'contract' ? (form.contract_rate_id || null) : null,
     }
 
     const crewRows = crew.filter((r) => r.employee_id).map((r) => ({
@@ -921,7 +953,11 @@ const filteredCustomers = useMemo(
       if (photos.length) await supabase.from('job_photos').insert(photos.map((p) => ({ job_id: newId, url: p.url, caption: p.caption || null, category: p.category })))
     }
 
-    router.push('/')
+    if (!isEdit) {
+      router.push('/')
+    } else if (statusOverride) {
+      setForm((f) => ({ ...f, status: statusOverride }))
+    }
   }
 
   function extractMsg(e: unknown, fallback: string): string {
@@ -1023,8 +1059,7 @@ const filteredCustomers = useMemo(
           locked ? (
             <div className="space-y-1">
               <p className="text-sm font-medium text-gray-800">{selectedSub?.name ?? '—'}</p>
-              {form.reference_number && <p className="text-xs text-gray-500">Ref: {form.reference_number}</p>}
-              {form.subcontractor_service_type && <p className="text-xs text-gray-500">Service: {form.subcontractor_service_type}</p>}
+              {form.subcontractor_rate_id && <p className="text-xs text-gray-500">Rate: {subRates.find((r) => r.id === form.subcontractor_rate_id)?.name ?? '—'}</p>}
               {form.subcontractor_trucks && <p className="text-xs text-gray-500">Trucks: {form.subcontractor_trucks}</p>}
               {form.subcontractor_crew_size && <p className="text-xs text-gray-500">Crew: {form.subcontractor_crew_size}</p>}
             </div>
@@ -1037,18 +1072,27 @@ const filteredCustomers = useMemo(
                 value={form.subcontractor_id ?? ''}
                 onChange={(e) => handleSubChange(e.target.value)}
               />
-              <Input
-                label="Invoice # / Reference"
-                value={form.reference_number ?? ''}
-                onChange={(e) => setField('reference_number', e.target.value)}
-                placeholder="e.g. INV-2024-001 (optional)"
-              />
-              <Input
-                label="Service Type"
-                value={form.subcontractor_service_type ?? ''}
-                onChange={(e) => setField('subcontractor_service_type', e.target.value)}
-                placeholder="e.g. 2 Men + 1 Truck, Packing Only"
-              />
+              {form.subcontractor_id && (() => {
+                const filteredRates = subRates.filter((r) => r.subcontractor_id === form.subcontractor_id)
+                if (filteredRates.length === 0) return (
+                  <p className="text-xs text-gray-400">No rates configured — <Link href="/settings/subcontractors" className="text-blue-600 hover:underline">add rates in Settings</Link></p>
+                )
+                return (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Rate</label>
+                    <select
+                      value={form.subcontractor_rate_id ?? ''}
+                      onChange={(e) => setField('subcontractor_rate_id', e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    >
+                      <option value="">Select rate…</option>
+                      {filteredRates.map((r) => (
+                        <option key={r.id} value={r.id}>{r.name} — ${r.rate_per_hour}/hr</option>
+                      ))}
+                    </select>
+                  </div>
+                )
+              })()}
               <Input
                 label="Subcontractor Truck(s)"
                 value={form.subcontractor_trucks ?? ''}
@@ -1179,13 +1223,6 @@ const filteredCustomers = useMemo(
                 </>
               )}
 
-              <Input
-                label="Job ID"
-                value={form.reference_number ?? ''}
-                onChange={(e) => setField('reference_number', e.target.value)}
-                placeholder="e.g. JOB-001 (optional)"
-              />
-
             </div>
           )
         )}
@@ -1195,7 +1232,8 @@ const filteredCustomers = useMemo(
           locked ? (
             <div className="space-y-1">
               <p className="text-sm font-medium text-gray-800">{entityDisplayName}</p>
-              {form.rate_card_key && <p className="text-xs text-gray-500">Rate: {form.rate_card_key}</p>}
+              {form.contract_rate_id && <p className="text-xs text-gray-500">Rate: {contractRates.find((r) => r.id === form.contract_rate_id)?.name ?? '—'}</p>}
+              {!form.contract_rate_id && form.rate_card_key && <p className="text-xs text-gray-500">Rate: {form.rate_card_key}</p>}
               {form.reference_number && <p className="text-xs text-gray-500">Job ID: {form.reference_number}</p>}
             </div>
           ) : (
@@ -1216,36 +1254,34 @@ const filteredCustomers = useMemo(
                   onChange={(e) => setField('contract_client_id', e.target.value)}
                 />
               )}
-              {/* Rate selector for ratecard contracts */}
-              {form.contract_id && activeBillingType === 'ratecard' && rateCardKeys.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Rate <span className="text-red-400">*</span></label>
-                  <select
-                    value={form.rate_card_key ?? ''}
-                    onChange={(e) => setField('rate_card_key', e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                  >
-                    <option value="">Select rate…</option>
-                    {rateCardKeys.map((r) => (
-                      <option key={r.value} value={r.value}>{r.label}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {/* Additional hours/rate (visible once a rate is selected) */}
-              {form.contract_id && activeBillingType === 'ratecard' && form.rate_card_key && (
+              {/* Rate selector from contract_rates */}
+              {form.contract_id && (() => {
+                const filteredRates = contractRates.filter((r) => r.contract_id === form.contract_id)
+                if (filteredRates.length === 0) return null
+                return (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Rate</label>
+                    <select
+                      value={form.contract_rate_id ?? ''}
+                      onChange={(e) => setField('contract_rate_id', e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    >
+                      <option value="">Select rate…</option>
+                      {filteredRates.map((r) => (
+                        <option key={r.id} value={r.id}>{r.name} — ${r.rate_per_hour}/hr</option>
+                      ))}
+                    </select>
+                  </div>
+                )
+              })()}
+              {/* Additional hours/rate when contract_rate selected */}
+              {form.contract_id && form.contract_rate_id && (
                 <div className="grid grid-cols-2 gap-3">
                   <Input label="Additional Hrs" type="number" min="0" step="0.25" value={form.additional_hours ?? ''} onChange={(e) => setField('additional_hours', e.target.value)} placeholder="0" />
                   <Input label="Addtl Rate ($/hr)" type="number" min="0" step="0.01" value={form.additional_rate ?? ''} onChange={(e) => setField('additional_rate', e.target.value)} placeholder="0.00" />
                 </div>
               )}
               <Input label="COF (hrs)" type="number" min="0" step="0.25" value={form.cof ?? ''} onChange={(e) => setField('cof', e.target.value)} placeholder="0.5" />
-              <Input
-                label="Job ID"
-                value={form.reference_number ?? ''}
-                onChange={(e) => setField('reference_number', e.target.value)}
-                placeholder="e.g. JOB-001 (optional)"
-              />
             </div>
           )
         )}
@@ -2193,6 +2229,15 @@ const filteredCustomers = useMemo(
 
         {/* ── Job Info ──────────────────────────────────────────────────── */}
         <Card title="Job Info">
+          <div className="mb-3">
+            <Input
+              label="Job ID"
+              value={form.reference_number ?? ''}
+              onChange={(e) => setField('reference_number', e.target.value)}
+              placeholder="e.g. JOB-001 (optional)"
+              disabled={isReviewed}
+            />
+          </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Input
               label="Job #"
