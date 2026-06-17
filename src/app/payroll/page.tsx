@@ -7,7 +7,6 @@ import { ChevronLeft, ChevronRight, AlertTriangle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { Employee, JobSource, JobStatus } from '@/types/database'
 
-// ─── Date utilities ───────────────────────────────────────────────────────────
 function getMonday(d: Date): Date {
   const date = new Date(d)
   const day = date.getDay()
@@ -42,7 +41,6 @@ function fmtHours(n: number) {
   return n % 1 === 0 ? `${n}h` : `${n.toFixed(2)}h`
 }
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 interface PayrollCrewRow {
   employee_id: string
   hours: number
@@ -85,9 +83,9 @@ interface EmployeeEntry {
 const MIN_CALL = 2
 
 const STATUS_PILL: Partial<Record<JobStatus, string>> = {
-  reviewed: 'bg-cyan-100 text-cyan-700',
-  invoiced: 'bg-purple-100 text-purple-700',
-  paid: 'bg-teal-100 text-teal-700',
+  reviewed: 'bg-cyan-500/10 text-cyan-300',
+  invoiced: 'bg-purple-500/10 text-purple-300',
+  paid:     'bg-teal-500/10 text-teal-300',
 }
 
 function jobEntityName(job: PayrollJob): string {
@@ -99,7 +97,6 @@ function jobEntityName(job: PayrollJob): string {
   return job.subcontractor?.name ?? '—'
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
 export default function PayrollPage() {
   const supabase = createClient()
 
@@ -182,26 +179,25 @@ export default function PayrollPage() {
 
   return (
     <div className="max-w-3xl">
-      {/* ── Header ──────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <h1 className="text-2xl font-bold text-gray-900">Payroll</h1>
+        <h1 className="text-2xl font-display font-bold text-parchment">Payroll</h1>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setWeekStart((d) => addDays(d, -7))}
-            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"
+            className="p-1.5 rounded-lg hover:bg-panel text-warm hover:text-parchment transition-colors"
             aria-label="Previous week"
           >
             <ChevronLeft size={18} />
           </button>
           <button
             onClick={() => setWeekStart(getMonday(new Date()))}
-            className="text-sm font-semibold text-gray-700 min-w-[180px] text-center hover:text-blue-600"
+            className="text-sm font-semibold text-parchment min-w-[180px] text-center hover:text-gold transition-colors"
           >
             {fmtWeekRange(weekStart)}
           </button>
           <button
             onClick={() => setWeekStart((d) => addDays(d, 7))}
-            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"
+            className="p-1.5 rounded-lg hover:bg-panel text-warm hover:text-parchment transition-colors"
             aria-label="Next week"
           >
             <ChevronRight size={18} />
@@ -209,15 +205,15 @@ export default function PayrollPage() {
         </div>
       </div>
 
-      <p className="text-xs text-gray-400 mb-4">
-        Showing jobs with status <span className="font-medium">Reviewed · Invoiced · Paid</span> only.
+      <p className="text-xs text-dim mb-4">
+        Showing jobs with status <span className="font-medium text-warm">Reviewed · Invoiced · Paid</span> only.
       </p>
 
       {loading ? (
-        <p className="text-gray-400 text-sm py-12 text-center">Loading…</p>
+        <p className="text-warm text-sm py-12 text-center">Loading…</p>
       ) : employeeData.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-          <p className="text-gray-400">No reviewed jobs in this period.</p>
+        <div className="bg-surface rounded-xl border border-wire p-12 text-center">
+          <p className="text-dim">No reviewed jobs in this period.</p>
         </div>
       ) : (
         <div className="space-y-4">
@@ -228,80 +224,77 @@ export default function PayrollPage() {
             const diffBad = diff !== null && Math.abs(diff) > 0.01
 
             return (
-              <div key={emp.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                {/* Employee header */}
-                <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
+              <div key={emp.id} className="bg-surface rounded-xl border border-wire overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-3 bg-panel border-b border-wire">
                   <div>
-                    <span className="font-semibold text-gray-900">{emp.name}</span>
-                    <span className="ml-2 text-xs text-gray-400">${emp.hourly_rate}/hr</span>
+                    <span className="font-semibold text-parchment">{emp.name}</span>
+                    <span className="ml-2 text-xs text-dim font-mono">${emp.hourly_rate}/hr</span>
                   </div>
-                  <span className="text-sm font-bold text-gray-800">{fmtMoney(totalPay)}</span>
+                  <span className="text-sm font-mono font-bold text-gold">{fmtMoney(totalPay)}</span>
                 </div>
 
-                {/* Jobs table */}
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-gray-100">
-                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-400">Date</th>
-                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-400">Job</th>
-                        <th className="text-right px-4 py-2 text-xs font-medium text-gray-400">Worked</th>
-                        <th className="text-right px-4 py-2 text-xs font-medium text-gray-400">COF</th>
-                        <th className="text-right px-4 py-2 text-xs font-medium text-gray-400">Paid hrs</th>
-                        <th className="text-right px-4 py-2 text-xs font-medium text-gray-400">Amount</th>
+                      <tr className="border-b border-wire">
+                        <th className="text-left px-4 py-2 text-[10px] font-semibold text-dim uppercase tracking-widest">Date</th>
+                        <th className="text-left px-4 py-2 text-[10px] font-semibold text-dim uppercase tracking-widest">Job</th>
+                        <th className="text-right px-4 py-2 text-[10px] font-semibold text-dim uppercase tracking-widest">Worked</th>
+                        <th className="text-right px-4 py-2 text-[10px] font-semibold text-dim uppercase tracking-widest">COF</th>
+                        <th className="text-right px-4 py-2 text-[10px] font-semibold text-dim uppercase tracking-widest">Paid hrs</th>
+                        <th className="text-right px-4 py-2 text-[10px] font-semibold text-dim uppercase tracking-widest">Amount</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-50">
+                    <tbody className="divide-y divide-wire">
                       {entries.map(({ job, workedHours, workedTime, cofHours, paidHours, pay, isExtraMan, googleReviewBonus }) => (
-                        <tr key={`${job.id}-${isExtraMan ? 'em' : 'crew'}`} className="hover:bg-gray-50/50">
-                          <td className="px-4 py-2 text-gray-700 whitespace-nowrap">{job.date}</td>
+                        <tr key={`${job.id}-${isExtraMan ? 'em' : 'crew'}`} className="hover:bg-panel transition-colors">
+                          <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
                           <td className="px-4 py-2">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-mono text-gray-900">#{job.job_number}</span>
+                              <span className="font-mono text-parchment">#{job.job_number}</span>
                               {STATUS_PILL[job.status] && (
                                 <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${STATUS_PILL[job.status]}`}>
                                   {job.status}
                                 </span>
                               )}
                               {googleReviewBonus && (
-                                <span className="text-xs px-1.5 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700">★ +0.5h</span>
+                                <span className="text-xs px-1.5 py-0.5 rounded-full font-medium bg-gold/15 text-gold">★ +0.5h</span>
                               )}
                             </div>
-                            <div className="text-xs text-gray-400 truncate max-w-[160px]">{jobEntityName(job)}</div>
+                            <div className="text-xs text-dim truncate max-w-[160px]">{jobEntityName(job)}</div>
                           </td>
-                          <td className="px-4 py-2 text-right text-gray-600">
+                          <td className="px-4 py-2 text-right text-warm font-mono">
                             {isExtraMan
-                              ? <span className="inline-flex items-center gap-1 text-orange-600 font-medium">+{fmtHours(workedHours)} <span className="text-xs font-normal text-orange-400">extra man</span></span>
+                              ? <span className="inline-flex items-center gap-1 text-amber-300 font-medium">+{fmtHours(workedHours)} <span className="text-xs font-normal text-dim">extra</span></span>
                               : fmtHours(workedHours)
                             }
-                            {workedTime && <div className="text-xs text-gray-400 tabular-nums">{workedTime}</div>}
+                            {workedTime && <div className="text-xs text-dim tabular-nums">{workedTime}</div>}
                           </td>
-                          <td className="px-4 py-2 text-right text-gray-500">
-                            {cofHours > 0 ? <span className="text-blue-600">+{fmtHours(cofHours)}</span> : <span className="text-gray-300">—</span>}
+                          <td className="px-4 py-2 text-right font-mono">
+                            {cofHours > 0 ? <span className="text-blue-300">+{fmtHours(cofHours)}</span> : <span className="text-dim">—</span>}
                           </td>
-                          <td className="px-4 py-2 text-right font-medium text-gray-800">{fmtHours(paidHours)}</td>
-                          <td className="px-4 py-2 text-right font-semibold text-gray-900">{fmtMoney(pay)}</td>
+                          <td className="px-4 py-2 text-right font-mono font-medium text-parchment">{fmtHours(paidHours)}</td>
+                          <td className="px-4 py-2 text-right font-mono font-semibold text-gold">{fmtMoney(pay)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
 
-                {/* Footer */}
-                <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-between gap-4 flex-wrap">
+                <div className="px-4 py-3 border-t border-wire flex items-center justify-between gap-4 flex-wrap bg-panel/50">
                   <div className="flex items-center gap-4 flex-wrap">
                     <div className="text-sm">
-                      <span className="text-gray-500">Total hrs: </span>
-                      <span className="font-semibold text-gray-900">{fmtHours(totalPaidHours)}</span>
+                      <span className="text-dim">Total hrs: </span>
+                      <span className="font-mono font-semibold text-parchment">{fmtHours(totalPaidHours)}</span>
                     </div>
                     <div className="text-sm">
-                      <span className="text-gray-500">Total pay: </span>
-                      <span className="font-bold text-gray-900">{fmtMoney(totalPay)}</span>
+                      <span className="text-dim">Total pay: </span>
+                      <span className="font-mono font-bold text-gold">{fmtMoney(totalPay)}</span>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <label className="text-xs text-gray-400 whitespace-nowrap">Declared hrs:</label>
+                    <label className="text-xs text-dim whitespace-nowrap">Declared hrs:</label>
                     <input
                       type="number"
                       min="0"
@@ -309,16 +302,16 @@ export default function PayrollPage() {
                       value={declared[emp.id] ?? ''}
                       onChange={(e) => setDeclared((d) => ({ ...d, [emp.id]: e.target.value }))}
                       placeholder={fmtHours(totalPaidHours)}
-                      className="w-20 px-2 py-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-right"
+                      className="w-20 px-2 py-1 text-sm border border-wire rounded-lg bg-surface text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring text-right font-mono"
                     />
                     {hasDeclared && diff !== null && (
                       diffBad ? (
-                        <div className="flex items-center gap-1 text-orange-600 text-xs font-medium">
+                        <div className="flex items-center gap-1 text-amber-300 text-xs font-medium">
                           <AlertTriangle size={13} />
                           {diff > 0 ? `+${fmtHours(Math.abs(diff))} over` : `${fmtHours(Math.abs(diff))} under`}
                         </div>
                       ) : (
-                        <span className="text-green-600 text-xs font-medium">✓ Match</span>
+                        <span className="text-success text-xs font-medium">✓ Match</span>
                       )
                     )}
                   </div>
@@ -327,10 +320,9 @@ export default function PayrollPage() {
             )
           })}
 
-          {/* Grand total */}
-          <div className="bg-gray-900 text-white rounded-xl px-4 py-3 flex items-center justify-between">
-            <span className="text-sm font-semibold">Total payroll this week</span>
-            <span className="text-lg font-bold">{fmtMoney(grandTotal)}</span>
+          <div className="bg-gold/10 border border-gold-ring rounded-xl px-4 py-3 flex items-center justify-between">
+            <span className="text-sm font-display font-semibold text-gold">Total payroll this week</span>
+            <span className="text-lg font-mono font-bold text-gold">{fmtMoney(grandTotal)}</span>
           </div>
         </div>
       )}

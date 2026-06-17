@@ -162,15 +162,15 @@ const PAYMENT_METHODS = [
 ]
 
 const STATUS_STYLE: Record<JobStatus, string> = {
-  draft: 'bg-gray-100 text-gray-600',
-  scheduled: 'bg-blue-100 text-blue-700',
-  confirmed: 'bg-indigo-100 text-indigo-700',
-  in_progress: 'bg-amber-100 text-amber-700',
-  completed: 'bg-green-100 text-green-700',
-  reviewed: 'bg-cyan-100 text-cyan-700',
-  invoiced: 'bg-purple-100 text-purple-700',
-  paid: 'bg-teal-100 text-teal-700',
-  cancelled: 'bg-red-100 text-red-600',
+  draft: 'bg-wire/50 text-dim',
+  scheduled: 'bg-blue-500/10 text-blue-300',
+  confirmed: 'bg-indigo-500/10 text-indigo-300',
+  in_progress: 'bg-amber-500/10 text-amber-300',
+  completed: 'bg-success/10 text-success',
+  reviewed: 'bg-cyan-500/10 text-cyan-300',
+  invoiced: 'bg-purple-500/10 text-purple-300',
+  paid: 'bg-teal-500/10 text-teal-300',
+  cancelled: 'bg-danger/10 text-danger',
 }
 
 const STATUS_LABEL: Record<JobStatus, string> = {
@@ -1082,7 +1082,7 @@ const filteredCustomers = useMemo(
   const usedEmployeeIds = new Set(crew.map((r) => r.employee_id).filter(Boolean))
 
   if (loading) {
-    return <div className="flex items-center justify-center py-16 text-gray-400 text-sm">Loading job…</div>
+    return <div className="flex items-center justify-center py-16 text-dim text-sm">Loading job…</div>
   }
 
   // ── SHARED: Entity card ────────────────────────────────────────────────────
@@ -1099,8 +1099,8 @@ const filteredCustomers = useMemo(
                 onClick={() => handleSourceChange(src)}
                 className={`flex-1 py-2 rounded-lg text-sm font-semibold border-2 transition-colors ${
                   form.source === src
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+                    ? 'border-gold-ring bg-gold/8 text-gold'
+                    : 'border-wire bg-panel text-dim hover:border-dim'
                 }`}
               >
                 {src === 'private' ? 'Private' : src === 'subcontract' ? 'Subcontract' : 'Contract'}
@@ -1111,8 +1111,8 @@ const filteredCustomers = useMemo(
           <div className="mb-3 flex items-center gap-2">
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
               form.source === 'private' ? 'bg-violet-100 text-violet-700' :
-              form.source === 'contract' ? 'bg-teal-100 text-teal-700' :
-              'bg-gray-100 text-gray-600'
+              form.source === 'contract' ? 'bg-teal-500/10 text-teal-300' :
+              'bg-wire/50 text-dim'
             }`}>
               {form.source === 'private' ? 'Private' : form.source === 'subcontract' ? 'Subcontract' : 'Contract'}
             </span>
@@ -1123,10 +1123,10 @@ const filteredCustomers = useMemo(
         {form.source === 'subcontract' && (
           locked ? (
             <div className="space-y-1">
-              <p className="text-sm font-medium text-gray-800">{selectedSub?.name ?? '—'}</p>
-              {form.subcontractor_rate_id && <p className="text-xs text-gray-500">Rate: {subRates.find((r) => r.id === form.subcontractor_rate_id)?.name ?? '—'}</p>}
-              {form.subcontractor_trucks && <p className="text-xs text-gray-500">Trucks: {form.subcontractor_trucks}</p>}
-              {form.subcontractor_crew_size && <p className="text-xs text-gray-500">Crew: {form.subcontractor_crew_size}</p>}
+              <p className="text-sm font-medium text-parchment">{selectedSub?.name ?? '—'}</p>
+              {form.subcontractor_rate_id && <p className="text-xs text-dim">Rate: {subRates.find((r) => r.id === form.subcontractor_rate_id)?.name ?? '—'}</p>}
+              {form.subcontractor_trucks && <p className="text-xs text-dim">Trucks: {form.subcontractor_trucks}</p>}
+              {form.subcontractor_crew_size && <p className="text-xs text-dim">Crew: {form.subcontractor_crew_size}</p>}
             </div>
           ) : (
             <div className="space-y-3">
@@ -1140,15 +1140,15 @@ const filteredCustomers = useMemo(
               {form.subcontractor_id && (() => {
                 const filteredRates = subRates.filter((r) => r.subcontractor_id === form.subcontractor_id)
                 if (filteredRates.length === 0) return (
-                  <p className="text-xs text-gray-400">No rates configured — <Link href="/settings/subcontractors" className="text-blue-600 hover:underline">add rates in Settings</Link></p>
+                  <p className="text-xs text-dim">No rates configured — <Link href="/settings/subcontractors" className="text-gold hover:underline">add rates in Settings</Link></p>
                 )
                 return (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Rate</label>
+                    <label className="block text-sm font-medium text-warm mb-1">Rate</label>
                     <select
                       value={form.subcontractor_rate_id ?? ''}
                       onChange={(e) => setField('subcontractor_rate_id', e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                      className="w-full px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring bg-panel"
                     >
                       <option value="">Select rate…</option>
                       {filteredRates.map((r) => (
@@ -1181,12 +1181,12 @@ const filteredCustomers = useMemo(
         {form.source === 'private' && (
           locked ? (
             <div className="space-y-1">
-              <p className="text-sm font-medium text-gray-800">{selectedCustomer?.name ?? '—'}</p>
+              <p className="text-sm font-medium text-parchment">{selectedCustomer?.name ?? '—'}</p>
               {selectedCustomer?.phone && (
-                <p className="text-xs text-gray-500">{selectedCustomer.phone}</p>
+                <p className="text-xs text-dim">{selectedCustomer.phone}</p>
               )}
               {(form.private_rate_id || form.private_rate_custom) && (
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-dim">
                   {form.private_rate_custom
                     ? `Custom — $${form.private_rate_custom_price}/hr${form.private_rate_custom_desc ? ` (${form.private_rate_custom_desc})` : ''}`
                     : privateRates.find((r) => r.id === form.private_rate_id)?.name ?? '—'}
@@ -1197,8 +1197,8 @@ const filteredCustomers = useMemo(
             <div className="space-y-3">
               {/* Customer search */}
               <div ref={customerRef} className="relative">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Customer <span className="text-red-400">*</span>
+                <label className="block text-sm font-medium text-warm mb-1">
+                  Customer <span className="text-danger">*</span>
                 </label>
                 <input
                   type="text"
@@ -1206,36 +1206,36 @@ const filteredCustomers = useMemo(
                   onFocus={() => setShowCustomerDrop(true)}
                   onChange={(e) => { setCustomerSearch(e.target.value); setField('customer_id', ''); setShowCustomerDrop(true) }}
                   placeholder="Search or type new customer name…"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
                 />
                 {showCustomerDrop && (
-                  <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-44 overflow-y-auto">
-                    <button type="button" onClick={() => { setField('customer_id', ''); setCustomerSearch(''); setShowCustomerDrop(false) }} className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:bg-gray-50">
+                  <div className="absolute z-20 w-full mt-1 bg-surface border border-wire rounded-lg shadow-lg max-h-44 overflow-y-auto">
+                    <button type="button" onClick={() => { setField('customer_id', ''); setCustomerSearch(''); setShowCustomerDrop(false) }} className="w-full text-left px-3 py-2 text-sm text-dim hover:bg-panel">
                       No customer
                     </button>
                     {filteredCustomers.map((c) => (
                       <button key={c.id} type="button" onClick={() => { setField('customer_id', c.id); setCustomerSearch(c.name); setShowCustomerDrop(false) }} className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-baseline gap-2">
                         <span className="font-medium">{c.name}</span>
-                        {c.phone && <span className="text-gray-400 text-xs">{c.phone}</span>}
-                        {!c.phone && c.contact_info && <span className="text-gray-400 text-xs">{c.contact_info}</span>}
+                        {c.phone && <span className="text-dim text-xs">{c.phone}</span>}
+                        {!c.phone && c.contact_info && <span className="text-dim text-xs">{c.contact_info}</span>}
                       </button>
                     ))}
                     {filteredCustomers.length === 0 && customerSearch.trim() && (
-                      <p className="px-3 py-2 text-xs text-blue-600">Will create new customer &quot;{customerSearch}&quot; on save</p>
+                      <p className="px-3 py-2 text-xs text-gold">Will create new customer &quot;{customerSearch}&quot; on save</p>
                     )}
                   </div>
                 )}
                 {selectedCustomer?.phone && (
-                  <p className="mt-1 text-xs text-gray-500">{selectedCustomer.phone}</p>
+                  <p className="mt-1 text-xs text-dim">{selectedCustomer.phone}</p>
                 )}
                 {!form.customer_id && customerSearch.trim() && (
-                  <p className="mt-1 text-xs text-blue-600">New customer &quot;{customerSearch}&quot; will be created on save</p>
+                  <p className="mt-1 text-xs text-gold">New customer &quot;{customerSearch}&quot; will be created on save</p>
                 )}
               </div>
 
               {/* Rate dropdown grouped by truck size */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Rate <span className="text-red-400">*</span></label>
+                <label className="block text-sm font-medium text-warm mb-1">Rate <span className="text-danger">*</span></label>
                 <select
                   value={form.private_rate_custom ? 'custom' : (form.private_rate_id ?? '')}
                   onChange={(e) => {
@@ -1247,7 +1247,7 @@ const filteredCustomers = useMemo(
                       setField('private_rate_id', e.target.value)
                     }
                   }}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  className="w-full px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring bg-panel"
                 >
                   <option value="">Select rate…</option>
                   {(['small', 'large'] as const).map((size) => {
@@ -1296,10 +1296,10 @@ const filteredCustomers = useMemo(
         {form.source === 'contract' && (
           locked ? (
             <div className="space-y-1">
-              <p className="text-sm font-medium text-gray-800">{entityDisplayName}</p>
-              {form.contract_rate_id && <p className="text-xs text-gray-500">Rate: {contractRates.find((r) => r.id === form.contract_rate_id)?.name ?? '—'}</p>}
-              {!form.contract_rate_id && form.rate_card_key && <p className="text-xs text-gray-500">Rate: {form.rate_card_key}</p>}
-              {form.reference_number && <p className="text-xs text-gray-500">Job ID: {form.reference_number}</p>}
+              <p className="text-sm font-medium text-parchment">{entityDisplayName}</p>
+              {form.contract_rate_id && <p className="text-xs text-dim">Rate: {contractRates.find((r) => r.id === form.contract_rate_id)?.name ?? '—'}</p>}
+              {!form.contract_rate_id && form.rate_card_key && <p className="text-xs text-dim">Rate: {form.rate_card_key}</p>}
+              {form.reference_number && <p className="text-xs text-dim">Job ID: {form.reference_number}</p>}
             </div>
           ) : (
             <div className="space-y-3">
@@ -1325,11 +1325,11 @@ const filteredCustomers = useMemo(
                 if (filteredRates.length === 0) return null
                 return (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Rate</label>
+                    <label className="block text-sm font-medium text-warm mb-1">Rate</label>
                     <select
                       value={form.contract_rate_id ?? ''}
                       onChange={(e) => setField('contract_rate_id', e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                      className="w-full px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring bg-panel"
                     >
                       <option value="">Select rate…</option>
                       {filteredRates.map((r) => (
@@ -1366,14 +1366,14 @@ const filteredCustomers = useMemo(
   // ── SHARED: Crew card ──────────────────────────────────────────────────────
   function renderCrewCard(showTimeInputs: boolean, locked = false) {
     return (
-      <Card title="Crew" action={!locked ? <button type="button" onClick={addCrew} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium"><Plus size={14} /> Add</button> : undefined}>
+      <Card title="Crew" action={!locked ? <button type="button" onClick={addCrew} className="flex items-center gap-1 text-xs text-gold hover:text-gold-bright font-medium"><Plus size={14} /> Add</button> : undefined}>
         {/* Truck selector — only for private and contract jobs */}
         {(form.source === 'private' || form.source === 'contract') && <div className="mb-3 space-y-1.5">
-          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide">Truck</label>
+          <label className="block text-xs font-semibold text-dim uppercase tracking-wide">Truck</label>
           {locked ? (
-            <p className="text-sm text-gray-700">
+            <p className="text-sm text-warm">
               {jobTruckIds.length === 0
-                ? <span className="text-gray-400">—</span>
+                ? <span className="text-dim">—</span>
                 : jobTruckIds.map((fid) => fleet.find((t) => t.id === fid)).filter(Boolean).map((t, i) => (
                     <span key={i}>
                       {i > 0 && ' + '}
@@ -1389,7 +1389,7 @@ const filteredCustomers = useMemo(
                   <select
                     value={fid}
                     onChange={(e) => setTruckId(idx, e.target.value)}
-                    className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    className="flex-1 px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring bg-panel"
                   >
                     <option value="">Select truck…</option>
                     {fleet.map((t) => (
@@ -1398,22 +1398,22 @@ const filteredCustomers = useMemo(
                       </option>
                     ))}
                   </select>
-                  <button type="button" onClick={() => removeTruck(idx)} className="text-gray-300 hover:text-red-500 shrink-0"><Trash2 size={15} /></button>
+                  <button type="button" onClick={() => removeTruck(idx)} className="text-dim hover:text-danger shrink-0"><Trash2 size={15} /></button>
                 </div>
               ))}
               <button
                 type="button"
                 onClick={addTruck}
-                className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium"
+                className="flex items-center gap-1 text-xs text-gold hover:text-gold-bright font-medium"
               >
                 <Plus size={13} /> Add Truck
               </button>
             </>
           )}
         </div>}
-        {(form.source === 'private' || form.source === 'contract') && <div className="border-t border-gray-100 mb-3" />}
+        {(form.source === 'private' || form.source === 'contract') && <div className="border-t border-wire mb-3" />}
         <div>
-        {crew.length === 0 && <p className="text-sm text-gray-400 text-center py-2">No crew added yet.</p>}
+        {crew.length === 0 && <p className="text-sm text-dim text-center py-2">No crew added yet.</p>}
         <div className="space-y-2">
           {crew.map((row) => {
             if (!showTimeInputs) {
@@ -1423,14 +1423,14 @@ const filteredCustomers = useMemo(
                   <select
                     value={row.employee_id ?? ''}
                     onChange={(e) => updateCrew(row._id, 'employee_id', e.target.value)}
-                    className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="flex-1 px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
                   >
                     <option value="">Select employee…</option>
                     {employees.filter((e) => e.id === row.employee_id || !usedEmployeeIds.has(e.id)).map((e) => (
                       <option key={e.id} value={e.id}>{e.name} (${e.hourly_rate}/hr)</option>
                     ))}
                   </select>
-                  <label className="flex items-center gap-1.5 text-sm text-gray-700 whitespace-nowrap cursor-pointer select-none shrink-0">
+                  <label className="flex items-center gap-1.5 text-sm text-warm whitespace-nowrap cursor-pointer select-none shrink-0">
                     <input
                       type="checkbox"
                       checked={row.cof_share}
@@ -1450,12 +1450,12 @@ const filteredCustomers = useMemo(
                           const val = parseFloat(e.target.value)
                           updateCrew(row._id, 'cof_hours', isNaN(val) ? '0.5' : Math.max(0.5, val).toString())
                         }}
-                        className="w-16 px-2 py-1.5 text-sm text-center border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-16 px-2 py-1.5 text-sm text-center border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
                       />
-                      <span className="text-xs text-gray-400 whitespace-nowrap">hrs</span>
+                      <span className="text-xs text-dim whitespace-nowrap">hrs</span>
                     </div>
                   )}
-                  <button type="button" onClick={() => removeCrew(row._id)} className="text-gray-300 hover:text-red-500 shrink-0" aria-label="Remove">
+                  <button type="button" onClick={() => removeCrew(row._id)} className="text-dim hover:text-danger shrink-0" aria-label="Remove">
                     <Trash2 size={15} />
                   </button>
                 </div>
@@ -1471,7 +1471,7 @@ const filteredCustomers = useMemo(
                   value={row.employee_id ?? ''}
                   onChange={(e) => updateCrew(row._id, 'employee_id', e.target.value)}
                   disabled={locked}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
+                  className="w-full px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel disabled:text-dim"
                 >
                   <option value="">Select employee…</option>
                   {employees.filter((e) => e.id === row.employee_id || !usedEmployeeIds.has(e.id)).map((e) => (
@@ -1484,18 +1484,18 @@ const filteredCustomers = useMemo(
                     value={row.start_time ?? ''}
                     onChange={(e) => updateCrew(row._id, 'start_time', e.target.value)}
                     disabled={locked}
-                    className="w-28 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+                    className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel"
                   />
-                  <span className="text-gray-400 text-xs">–</span>
+                  <span className="text-dim text-xs">–</span>
                   <input
                     type="time"
                     value={row.end_time ?? ''}
                     onChange={(e) => updateCrew(row._id, 'end_time', e.target.value)}
                     disabled={locked}
-                    className="w-28 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+                    className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel"
                   />
                   {hasTime ? (
-                    <span className="text-sm font-medium text-gray-700 w-14 text-right tabular-nums">{computed}h</span>
+                    <span className="text-sm font-medium text-warm w-14 text-right tabular-nums">{computed}h</span>
                   ) : (
                     <input
                       type="number"
@@ -1505,10 +1505,10 @@ const filteredCustomers = useMemo(
                       onChange={(e) => updateCrew(row._id, 'hours', e.target.value)}
                       disabled={locked}
                       placeholder="hrs"
-                      className="w-20 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+                      className="w-20 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel"
                     />
                   )}
-                  <label className="flex items-center gap-1.5 text-sm text-gray-700 whitespace-nowrap cursor-pointer select-none">
+                  <label className="flex items-center gap-1.5 text-sm text-warm whitespace-nowrap cursor-pointer select-none">
                     <input type="checkbox" checked={row.cof_share} onChange={(e) => updateCrew(row._id, 'cof_share', e.target.checked)} disabled={locked} className="rounded" />
                     COF
                   </label>
@@ -1524,13 +1524,13 @@ const filteredCustomers = useMemo(
                           const val = parseFloat(e.target.value)
                           updateCrew(row._id, 'cof_hours', isNaN(val) ? '0.5' : Math.max(0.5, val).toString())
                         }}
-                        className="w-16 px-2 py-1.5 text-sm text-center border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+                        className="w-16 px-2 py-1.5 text-sm text-center border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel"
                       />
-                      <span className="text-xs text-gray-400">hrs</span>
+                      <span className="text-xs text-dim">hrs</span>
                     </div>
                   )}
                   {!locked && (
-                    <button type="button" onClick={() => removeCrew(row._id)} className="ml-auto text-gray-300 hover:text-red-500" aria-label="Remove">
+                    <button type="button" onClick={() => removeCrew(row._id)} className="ml-auto text-dim hover:text-danger" aria-label="Remove">
                       <Trash2 size={15} />
                     </button>
                   )}
@@ -1540,17 +1540,17 @@ const filteredCustomers = useMemo(
           })}
         </div>
         {summary && summary.payrollEntries.length > 0 && (
-          <div className="mt-3 pt-3 border-t border-gray-100 space-y-1">
+          <div className="mt-3 pt-3 border-t border-wire space-y-1">
             {summary.payrollEntries.map((e) => (
-              <div key={e.employee_id} className="flex justify-between text-xs text-gray-500">
+              <div key={e.employee_id} className="flex justify-between text-xs text-dim">
                 <span>
                   {e.employee_name} — {e.paid_hours}h × ${e.hourly_rate}
-                  {e.google_review_bonus && <span className="ml-1 text-amber-600">(+0.5h ★)</span>}
+                  {e.google_review_bonus && <span className="ml-1 text-gold">(+0.5h ★)</span>}
                 </span>
                 <span className="font-medium">{fmt(e.pay)}</span>
               </div>
             ))}
-            <div className="flex justify-between text-xs font-semibold text-gray-700 pt-1 border-t border-gray-100">
+            <div className="flex justify-between text-xs font-semibold text-warm pt-1 border-t border-wire">
               <span>Payroll total</span>
               <span>{fmt(summary.payrollTotal)}</span>
             </div>
@@ -1575,7 +1575,7 @@ const filteredCustomers = useMemo(
               <select
                 value={photoCategory}
                 onChange={(e) => setPhotoCategory(e.target.value)}
-                className="px-2 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="px-2 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
               >
                 {PHOTO_CATEGORIES.filter((c) => availableCategories.includes(c.value)).map((c) => (
                   <option key={c.value} value={c.value}>{c.label}</option>
@@ -1587,9 +1587,9 @@ const filteredCustomers = useMemo(
               value={photoCaption}
               onChange={(e) => setPhotoCaption(e.target.value)}
               placeholder="Caption (optional)…"
-              className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="flex-1 px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
             />
-            <label className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 cursor-pointer shrink-0">
+            <label className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gold border border-gold-ring/50 rounded-lg hover:bg-gold/8 cursor-pointer shrink-0">
               <ImagePlus size={16} />
               {uploadingPhoto ? 'Uploading…' : 'Add'}
               <input
@@ -1606,9 +1606,9 @@ const filteredCustomers = useMemo(
             </label>
           </div>
         )}
-        {uploadError && <p className="text-xs text-red-600 mb-2">{uploadError}</p>}
+        {uploadError && <p className="text-xs text-danger mb-2">{uploadError}</p>}
         {photos.filter((p) => displayCategories.includes(p.category)).length === 0 && (
-          <p className="text-sm text-gray-400 text-center py-2">No photos yet.</p>
+          <p className="text-sm text-dim text-center py-2">No photos yet.</p>
         )}
         {displayCategories.map((cat) => {
           const catPhotos = photos.filter((p) => p.category === cat)
@@ -1616,11 +1616,11 @@ const filteredCustomers = useMemo(
           return (
             <div key={cat} className="mb-3">
               {availableCategories.length > 1 && (
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">{PHOTO_LABELS[cat] ?? cat}</p>
+                <p className="text-xs font-semibold text-dim uppercase tracking-wide mb-1.5">{PHOTO_LABELS[cat] ?? cat}</p>
               )}
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {catPhotos.map((p) => (
-                  <div key={p._id} className="relative group rounded-lg overflow-hidden bg-gray-100 aspect-video">
+                  <div key={p._id} className="relative group rounded-lg overflow-hidden bg-wire/30 aspect-video">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={p.url} alt={p.caption || 'Job photo'} className="w-full h-full object-cover" />
                     {p.caption && (
@@ -1653,12 +1653,12 @@ const filteredCustomers = useMemo(
         <button
           type="button"
           onClick={() => setShowCatalogDrop((v) => !v)}
-          className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium"
+          className="flex items-center gap-1 text-xs text-gold hover:text-gold-bright font-medium"
         >
           <Plus size={14} /> Add
         </button>
         {showCatalogDrop && (
-          <div className="absolute right-0 top-full mt-1 z-30 w-52 bg-white border border-gray-200 rounded-lg shadow-lg py-1">
+          <div className="absolute right-0 top-full mt-1 z-30 w-52 bg-surface border border-wire rounded-lg shadow-lg py-1">
             {catalog.map((item) => (
               <button
                 key={item.id}
@@ -1667,14 +1667,14 @@ const filteredCustomers = useMemo(
                 className="w-full text-left px-3 py-1.5 text-sm hover:bg-blue-50 flex justify-between items-center gap-2"
               >
                 <span>{item.name}</span>
-                <span className="text-gray-400 text-xs shrink-0">${Number(item.sale_price).toFixed(2)}</span>
+                <span className="text-dim text-xs shrink-0">${Number(item.sale_price).toFixed(2)}</span>
               </button>
             ))}
-            <div className="border-t border-gray-100 mt-1 pt-1">
+            <div className="border-t border-wire mt-1 pt-1">
               <button
                 type="button"
                 onClick={() => addMaterialFromCatalog(null)}
-                className="w-full text-left px-3 py-1.5 text-sm text-gray-500 hover:bg-gray-50"
+                className="w-full text-left px-3 py-1.5 text-sm text-dim hover:bg-panel"
               >
                 Custom item…
               </button>
@@ -1685,26 +1685,26 @@ const filteredCustomers = useMemo(
     ) : undefined
     return (
       <Card title="Materials" action={catalogAction}>
-        {materials.length === 0 && <p className="text-sm text-gray-400 text-center py-2">No materials.</p>}
+        {materials.length === 0 && <p className="text-sm text-dim text-center py-2">No materials.</p>}
         {materials.length > 0 && !locked && (
-          <div className="text-xs text-gray-400 grid grid-cols-[1fr_56px_72px_72px_20px] gap-2 px-1 mb-1">
+          <div className="text-xs text-dim grid grid-cols-[1fr_56px_72px_72px_20px] gap-2 px-1 mb-1">
             <span>Name</span><span>Qty</span><span>Cost</span><span>Sale</span><span />
           </div>
         )}
         <div className="space-y-2">
           {materials.map((row) => (
             locked ? (
-              <div key={row._id} className="flex justify-between text-sm text-gray-700">
+              <div key={row._id} className="flex justify-between text-sm text-warm">
                 <span>{row.material_name} × {row.quantity}</span>
-                <span className="text-gray-500">{fmt(parseFloat(row.sale_price) * parseFloat(row.quantity) || 0)}</span>
+                <span className="text-dim">{fmt(parseFloat(row.sale_price) * parseFloat(row.quantity) || 0)}</span>
               </div>
             ) : (
               <div key={row._id} className="grid grid-cols-[1fr_56px_72px_72px_20px] gap-2 items-center">
-                <input type="text" value={row.material_name ?? ''} onChange={(e) => updateMaterial(row._id, 'material_name', e.target.value)} placeholder="Item name" className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                <input type="number" min="0" step="1" value={row.quantity ?? ''} onChange={(e) => updateMaterial(row._id, 'quantity', e.target.value)} className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                <input type="number" min="0" step="0.01" value={row.cost_price ?? ''} onChange={(e) => updateMaterial(row._id, 'cost_price', e.target.value)} placeholder="0.00" className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                <input type="number" min="0" step="0.01" value={row.sale_price ?? ''} onChange={(e) => updateMaterial(row._id, 'sale_price', e.target.value)} placeholder="0.00" className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                <button type="button" onClick={() => removeMaterial(row._id)} className="text-gray-300 hover:text-red-500" aria-label="Remove"><Trash2 size={14} /></button>
+                <input type="text" value={row.material_name ?? ''} onChange={(e) => updateMaterial(row._id, 'material_name', e.target.value)} placeholder="Item name" className="w-full px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring" />
+                <input type="number" min="0" step="1" value={row.quantity ?? ''} onChange={(e) => updateMaterial(row._id, 'quantity', e.target.value)} className="w-full px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring" />
+                <input type="number" min="0" step="0.01" value={row.cost_price ?? ''} onChange={(e) => updateMaterial(row._id, 'cost_price', e.target.value)} placeholder="0.00" className="w-full px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring" />
+                <input type="number" min="0" step="0.01" value={row.sale_price ?? ''} onChange={(e) => updateMaterial(row._id, 'sale_price', e.target.value)} placeholder="0.00" className="w-full px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring" />
+                <button type="button" onClick={() => removeMaterial(row._id)} className="text-dim hover:text-danger" aria-label="Remove"><Trash2 size={14} /></button>
               </div>
             )
           ))}
@@ -1735,20 +1735,20 @@ const filteredCustomers = useMemo(
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <Link href="/jobs" className="text-gray-400 hover:text-gray-600">
+            <Link href="/jobs" className="text-dim hover:text-warm">
               <ChevronLeft size={20} />
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Job #{form.job_number}</h1>
+              <h1 className="text-2xl font-display font-bold text-parchment">Job #{form.job_number}</h1>
               <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_STYLE[form.status]}`}>
                 {STATUS_LABEL[form.status]}
               </span>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-500">{form.date}</span>
+            <span className="text-sm text-dim">{form.date}</span>
             {isEdit && (
-              <button onClick={handleDelete} disabled={deleting} className="text-sm text-red-500 hover:text-red-700 font-medium disabled:opacity-50">
+              <button onClick={handleDelete} disabled={deleting} className="text-sm text-danger hover:text-danger font-medium disabled:opacity-50">
                 {deleting ? 'Deleting…' : 'Delete'}
               </button>
             )}
@@ -1760,35 +1760,35 @@ const filteredCustomers = useMemo(
           <Card title="Service Details">
             <div className="space-y-2 text-sm">
               <div className="flex gap-4">
-                <span className="text-gray-400 w-20 shrink-0">Client</span>
-                <span className="font-medium text-gray-900">{entityDisplayName}</span>
+                <span className="text-dim w-20 shrink-0">Client</span>
+                <span className="font-medium text-parchment">{entityDisplayName}</span>
               </div>
               {form.reference_number && (
                 <div className="flex gap-4">
-                  <span className="text-gray-400 w-20 shrink-0">Ref</span>
-                  <span className="text-gray-700">{form.reference_number}</span>
+                  <span className="text-dim w-20 shrink-0">Ref</span>
+                  <span className="text-warm">{form.reference_number}</span>
                 </div>
               )}
               <div className="flex gap-4">
-                <span className="text-gray-400 w-20 shrink-0">Date</span>
-                <span className="text-gray-700">{form.date}</span>
+                <span className="text-dim w-20 shrink-0">Date</span>
+                <span className="text-warm">{form.date}</span>
               </div>
               {form.pickup_address && (
                 <div className="flex gap-4">
-                  <span className="text-gray-400 w-20 shrink-0">Pickup</span>
-                  <span className="text-gray-700">{form.pickup_address}</span>
+                  <span className="text-dim w-20 shrink-0">Pickup</span>
+                  <span className="text-warm">{form.pickup_address}</span>
                 </div>
               )}
               {form.delivery_address && (
                 <div className="flex gap-4">
-                  <span className="text-gray-400 w-20 shrink-0">Delivery</span>
-                  <span className="text-gray-700">{form.delivery_address}</span>
+                  <span className="text-dim w-20 shrink-0">Delivery</span>
+                  <span className="text-warm">{form.delivery_address}</span>
                 </div>
               )}
               {form.actual_start_time && form.actual_finish_time && (
                 <div className="flex gap-4">
-                  <span className="text-gray-400 w-20 shrink-0">Hours</span>
-                  <span className="text-gray-700">{form.actual_start_time.slice(0,5)} – {form.actual_finish_time.slice(0,5)}</span>
+                  <span className="text-dim w-20 shrink-0">Hours</span>
+                  <span className="text-warm">{form.actual_start_time.slice(0,5)} – {form.actual_finish_time.slice(0,5)}</span>
                 </div>
               )}
             </div>
@@ -1801,15 +1801,15 @@ const filteredCustomers = useMemo(
                 {crewLines.map((l, i) => l && (
                   <div key={i} className="flex items-center justify-between text-sm">
                     <div>
-                      <span className="font-medium text-gray-900">{l.name}</span>
-                      <span className="text-gray-400 ml-2">{l.paidHours}h × ${l.rate}/hr</span>
+                      <span className="font-medium text-parchment">{l.name}</span>
+                      <span className="text-dim ml-2">{l.paidHours}h × ${l.rate}/hr</span>
                     </div>
-                    <span className="font-semibold text-gray-800">{fmt(l.pay)}</span>
+                    <span className="font-semibold text-parchment">{fmt(l.pay)}</span>
                   </div>
                 ))}
-                <div className="flex items-center justify-between text-sm font-bold pt-2 border-t border-gray-100">
-                  <span className="text-gray-700">Total Payroll</span>
-                  <span className="text-gray-900">{fmt(payrollTotal)}</span>
+                <div className="flex items-center justify-between text-sm font-bold pt-2 border-t border-wire">
+                  <span className="text-warm">Total Payroll</span>
+                  <span className="text-parchment">{fmt(payrollTotal)}</span>
                 </div>
               </div>
             </Card>
@@ -1820,28 +1820,28 @@ const filteredCustomers = useMemo(
             <Card title="Financials">
               <div className="space-y-1.5 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Revenue</span>
-                  <span className="font-semibold text-gray-900">{fmt(summary.totalRevenue)}</span>
+                  <span className="text-dim">Revenue</span>
+                  <span className="font-semibold text-parchment">{fmt(summary.totalRevenue)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Payroll</span>
+                  <span className="text-dim">Payroll</span>
                   <span className="text-orange-600 font-medium">−{fmt(summary.payrollTotal)}</span>
                 </div>
                 {summary.materialsRevenue !== 0 && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Materials</span>
-                    <span className="font-medium text-gray-700">{fmt(summary.materialsRevenue)}</span>
+                    <span className="text-dim">Materials</span>
+                    <span className="font-medium text-warm">{fmt(summary.materialsRevenue)}</span>
                   </div>
                 )}
                 {summary.discount > 0 && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Discount</span>
-                    <span className="text-red-500 font-medium">−{fmt(summary.discount)}</span>
+                    <span className="text-dim">Discount</span>
+                    <span className="text-danger font-medium">−{fmt(summary.discount)}</span>
                   </div>
                 )}
-                <div className="flex justify-between pt-2 border-t border-gray-100">
-                  <span className="font-bold text-gray-800">Profit</span>
-                  <span className={`font-bold ${summary.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                <div className="flex justify-between pt-2 border-t border-wire">
+                  <span className="font-bold text-parchment">Profit</span>
+                  <span className={`font-bold ${summary.profit >= 0 ? 'text-success' : 'text-danger'}`}>
                     {fmt(summary.profit)}
                     {summary.margin !== null && <span className="text-xs font-normal ml-1">({(summary.margin * 100).toFixed(1)}%)</span>}
                   </span>
@@ -1855,14 +1855,14 @@ const filteredCustomers = useMemo(
             <Card title="Notes">
               {form.completion_notes && (
                 <div className="mb-2">
-                  <p className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">Completion</p>
-                  <p className="text-sm text-gray-700 whitespace-pre-wrap">{form.completion_notes}</p>
+                  <p className="text-xs text-dim uppercase tracking-wide mb-0.5">Completion</p>
+                  <p className="text-sm text-warm whitespace-pre-wrap">{form.completion_notes}</p>
                 </div>
               )}
               {form.notes && (
                 <div>
-                  <p className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">Notes</p>
-                  <p className="text-sm text-gray-700 whitespace-pre-wrap">{form.notes}</p>
+                  <p className="text-xs text-dim uppercase tracking-wide mb-0.5">Notes</p>
+                  <p className="text-sm text-warm whitespace-pre-wrap">{form.notes}</p>
                 </div>
               )}
             </Card>
@@ -1874,38 +1874,38 @@ const filteredCustomers = useMemo(
               <div className="space-y-1.5 text-sm">
                 {form.payment_date && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Date</span>
-                    <span className="text-gray-800">{form.payment_date}</span>
+                    <span className="text-dim">Date</span>
+                    <span className="text-parchment">{form.payment_date}</span>
                   </div>
                 )}
                 {form.payment_methods.length > 0 && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Method</span>
-                    <span className="text-gray-800">{form.payment_methods.map((m) => PAYMENT_METHODS.find((pm) => pm.value === m)?.label ?? m).join(' + ')}</span>
+                    <span className="text-dim">Method</span>
+                    <span className="text-parchment">{form.payment_methods.map((m) => PAYMENT_METHODS.find((pm) => pm.value === m)?.label ?? m).join(' + ')}</span>
                   </div>
                 )}
                 {parseFloat(form.payment_cash_amount) > 0 && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Cash</span>
-                    <span className="text-gray-800">{fmt(parseFloat(form.payment_cash_amount))}</span>
+                    <span className="text-dim">Cash</span>
+                    <span className="text-parchment">{fmt(parseFloat(form.payment_cash_amount))}</span>
                   </div>
                 )}
                 {parseFloat(form.payment_transfer_amount) > 0 && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Transfer</span>
-                    <span className="text-gray-800">{fmt(parseFloat(form.payment_transfer_amount))}</span>
+                    <span className="text-dim">Transfer</span>
+                    <span className="text-parchment">{fmt(parseFloat(form.payment_transfer_amount))}</span>
                   </div>
                 )}
                 {parseFloat(form.payment_card_amount) > 0 && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Card</span>
-                    <span className="text-gray-800">{fmt(parseFloat(form.payment_card_amount))}</span>
+                    <span className="text-dim">Card</span>
+                    <span className="text-parchment">{fmt(parseFloat(form.payment_card_amount))}</span>
                   </div>
                 )}
                 {form.payment_collected_by && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Collected by</span>
-                    <span className="text-gray-800">{form.payment_collected_by}</span>
+                    <span className="text-dim">Collected by</span>
+                    <span className="text-parchment">{form.payment_collected_by}</span>
                   </div>
                 )}
               </div>
@@ -1917,7 +1917,7 @@ const filteredCustomers = useMemo(
         </div>
 
         {/* Sticky footer */}
-        <div className="fixed bottom-0 left-0 right-0 lg:left-56 bg-white border-t border-gray-200 shadow-xl z-10">
+        <div className="fixed bottom-0 left-0 right-0 lg:left-56 bg-surface border-t border-wire shadow-xl z-10">
           <div className="px-4 lg:px-6 py-3 flex items-center justify-end gap-3 max-w-2xl">
             {!isPaid && (
               <Button onClick={() => setPaymentModalOpen(true)} disabled={saving} size="md" className="bg-teal-600 hover:bg-teal-700 border-teal-600">
@@ -1938,7 +1938,7 @@ const filteredCustomers = useMemo(
           <div className="space-y-4">
             <Input label="Payment Date" type="date" value={form.payment_date ?? ''} onChange={(e) => setField('payment_date', e.target.value)} />
             <div>
-              <p className="text-sm font-medium text-gray-700 mb-2">Payment Method</p>
+              <p className="text-sm font-medium text-warm mb-2">Payment Method</p>
               <div className="flex gap-3 flex-wrap">
                 {PAYMENT_METHODS.map((pm) => (
                   <label key={pm.value} className="flex items-center gap-2 text-sm cursor-pointer">
@@ -1968,7 +1968,7 @@ const filteredCustomers = useMemo(
               <Input label="Card Amount ($)" type="number" min="0" step="0.01" value={form.payment_card_amount ?? ''} onChange={(e) => setField('payment_card_amount', e.target.value)} placeholder="0.00" />
             )}
             <Input label="Collected by" value={form.payment_collected_by ?? ''} onChange={(e) => setField('payment_collected_by', e.target.value)} placeholder="e.g. Alex" />
-            {error && <p className="text-sm text-red-600">{error}</p>}
+            {error && <p className="text-sm text-danger">{error}</p>}
             <div className="flex gap-2 pt-2">
               <Button onClick={handleConfirmPayment} disabled={saving} className="flex-1 bg-teal-600 hover:bg-teal-700 border-teal-600">
                 {saving ? 'Saving…' : 'Confirm Payment'}
@@ -1986,22 +1986,22 @@ const filteredCustomers = useMemo(
     return (
       <div className="max-w-2xl">
         <div className="flex items-center gap-3 mb-6">
-          <Link href="/jobs" className="text-gray-400 hover:text-gray-600">
+          <Link href="/jobs" className="text-dim hover:text-warm">
             <ChevronLeft size={20} />
           </Link>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Job #{form.job_number}</h1>
-            <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-600">Cancelled</span>
+            <h1 className="text-2xl font-display font-bold text-parchment">Job #{form.job_number}</h1>
+            <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-danger/10 text-danger">Cancelled</span>
           </div>
         </div>
 
         <div className="space-y-4">
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
-            <XCircle size={20} className="text-red-500 shrink-0 mt-0.5" />
+            <XCircle size={20} className="text-danger shrink-0 mt-0.5" />
             <div>
-              <p className="font-semibold text-red-800 text-sm">Job cancelled</p>
+              <p className="font-semibold text-danger text-sm">Job cancelled</p>
               {form.cancellation_reason && (
-                <p className="text-sm text-red-700 mt-1">{form.cancellation_reason}</p>
+                <p className="text-sm text-danger mt-1">{form.cancellation_reason}</p>
               )}
             </div>
           </div>
@@ -2009,15 +2009,15 @@ const filteredCustomers = useMemo(
           <Card title="Job Info">
             <div className="space-y-2 text-sm">
               <div className="flex gap-4">
-                <span className="text-gray-400 w-24 shrink-0">Job #</span>
+                <span className="text-dim w-24 shrink-0">Job #</span>
                 <span className="font-mono font-medium">{form.job_number}</span>
               </div>
               <div className="flex gap-4">
-                <span className="text-gray-400 w-24 shrink-0">Date</span>
+                <span className="text-dim w-24 shrink-0">Date</span>
                 <span>{form.date}</span>
               </div>
               <div className="flex gap-4">
-                <span className="text-gray-400 w-24 shrink-0">Client</span>
+                <span className="text-dim w-24 shrink-0">Client</span>
                 <span>{entityDisplayName}</span>
               </div>
             </div>
@@ -2026,8 +2026,8 @@ const filteredCustomers = useMemo(
           {form.minimum_charge_applied && (
             <Card title="Minimum Charge">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-700">Minimum charge applied</span>
-                <span className="font-semibold text-gray-900">{fmt(parseFloat(form.minimum_charge_amount) || 0)}</span>
+                <span className="text-sm text-warm">Minimum charge applied</span>
+                <span className="font-semibold text-parchment">{fmt(parseFloat(form.minimum_charge_amount) || 0)}</span>
               </div>
             </Card>
           )}
@@ -2042,11 +2042,11 @@ const filteredCustomers = useMemo(
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <Link href="/jobs" className="text-gray-400 hover:text-gray-600">
+          <Link href="/jobs" className="text-dim hover:text-warm">
             <ChevronLeft size={20} />
           </Link>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">
+            <h1 className="text-2xl font-display font-bold text-parchment">
               {isEdit ? `Job #${form.job_number}` : 'New Job'}
             </h1>
             {isEdit && (
@@ -2062,7 +2062,7 @@ const filteredCustomers = useMemo(
             <button
               type="button"
               onClick={() => setCancelModalOpen(true)}
-              className="text-sm text-red-400 hover:text-red-600 font-medium"
+              className="text-sm text-danger hover:text-danger font-medium"
             >
               Cancel Job
             </button>
@@ -2071,7 +2071,7 @@ const filteredCustomers = useMemo(
             <button
               onClick={handleDelete}
               disabled={deleting}
-              className="text-sm text-red-500 hover:text-red-700 font-medium disabled:opacity-50"
+              className="text-sm text-danger hover:text-danger font-medium disabled:opacity-50"
             >
               {deleting ? 'Deleting…' : 'Delete Job'}
             </button>
@@ -2084,11 +2084,11 @@ const filteredCustomers = useMemo(
         {/* ── Reviewed lock banner ──────────────────────────────────────── */}
         {form.status === 'reviewed' && !editAnyway && (
           <div className="bg-amber-50 border border-amber-300 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
-            <span className="text-sm font-medium text-amber-800">This job has been reviewed and is locked.</span>
+            <span className="text-sm font-medium text-amber-300">This job has been reviewed and is locked.</span>
             <button
               type="button"
               onClick={() => setEditAnyway(true)}
-              className="text-sm font-semibold text-amber-700 hover:text-amber-900 underline whitespace-nowrap"
+              className="text-sm font-semibold text-gold hover:text-gold-bright underline whitespace-nowrap"
             >
               Edit anyway
             </button>
@@ -2102,12 +2102,12 @@ const filteredCustomers = useMemo(
               <div className="flex items-center gap-2">
                 {isReviewed
                   ? <Lock size={16} className="text-cyan-600" />
-                  : <CheckCircle size={16} className="text-amber-600" />
+                  : <CheckCircle size={16} className="text-gold" />
                 }
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-700">Final Review</h2>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-warm">Final Review</h2>
               </div>
               {isReviewed && (
-                <span className="text-xs font-medium text-cyan-700 bg-cyan-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <span className="text-xs font-medium text-cyan-300 bg-cyan-500/10 px-2 py-0.5 rounded-full flex items-center gap-1">
                   <CheckCircle size={11} /> Reviewed
                 </span>
               )}
@@ -2118,7 +2118,7 @@ const filteredCustomers = useMemo(
               <div>
                 <Input id="rfv-cof-final" label="COF Final (hrs)" type="number" min="0" step="0.25" value={form.cof_final ?? ''} onChange={(e) => setField('cof_final', e.target.value)} placeholder={form.cof || '—'} disabled={isReviewed} />
                 {suggestedCofFinal !== null && !isReviewed && (
-                  <button type="button" onClick={() => setField('cof_final', suggestedCofFinal.toString())} className="mt-1 text-xs text-blue-600 hover:text-blue-800">
+                  <button type="button" onClick={() => setField('cof_final', suggestedCofFinal.toString())} className="mt-1 text-xs text-gold hover:text-gold-bright">
                     ↑ Use {suggestedCofFinal}h from actual times
                   </button>
                 )}
@@ -2133,16 +2133,16 @@ const filteredCustomers = useMemo(
             </div>
 
             {/* Extra Men */}
-            <div className="mb-3 pt-2 border-t border-gray-100">
+            <div className="mb-3 pt-2 border-t border-wire">
               <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-medium text-gray-700">Extra Men</label>
+                <label className="text-sm font-medium text-warm">Extra Men</label>
                 {!isReviewed && (
-                  <button type="button" onClick={addExtraMan} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium">
+                  <button type="button" onClick={addExtraMan} className="flex items-center gap-1 text-xs text-gold hover:text-gold-bright font-medium">
                     <Plus size={13} /> Add Extra Man
                   </button>
                 )}
               </div>
-              {extraMen.length === 0 && <p className="text-xs text-gray-400">No extra men added.</p>}
+              {extraMen.length === 0 && <p className="text-xs text-dim">No extra men added.</p>}
               <div className="space-y-2">
                 {extraMen.map((row) => {
                   const hasTime = row.start_time.length === 5 && row.finish_time.length === 5
@@ -2153,17 +2153,17 @@ const filteredCustomers = useMemo(
                         value={row.employee_id}
                         onChange={(e) => updateExtraMan(row._id, 'employee_id', e.target.value)}
                         disabled={isReviewed}
-                        className="flex-1 min-w-0 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:bg-gray-50"
+                        className="flex-1 min-w-0 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface"
                       >
                         <option value="">Select employee…</option>
                         {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
                       </select>
-                      <input type="time" value={row.start_time} onChange={(e) => updateExtraMan(row._id, 'start_time', e.target.value)} disabled={isReviewed} className="w-28 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:bg-gray-50" />
-                      <span className="text-gray-400 text-xs">–</span>
-                      <input type="time" value={row.finish_time} onChange={(e) => updateExtraMan(row._id, 'finish_time', e.target.value)} disabled={isReviewed} className="w-28 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:bg-gray-50" />
-                      {computed !== null && <span className="text-sm text-gray-500 tabular-nums w-10">{computed}h</span>}
+                      <input type="time" value={row.start_time} onChange={(e) => updateExtraMan(row._id, 'start_time', e.target.value)} disabled={isReviewed} className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface" />
+                      <span className="text-dim text-xs">–</span>
+                      <input type="time" value={row.finish_time} onChange={(e) => updateExtraMan(row._id, 'finish_time', e.target.value)} disabled={isReviewed} className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface" />
+                      {computed !== null && <span className="text-sm text-dim tabular-nums w-10">{computed}h</span>}
                       {!isReviewed && (
-                        <button type="button" onClick={() => removeExtraMan(row._id)} className="text-gray-300 hover:text-red-500">
+                        <button type="button" onClick={() => removeExtraMan(row._id)} className="text-dim hover:text-danger">
                           <Trash2 size={15} />
                         </button>
                       )}
@@ -2176,8 +2176,8 @@ const filteredCustomers = useMemo(
             {/* Completion notes */}
             <div className="mb-3">
               <div className="flex items-center justify-between mb-1">
-                <label className="text-sm font-medium text-gray-700">Completion Notes</label>
-                <label className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+                <label className="text-sm font-medium text-warm">Completion Notes</label>
+                <label className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-dim border border-wire rounded-lg hover:bg-panel cursor-pointer">
                   <ImagePlus size={13} />
                   Photo
                   <input
@@ -2195,13 +2195,13 @@ const filteredCustomers = useMemo(
                 onChange={(e) => setField('completion_notes', e.target.value)}
                 disabled={isReviewed}
                 placeholder="e.g. Job took longer due to access issues"
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:bg-gray-50 disabled:text-gray-500"
+                className="w-full px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface disabled:text-dim"
               />
             </div>
 
             {/* Google Review */}
-            <div className="mb-3 pt-3 border-t border-gray-100">
-              <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer mb-2">
+            <div className="mb-3 pt-3 border-t border-wire">
+              <label className="flex items-center gap-2 text-sm font-medium text-warm cursor-pointer mb-2">
                 <input
                   type="checkbox"
                   checked={form.google_review}
@@ -2212,13 +2212,13 @@ const filteredCustomers = useMemo(
                   disabled={isReviewed}
                   className="rounded"
                 />
-                <Star size={14} className="text-amber-500" />
+                <Star size={14} className="text-gold" />
                 Google Review received
               </label>
               {form.google_review && (
                 <div className="space-y-2 pl-1">
                   <div>
-                    <p className="text-xs text-gray-400 mb-1.5">Who received the review <span className="text-amber-600">(+0.5h each)</span></p>
+                    <p className="text-xs text-dim mb-1.5">Who received the review <span className="text-gold">(+0.5h each)</span></p>
                     <div className="flex flex-wrap gap-1.5">
                       {(() => {
                         const crewEmpIds = crew.filter((r) => r.employee_id).map((r) => r.employee_id)
@@ -2242,7 +2242,7 @@ const filteredCustomers = useMemo(
                               )}
                               disabled={isReviewed}
                               className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors disabled:opacity-50 ${
-                                checked ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-white text-gray-600 border-gray-300 hover:border-amber-300'
+                                checked ? 'bg-gold/10 text-gold border-gold-ring' : 'bg-panel text-warm border-wire hover:border-gold-ring'
                               }`}
                             >
                               {checked ? '★ ' : ''}{emp.name}{isExtra ? ' (extra)' : ''}
@@ -2251,13 +2251,13 @@ const filteredCustomers = useMemo(
                         })
                       })()}
                       {crew.filter((r) => r.employee_id).length === 0 && extraMen.filter((r) => r.employee_id).length === 0 && !form.extra_man_employee_id && (
-                        <p className="text-xs text-gray-400">Add crew members above to select recipients.</p>
+                        <p className="text-xs text-dim">Add crew members above to select recipients.</p>
                       )}
                     </div>
                   </div>
                   <div>
-                    <p className="text-xs text-gray-400 mb-1.5">Screenshot (optional)</p>
-                    <label className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-50 cursor-pointer w-fit">
+                    <p className="text-xs text-dim mb-1.5">Screenshot (optional)</p>
+                    <label className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gold border border-gold-ring/50 rounded-lg hover:bg-gold/8 cursor-pointer w-fit">
                       <ImagePlus size={13} />
                       {uploadingPhoto ? 'Uploading…' : 'Upload screenshot'}
                       <input
@@ -2271,7 +2271,7 @@ const filteredCustomers = useMemo(
                     {photos.filter((p) => p.category === 'google_review').length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-2">
                         {photos.filter((p) => p.category === 'google_review').map((p) => (
-                          <div key={p._id} className="relative group w-20 h-14 rounded-lg overflow-hidden bg-gray-100 shrink-0">
+                          <div key={p._id} className="relative group w-20 h-14 rounded-lg overflow-hidden bg-wire/30 shrink-0">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={p.url} alt="Review screenshot" className="w-full h-full object-cover" />
                             {!isReviewed && (
@@ -2305,20 +2305,20 @@ const filteredCustomers = useMemo(
           <Card title="Job Summary">
             <div className="space-y-1.5 text-sm">
               <div className="flex justify-between">
-                <span className="text-gray-500">Revenue</span>
-                <span className="font-semibold text-gray-900">{fmt(summary.totalRevenue)}</span>
+                <span className="text-dim">Revenue</span>
+                <span className="font-semibold text-parchment">{fmt(summary.totalRevenue)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">Payroll</span>
+                <span className="text-dim">Payroll</span>
                 <span className="text-orange-600">−{fmt(summary.payrollTotal)}</span>
               </div>
               {summary.discount > 0 && (
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Discount</span>
-                  <span className="text-red-500">−{fmt(summary.discount)}</span>
+                  <span className="text-dim">Discount</span>
+                  <span className="text-danger">−{fmt(summary.discount)}</span>
                 </div>
               )}
-              <div className={`flex justify-between pt-2 border-t border-gray-100 font-bold ${summary.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              <div className={`flex justify-between pt-2 border-t border-wire font-bold ${summary.profit >= 0 ? 'text-success' : 'text-danger'}`}>
                 <span>Profit</span>
                 <span>{fmt(summary.profit)}{summary.margin !== null ? ` (${(summary.margin * 100).toFixed(1)}%)` : ''}</span>
               </div>
@@ -2369,15 +2369,15 @@ const filteredCustomers = useMemo(
           </div>
           {form.scheduled_time && form.scheduled_finish_time && (() => {
             const dur = calcCrewHours(form.scheduled_time, form.scheduled_finish_time)
-            return dur > 0 ? <p className="mt-1.5 text-xs text-gray-400">Est. duration: {dur}h</p> : null
+            return dur > 0 ? <p className="mt-1.5 text-xs text-dim">Est. duration: {dur}h</p> : null
           })()}
           {isEdit && (
             <div className="mt-3">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+              <label className="block text-sm font-medium text-warm mb-1">Status</label>
               <select
                 value={form.status}
                 onChange={(e) => setField('status', e.target.value as JobStatus)}
-                className="w-full sm:w-48 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full sm:w-48 px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
               >
                 {(Object.entries(STATUS_LABEL) as [JobStatus, string][]).map(([val, label]) => (
                   <option key={val} value={val}>{label}</option>
@@ -2394,8 +2394,8 @@ const filteredCustomers = useMemo(
         <Card title="Location">
           {form.source === 'subcontract' && (
             <div ref={customerRef} className="relative mb-3">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Customer <span className="text-gray-400 font-normal">(optional)</span>
+              <label className="block text-sm font-medium text-warm mb-1">
+                Customer <span className="text-dim font-normal">(optional)</span>
               </label>
               <input
                 type="text"
@@ -2404,18 +2404,18 @@ const filteredCustomers = useMemo(
                 onChange={(e) => { setCustomerSearch(e.target.value); setField('customer_id', ''); setShowCustomerDrop(true) }}
                 placeholder="Search customers…"
                 disabled={isReviewed}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+                className="w-full px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel"
               />
               {showCustomerDrop && (
-                <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-44 overflow-y-auto">
-                  <button type="button" onClick={() => { setField('customer_id', ''); setCustomerSearch(''); setShowCustomerDrop(false) }} className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:bg-gray-50">
+                <div className="absolute z-20 w-full mt-1 bg-surface border border-wire rounded-lg shadow-lg max-h-44 overflow-y-auto">
+                  <button type="button" onClick={() => { setField('customer_id', ''); setCustomerSearch(''); setShowCustomerDrop(false) }} className="w-full text-left px-3 py-2 text-sm text-dim hover:bg-panel">
                     No customer
                   </button>
                   {filteredCustomers.map((c) => (
                     <button key={c.id} type="button" onClick={() => { setField('customer_id', c.id); setCustomerSearch(c.name); setShowCustomerDrop(false) }} className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-baseline gap-2">
                       <span className="font-medium">{c.name}</span>
-                      {c.phone && <span className="text-gray-400 text-xs">{c.phone}</span>}
-                      {!c.phone && c.contact_info && <span className="text-gray-400 text-xs">{c.contact_info}</span>}
+                      {c.phone && <span className="text-dim text-xs">{c.phone}</span>}
+                      {!c.phone && c.contact_info && <span className="text-dim text-xs">{c.contact_info}</span>}
                     </button>
                   ))}
                 </div>
@@ -2431,11 +2431,11 @@ const filteredCustomers = useMemo(
         {/* ── Extra Men (in_progress only — completion shows inside Final Review) */}
         {showExtraMen && !isCompletionMode && (
           <Card title="Extra Men" action={
-            <button type="button" onClick={addExtraMan} className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium">
+            <button type="button" onClick={addExtraMan} className="flex items-center gap-1 text-xs text-gold hover:text-gold-bright font-medium">
               <Plus size={14} /> Add
             </button>
           }>
-            {extraMen.length === 0 && <p className="text-sm text-gray-400 text-center py-2">No extra men added.</p>}
+            {extraMen.length === 0 && <p className="text-sm text-dim text-center py-2">No extra men added.</p>}
             <div className="space-y-2">
               {extraMen.map((row) => {
                 const hasTime = row.start_time.length === 5 && row.finish_time.length === 5
@@ -2445,16 +2445,16 @@ const filteredCustomers = useMemo(
                     <select
                       value={row.employee_id}
                       onChange={(e) => updateExtraMan(row._id, 'employee_id', e.target.value)}
-                      className="flex-1 min-w-0 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="flex-1 min-w-0 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
                     >
                       <option value="">Select employee…</option>
                       {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
                     </select>
-                    <input type="time" value={row.start_time} onChange={(e) => updateExtraMan(row._id, 'start_time', e.target.value)} className="w-28 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                    <span className="text-gray-400 text-xs">–</span>
-                    <input type="time" value={row.finish_time} onChange={(e) => updateExtraMan(row._id, 'finish_time', e.target.value)} className="w-28 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                    {computed !== null && <span className="text-sm text-gray-500 tabular-nums w-10">{computed}h</span>}
-                    <button type="button" onClick={() => removeExtraMan(row._id)} className="text-gray-300 hover:text-red-500">
+                    <input type="time" value={row.start_time} onChange={(e) => updateExtraMan(row._id, 'start_time', e.target.value)} className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring" />
+                    <span className="text-dim text-xs">–</span>
+                    <input type="time" value={row.finish_time} onChange={(e) => updateExtraMan(row._id, 'finish_time', e.target.value)} className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring" />
+                    {computed !== null && <span className="text-sm text-dim tabular-nums w-10">{computed}h</span>}
+                    <button type="button" onClick={() => removeExtraMan(row._id)} className="text-dim hover:text-danger">
                       <Trash2 size={15} />
                     </button>
                   </div>
@@ -2486,36 +2486,36 @@ const filteredCustomers = useMemo(
             </div>
           )}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            <label className="block text-sm font-medium text-warm mb-1">Notes</label>
             <textarea
               rows={3}
               value={form.notes ?? ''}
               onChange={(e) => setField('notes', e.target.value)}
               disabled={isReviewed}
               placeholder="e.g. EASTWOOD › EPPING"
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
+              className="w-full px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel disabled:text-dim"
             />
           </div>
         </Card>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">{error}</div>
+          <div className="bg-danger/10 border border-danger/30 text-danger text-sm px-4 py-3 rounded-lg">{error}</div>
         )}
       </div>
 
       {/* ── Sticky footer ────────────────────────────────────────────────── */}
-      <div className="fixed bottom-0 left-0 right-0 lg:left-56 bg-white border-t border-gray-200 shadow-xl z-10">
+      <div className="fixed bottom-0 left-0 right-0 lg:left-56 bg-surface border-t border-wire shadow-xl z-10">
         <div className="px-4 lg:px-6 py-3 flex items-center justify-between gap-3 max-w-2xl">
           {/* Summary numbers — only when we have data */}
           <div className="flex items-center gap-5 min-w-0">
             {summary && (
               <>
-                <SummaryCell label="Revenue" value={fmt(summary.totalRevenue)} color="text-gray-900" />
-                <SummaryCell label="Payroll" value={fmt(summary.payrollTotal)} color="text-orange-600" />
+                <SummaryCell label="Revenue" value={fmt(summary.totalRevenue)} color="text-parchment" />
+                <SummaryCell label="Payroll" value={fmt(summary.payrollTotal)} color="text-warm" />
                 <SummaryCell
                   label="Profit"
                   value={`${fmt(summary.profit)}${summary.margin !== null ? ` (${(summary.margin * 100).toFixed(1)}%)` : ''}`}
-                  color={summary.profit >= 0 ? 'text-green-600' : 'text-red-600'}
+                  color={summary.profit >= 0 ? 'text-success' : 'text-danger'}
                 />
               </>
             )}
@@ -2626,8 +2626,8 @@ const filteredCustomers = useMemo(
       <Modal open={cancelModalOpen} onClose={() => setCancelModalOpen(false)} title={`Cancel Job #${form.job_number}`}>
         <div className="space-y-4">
           <div>
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Minimum Charge</p>
-            <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer mb-3">
+            <p className="text-xs font-semibold text-dim uppercase tracking-wide mb-3">Minimum Charge</p>
+            <label className="flex items-center gap-2 text-sm font-medium text-warm cursor-pointer mb-3">
               <input
                 type="checkbox"
                 checked={form.minimum_charge_applied}
@@ -2649,16 +2649,16 @@ const filteredCustomers = useMemo(
             )}
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Cancellation Reason</label>
+            <label className="block text-sm font-medium text-warm mb-1">Cancellation Reason</label>
             <textarea
               rows={3}
               value={form.cancellation_reason ?? ''}
               onChange={(e) => setField('cancellation_reason', e.target.value)}
               placeholder="e.g. Client cancelled last minute"
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-400"
+              className="w-full px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-danger/60 focus:ring-1 focus:ring-danger/40"
             />
           </div>
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && <p className="text-sm text-danger">{error}</p>}
           <div className="flex gap-2 pt-2">
             <Button onClick={handleCancelJob} disabled={saving} variant="danger" className="flex-1">
               {saving ? 'Cancelling…' : 'Confirm Cancellation'}
@@ -2674,9 +2674,9 @@ const filteredCustomers = useMemo(
 // ─── Small helpers ────────────────────────────────────────────────────────────
 function Card({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-4">
+    <div className="bg-surface rounded-xl border border-wire p-4">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{title}</h2>
+        <h2 className="text-xs font-semibold text-dim uppercase tracking-wide">{title}</h2>
         {action}
       </div>
       {children}
@@ -2687,7 +2687,7 @@ function Card({ title, children, action }: { title: string; children: React.Reac
 function SummaryCell({ label, value, color }: { label: string; value: string; color: string }) {
   return (
     <div className="min-w-0">
-      <div className="text-xs text-gray-400">{label}</div>
+      <div className="text-xs text-dim">{label}</div>
       <div className={`text-sm font-bold truncate ${color}`}>{value}</div>
     </div>
   )

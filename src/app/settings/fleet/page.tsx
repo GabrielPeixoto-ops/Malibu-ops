@@ -144,14 +144,16 @@ export default function FleetPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto py-8 px-4">
+    <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Fleet</h1>
+        <h1 className="text-2xl font-display font-bold text-parchment">Fleet</h1>
         <Button onClick={openCreate}><Plus className="w-4 h-4" /> Add Truck</Button>
       </div>
 
       {loading ? (
-        <p className="text-sm text-gray-500">Loading…</p>
+        <p className="text-warm text-sm">Loading…</p>
+      ) : trucks.length === 0 ? (
+        <div className="bg-surface rounded-xl border border-wire p-12 text-center text-dim">No trucks yet.</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {trucks.map((t) => {
@@ -159,102 +161,88 @@ export default function FleetPage() {
             return (
               <div
                 key={t.id}
-                className={`bg-white rounded-xl border p-4 flex flex-col gap-3 ${!t.is_active ? 'opacity-60' : 'border-gray-200'}`}
+                className={`bg-surface rounded-xl border border-wire p-4 flex flex-col gap-3 ${!t.is_active ? 'opacity-50' : ''}`}
               >
-                {/* Header */}
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <h2 className="font-bold text-gray-900 leading-tight">{t.name}</h2>
-                    {t.model && <p className="text-xs text-gray-500 mt-0.5">{t.model}</p>}
+                    <h2 className="font-bold text-parchment leading-tight">{t.name}</h2>
+                    {t.model && <p className="text-xs text-dim mt-0.5">{t.model}</p>}
                   </div>
-                  <button
-                    onClick={() => openEdit(t)}
-                    className="p-1.5 text-gray-400 hover:text-blue-600 rounded shrink-0"
-                  >
+                  <button onClick={() => openEdit(t)} className="p-1.5 text-dim hover:text-gold rounded transition-colors shrink-0">
                     <Pencil className="w-4 h-4" />
                   </button>
                 </div>
 
-                {/* Badges */}
                 <div className="flex flex-wrap gap-1.5">
                   {t.registration && (
-                    <span className="px-2 py-0.5 rounded font-mono text-xs font-bold bg-gray-900 text-white tracking-wider">
+                    <span className="px-2 py-0.5 rounded font-mono text-xs font-bold bg-panel text-parchment tracking-wider border border-wire">
                       {t.registration}
                     </span>
                   )}
                   {t.size && (
                     <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
-                      t.size === 'large' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'
+                      t.size === 'large' ? 'bg-amber-500/10 text-amber-300' : 'bg-blue-500/10 text-blue-300'
                     }`}>
                       {t.size === 'large' ? 'Large' : 'Small'}
                     </span>
                   )}
                   {t.tonnes != null && (
-                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
-                      {t.tonnes}T
-                    </span>
+                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-wire/50 text-warm">{t.tonnes}T</span>
                   )}
                   {t.tailgate && (
-                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
-                      {t.tailgate}
-                    </span>
+                    <span className="px-2 py-0.5 rounded text-xs font-medium bg-wire/50 text-warm">{t.tailgate}</span>
                   )}
                 </div>
 
-                {/* Specs */}
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-600">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-warm">
                   {(t.cargo_capacity_cbm != null || t.actuals_cbm != null) && (
                     <div>
-                      <span className="text-gray-400">Capacity</span>
-                      <p className="font-medium text-gray-800">
+                      <span className="text-dim">Capacity</span>
+                      <p className="font-medium text-parchment">
                         {t.cargo_capacity_cbm ?? '—'} CBM
-                        {t.actuals_cbm != null && <span className="text-gray-400"> ({t.actuals_cbm} actual)</span>}
+                        {t.actuals_cbm != null && <span className="text-dim"> ({t.actuals_cbm} actual)</span>}
                       </p>
                     </div>
                   )}
                   {(t.height_clearance || t.internal_height) && (
                     <div>
-                      <span className="text-gray-400">Height</span>
-                      <p className="font-medium text-gray-800">
+                      <span className="text-dim">Height</span>
+                      <p className="font-medium text-parchment">
                         {t.height_clearance ?? '—'} clearance
-                        {t.internal_height && <span className="text-gray-400"> / {t.internal_height} internal</span>}
+                        {t.internal_height && <span className="text-dim"> / {t.internal_height} internal</span>}
                       </p>
                     </div>
                   )}
-
                 </div>
 
-                {/* Selling points */}
                 {t.selling_points && (
-                  <p className="text-xs font-medium text-indigo-700 bg-indigo-50 rounded px-2 py-1">
+                  <p className="text-xs font-medium text-gold bg-gold/8 rounded px-2 py-1">
                     {t.selling_points}
                   </p>
                 )}
 
-                {/* Notes (collapsible) */}
                 {t.notes && (
                   <div>
                     <button
                       onClick={() => toggleNotes(t.id)}
-                      className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600"
+                      className="flex items-center gap-1 text-xs text-dim hover:text-warm transition-colors"
                     >
                       {notesOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                       Notes
                     </button>
                     {notesOpen && (
-                      <p className="mt-1 text-xs text-gray-600 leading-relaxed">{t.notes}</p>
+                      <p className="mt-1 text-xs text-warm leading-relaxed">{t.notes}</p>
                     )}
                   </div>
                 )}
 
-                {/* Footer */}
-                <div className="mt-auto pt-2 border-t border-gray-100 flex justify-end">
+                <div className="mt-auto pt-2 border-t border-wire flex justify-end">
                   <button
                     onClick={() => toggleActive(t)}
                     className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
                       t.is_active
-                        ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                        ? 'bg-success/10 text-success hover:bg-success/20'
+                        : 'bg-wire/50 text-dim hover:bg-wire'
                     }`}
                   >
                     {t.is_active ? 'Active' : 'Inactive'}
@@ -288,20 +276,20 @@ export default function FleetPage() {
           </div>
           <Input label="Selling points" value={form.selling_points} onChange={(e) => setField('selling_points', e.target.value)} placeholder="SOLD AS 4.5T, 6T AND 8T" />
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            <label className="block text-xs font-semibold text-dim uppercase tracking-wide mb-1">Notes</label>
             <textarea
               rows={3}
               value={form.notes}
               onChange={(e) => setField('notes', e.target.value)}
               placeholder="Internal notes…"
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 text-sm border border-wire rounded-lg bg-panel text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
             />
           </div>
-          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-            <input type="checkbox" checked={form.is_active} onChange={(e) => setField('is_active', e.target.checked)} className="rounded" />
+          <label className="flex items-center gap-2 text-sm text-warm cursor-pointer">
+            <input type="checkbox" checked={form.is_active} onChange={(e) => setField('is_active', e.target.checked)} className="rounded border-wire bg-panel text-gold focus:ring-gold-ring" />
             Active (shown in job form)
           </label>
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && <p className="text-sm text-danger">{error}</p>}
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>

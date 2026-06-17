@@ -68,6 +68,15 @@ function billingFormFromCustomer(c: Customer): ReturnType<typeof emptyBillingFor
   return f
 }
 
+function billingBadge(type: string) {
+  if (type === 'percent') return 'bg-purple-500/10 text-purple-300'
+  if (type === 'formula') return 'bg-amber-500/10 text-amber-300'
+  return 'bg-blue-500/10 text-blue-300'
+}
+
+const inlineInput = 'flex-1 px-3 py-1.5 text-sm border border-wire rounded-lg bg-panel text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring'
+const checkboxCls = 'rounded border-wire bg-panel text-gold focus:ring-gold-ring'
+
 export default function CustomersPage() {
   const supabase = createClient()
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -168,7 +177,7 @@ export default function CustomersPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Customers</h1>
+        <h1 className="text-2xl font-display font-bold text-parchment">Customers</h1>
         <Button onClick={openCreate} size="sm">
           <Plus size={16} /> Add Customer
         </Button>
@@ -179,41 +188,41 @@ export default function CustomersPage() {
       </div>
 
       {loading ? (
-        <p className="text-gray-500">Loading...</p>
+        <p className="text-warm">Loading...</p>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-surface rounded-xl border border-wire overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="bg-panel border-b border-wire">
               <tr>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Name</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600 hidden sm:table-cell">Contact</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600 hidden md:table-cell">Billing</th>
+                <th className="text-left px-4 py-3 text-[10px] font-semibold text-dim uppercase tracking-widest">Name</th>
+                <th className="text-left px-4 py-3 text-[10px] font-semibold text-dim uppercase tracking-widest hidden sm:table-cell">Contact</th>
+                <th className="text-left px-4 py-3 text-[10px] font-semibold text-dim uppercase tracking-widest hidden md:table-cell">Billing</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-wire">
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={4} className="px-4 py-8 text-center text-dim">
                     {search ? 'No customers match your search.' : 'No customers yet.'}
                   </td>
                 </tr>
               )}
               {filtered.map((c) => (
-                <tr key={c.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-900">{c.name}</td>
-                  <td className="px-4 py-3 text-gray-500 hidden sm:table-cell">{c.contact_info ?? '—'}</td>
+                <tr key={c.id} className="hover:bg-panel transition-colors">
+                  <td className="px-4 py-3 font-medium text-parchment">{c.name}</td>
+                  <td className="px-4 py-3 text-warm hidden sm:table-cell">{c.contact_info ?? '—'}</td>
                   <td className="px-4 py-3 hidden md:table-cell">
                     {c.billing_type && (
-                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${c.billing_type === 'percent' ? 'bg-purple-100 text-purple-700' : c.billing_type === 'formula' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${billingBadge(c.billing_type)}`}>
                         {c.billing_type}
                       </span>
                     )}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2 justify-end">
-                      <button onClick={() => openEdit(c)} className="text-gray-400 hover:text-blue-600" aria-label="Edit"><Pencil size={15} /></button>
-                      <button onClick={() => handleDelete(c)} className="text-gray-400 hover:text-red-600" aria-label="Delete"><Trash2 size={15} /></button>
+                      <button onClick={() => openEdit(c)} className="text-dim hover:text-gold transition-colors" aria-label="Edit"><Pencil size={15} /></button>
+                      <button onClick={() => handleDelete(c)} className="text-dim hover:text-danger transition-colors" aria-label="Delete"><Trash2 size={15} /></button>
                     </div>
                   </td>
                 </tr>
@@ -226,18 +235,18 @@ export default function CustomersPage() {
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editing ? 'Edit Customer' : 'New Customer'}>
         <div className="space-y-4">
           <Input label="Name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. John Smith" />
-          <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
-            <input type="checkbox" checked={form.google_review_bonus} onChange={(e) => setForm((f) => ({ ...f, google_review_bonus: e.target.checked }))} className="rounded" />
+          <label className="flex items-center gap-2 text-sm font-medium text-warm cursor-pointer">
+            <input type="checkbox" checked={form.google_review_bonus} onChange={(e) => setForm((f) => ({ ...f, google_review_bonus: e.target.checked }))} className={checkboxCls} />
             Google Review Bonus eligible
           </label>
 
-          <div className="border-t border-gray-200 pt-3">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Contact</p>
+          <div className="border-t border-wire pt-3">
+            <p className="text-xs font-semibold text-dim uppercase tracking-wide mb-3">Contact</p>
             <Input label="Phone *" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="0412 345 678" />
           </div>
 
           <div>
-            <p className="text-xs font-medium text-gray-500 mb-2">Secondary Contact <span className="font-normal text-gray-400">(optional)</span></p>
+            <p className="text-xs font-medium text-dim mb-2">Secondary Contact <span className="font-normal text-dim/70">(optional)</span></p>
             <div className="grid grid-cols-2 gap-2">
               <Input label="Name" value={form.secondary_contact_name} onChange={(e) => setForm((f) => ({ ...f, secondary_contact_name: e.target.value }))} placeholder="e.g. Jack, husband" />
               <Input label="Phone" value={form.secondary_contact_phone} onChange={(e) => setForm((f) => ({ ...f, secondary_contact_phone: e.target.value }))} placeholder="0412 345 679" />
@@ -246,17 +255,27 @@ export default function CustomersPage() {
 
           <Input label="Contact info (email / other)" value={form.contact_info} onChange={(e) => setForm((f) => ({ ...f, contact_info: e.target.value }))} placeholder="john@example.com" />
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700">Default addresses (one per line)</label>
-            <textarea rows={2} value={form.default_addresses} onChange={(e) => setForm((f) => ({ ...f, default_addresses: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="123 Main St, Sydney NSW 2000" />
+            <label className="text-xs font-semibold text-dim uppercase tracking-wide">Default addresses (one per line)</label>
+            <textarea
+              rows={2}
+              value={form.default_addresses}
+              onChange={(e) => setForm((f) => ({ ...f, default_addresses: e.target.value }))}
+              className="w-full px-3 py-2 text-sm border border-wire rounded-lg bg-panel text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
+              placeholder="123 Main St, Sydney NSW 2000"
+            />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700">Notes</label>
-            <textarea rows={2} value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <label className="text-xs font-semibold text-dim uppercase tracking-wide">Notes</label>
+            <textarea
+              rows={2}
+              value={form.notes}
+              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+              className="w-full px-3 py-2 text-sm border border-wire rounded-lg bg-panel text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
+            />
           </div>
 
-          {/* ── Billing config ──────────────────────────────────────────── */}
-          <div className="border-t border-gray-200 pt-4">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Billing</p>
+          <div className="border-t border-wire pt-4">
+            <p className="text-xs font-semibold text-dim uppercase tracking-wide mb-3">Billing</p>
 
             <Select label="Billing Type" options={billingOptions} value={billing.billing_type} onChange={(e) => setBillingField('billing_type', e.target.value as BillingType)} />
 
@@ -268,21 +287,21 @@ export default function CustomersPage() {
 
             {billing.billing_type === 'ratecard' && (
               <div className="mt-3 space-y-3">
-                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
-                  <input type="checkbox" checked={billing.gst} onChange={(e) => setBillingField('gst', e.target.checked)} className="rounded" />
+                <label className="flex items-center gap-2 text-sm font-medium text-warm cursor-pointer">
+                  <input type="checkbox" checked={billing.gst} onChange={(e) => setBillingField('gst', e.target.checked)} className={checkboxCls} />
                   Include GST (10%)
                 </label>
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-sm font-medium text-gray-700">Rates</label>
-                    <button type="button" onClick={() => setBillingField('rateEntries', [...billing.rateEntries, ['', '']])} className="text-xs text-blue-600 hover:text-blue-700 font-medium">+ Add rate</button>
+                    <label className="text-xs font-semibold text-dim uppercase tracking-wide">Rates</label>
+                    <button type="button" onClick={() => setBillingField('rateEntries', [...billing.rateEntries, ['', '']])} className="text-xs text-gold hover:text-gold-bright font-medium transition-colors">+ Add rate</button>
                   </div>
                   <div className="space-y-1.5">
                     {billing.rateEntries.map(([key, val], i) => (
                       <div key={i} className="flex gap-2 items-center">
-                        <input type="text" value={key} onChange={(e) => updateRateEntry(i, 0, e.target.value)} placeholder="e.g. 3 Men + Truck" className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                        <input type="number" value={val} onChange={(e) => updateRateEntry(i, 1, e.target.value)} placeholder="0.00" className="w-24 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                        <button type="button" onClick={() => setBillingField('rateEntries', billing.rateEntries.filter((_, j) => j !== i))} className="text-gray-300 hover:text-red-500 shrink-0" aria-label="Remove"><X size={15} /></button>
+                        <input type="text" value={key} onChange={(e) => updateRateEntry(i, 0, e.target.value)} placeholder="e.g. 3 Men + Truck" className={inlineInput} />
+                        <input type="number" value={val} onChange={(e) => updateRateEntry(i, 1, e.target.value)} placeholder="0.00" className="w-24 px-3 py-1.5 text-sm border border-wire rounded-lg bg-panel text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring" />
+                        <button type="button" onClick={() => setBillingField('rateEntries', billing.rateEntries.filter((_, j) => j !== i))} className="text-dim hover:text-danger shrink-0 transition-colors" aria-label="Remove"><X size={15} /></button>
                       </div>
                     ))}
                   </div>
@@ -294,19 +313,19 @@ export default function CustomersPage() {
             {billing.billing_type === 'formula' && (
               <div className="mt-3 space-y-3">
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Expression</label>
-                  <p className="text-xs text-gray-400">Built-ins: gst(1.10), cof, additionalHours, additionalRate, extraMenHours, breakHours</p>
-                  <textarea rows={2} value={billing.expression} onChange={(e) => setBillingField('expression', e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono" placeholder="(cof + additionalHours) * additionalRate * gst" />
+                  <label className="text-xs font-semibold text-dim uppercase tracking-wide">Expression</label>
+                  <p className="text-xs text-dim">Built-ins: gst(1.10), cof, additionalHours, additionalRate, extraMenHours, breakHours</p>
+                  <textarea rows={2} value={billing.expression} onChange={(e) => setBillingField('expression', e.target.value)} className="w-full px-3 py-2 text-sm border border-wire rounded-lg bg-panel text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring font-mono" placeholder="(cof + additionalHours) * additionalRate * gst" />
                 </div>
                 <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-gray-700">Defaults (JSON)</label>
-                  <textarea rows={2} value={billing.defaults} onChange={(e) => setBillingField('defaults', e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono" placeholder='{"hourlyRate": 50}' />
+                  <label className="text-xs font-semibold text-dim uppercase tracking-wide">Defaults (JSON)</label>
+                  <textarea rows={2} value={billing.defaults} onChange={(e) => setBillingField('defaults', e.target.value)} className="w-full px-3 py-2 text-sm border border-wire rounded-lg bg-panel text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring font-mono" placeholder='{"hourlyRate": 50}' />
                 </div>
               </div>
             )}
           </div>
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && <p className="text-sm text-danger">{error}</p>}
           <div className="flex gap-2 pt-2">
             <Button onClick={handleSave} disabled={saving} className="flex-1">{saving ? 'Saving...' : 'Save'}</Button>
             <Button variant="secondary" onClick={() => setModalOpen(false)} className="flex-1">Cancel</Button>

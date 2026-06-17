@@ -11,15 +11,15 @@ import type { JobSource, JobStatus, Subcontractor, SubcontractorConfig } from '@
 import Button from '@/components/ui/Button'
 
 const STATUS_STYLE: Record<JobStatus, string> = {
-  draft: 'bg-gray-100 text-gray-600',
-  scheduled: 'bg-blue-100 text-blue-700',
-  confirmed: 'bg-indigo-100 text-indigo-700',
-  in_progress: 'bg-amber-100 text-amber-700',
-  completed: 'bg-green-100 text-green-700',
-  reviewed: 'bg-cyan-100 text-cyan-700',
-  invoiced: 'bg-purple-100 text-purple-700',
-  paid: 'bg-teal-100 text-teal-700',
-  cancelled: 'bg-red-100 text-red-600',
+  draft:       'bg-wire/50 text-warm',
+  scheduled:   'bg-blue-500/10 text-blue-300',
+  confirmed:   'bg-indigo-500/10 text-indigo-300',
+  in_progress: 'bg-amber-500/10 text-amber-300',
+  completed:   'bg-green-500/10 text-green-300',
+  reviewed:    'bg-cyan-500/10 text-cyan-300',
+  invoiced:    'bg-purple-500/10 text-purple-300',
+  paid:        'bg-teal-500/10 text-teal-300',
+  cancelled:   'bg-red-500/10 text-red-400',
 }
 
 interface JobRow {
@@ -73,8 +73,8 @@ function calcRevenue(job: JobRow): number | null {
 }
 
 function SourceBadge({ source }: { source: JobSource }) {
-  if (source === 'private') return <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-100 text-violet-700 leading-none">Private</span>
-  if (source === 'contract') return <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-100 text-teal-700 leading-none">Contract</span>
+  if (source === 'private') return <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gold/15 text-gold leading-none">Private</span>
+  if (source === 'contract') return <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-500/15 text-teal-300 leading-none">Contract</span>
   return null
 }
 
@@ -101,6 +101,8 @@ const STATUS_OPTIONS: { value: JobStatus | 'all'; label: string }[] = [
   { value: 'cancelled', label: 'Cancelled' },
 ]
 
+const filterInput = 'px-3 py-1.5 text-sm border border-wire rounded-lg bg-panel text-parchment placeholder:text-dim focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring'
+
 export default function JobsPage() {
   const supabase = createClient()
   const [jobs, setJobs] = useState<JobRow[]>([])
@@ -113,7 +115,6 @@ export default function JobsPage() {
 
   useEffect(() => {
     async function load() {
-      // Step 1: load jobs — no fleet join so this query can never be broken by missing migrations
       const { data, error } = await supabase
         .from('jobs')
         .select(`
@@ -133,7 +134,6 @@ export default function JobsPage() {
 
       const baseJobs = (data ?? []) as unknown as Omit<JobRow, 'job_trucks'>[]
 
-      // Step 2: load truck plates separately — silently skip if table doesn't exist yet
       const truckMap = new Map<string, JobRow['job_trucks']>()
       if (baseJobs.length > 0) {
         try {
@@ -146,9 +146,7 @@ export default function JobsPage() {
             list.push({ fleet: row.fleet })
             truckMap.set(row.job_id, list)
           }
-        } catch {
-          // fleet / job_trucks tables not yet migrated — trucks just won't show
-        }
+        } catch { /* fleet / job_trucks tables not yet migrated */ }
       }
 
       setJobs(baseJobs.map((j) => ({ ...j, job_trucks: truckMap.get(j.id) ?? [] })) as JobRow[])
@@ -175,7 +173,7 @@ export default function JobsPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Jobs</h1>
+        <h1 className="text-2xl font-display font-bold text-parchment">Jobs</h1>
         <Link href="/jobs/new">
           <Button size="sm">
             <Plus size={16} /> New Job
@@ -190,78 +188,58 @@ export default function JobsPage() {
           placeholder="Search job # or entity…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-48"
+          className={`${filterInput} w-48`}
         />
-        <select
-          value={sourceFilter}
-          onChange={(e) => setSourceFilter(e.target.value as JobSource | 'all')}
-          className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
+        <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value as JobSource | 'all')} className={filterInput}>
           {SOURCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as JobStatus | 'all')}
-          className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as JobStatus | 'all')} className={filterInput}>
           {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
-        <input
-          type="date"
-          value={dateFrom}
-          onChange={(e) => setDateFrom(e.target.value)}
-          className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          title="Date from"
-        />
-        <input
-          type="date"
-          value={dateTo}
-          onChange={(e) => setDateTo(e.target.value)}
-          className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          title="Date to"
-        />
+        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={filterInput} title="Date from" />
+        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={filterInput} title="Date to" />
       </div>
 
       {loading ? (
-        <p className="text-gray-500">Loading…</p>
+        <p className="text-warm">Loading…</p>
       ) : filtered.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+        <div className="bg-surface rounded-xl border border-wire p-12 text-center">
           {jobs.length === 0 ? (
             <>
-              <p className="text-gray-400 mb-4">No jobs yet.</p>
+              <p className="text-dim mb-4">No jobs yet.</p>
               <Link href="/jobs/new"><Button><Plus size={16} /> Create your first job</Button></Link>
             </>
           ) : (
-            <p className="text-gray-400">No jobs match your filters.</p>
+            <p className="text-dim">No jobs match your filters.</p>
           )}
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-surface rounded-xl border border-wire overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="bg-panel border-b border-wire">
               <tr>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Job #</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Date</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600 hidden sm:table-cell">Entity</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-600 hidden md:table-cell">Revenue</th>
+                <th className="text-left px-4 py-3 text-[10px] font-semibold text-dim uppercase tracking-widest">Job #</th>
+                <th className="text-left px-4 py-3 text-[10px] font-semibold text-dim uppercase tracking-widest">Date</th>
+                <th className="text-left px-4 py-3 text-[10px] font-semibold text-dim uppercase tracking-widest hidden sm:table-cell">Entity</th>
+                <th className="text-left px-4 py-3 text-[10px] font-semibold text-dim uppercase tracking-widest">Status</th>
+                <th className="text-right px-4 py-3 text-[10px] font-semibold text-dim uppercase tracking-widest hidden md:table-cell">Revenue</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-wire">
               {filtered.map((job) => {
                 const rev = calcRevenue(job)
                 return (
-                  <tr key={job.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-mono font-medium text-gray-900">{job.job_number}</td>
-                    <td className="px-4 py-3 text-gray-700">{job.date}</td>
+                  <tr key={job.id} className="hover:bg-panel transition-colors">
+                    <td className="px-4 py-3 font-mono font-semibold text-parchment">{job.job_number}</td>
+                    <td className="px-4 py-3 text-warm">{job.date}</td>
                     <td className="px-4 py-3 hidden sm:table-cell">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-gray-700">{entityLabel(job)}</span>
+                        <span className="text-parchment">{entityLabel(job)}</span>
                         <SourceBadge source={job.source} />
                       </div>
                       {(job.job_trucks ?? []).length > 0 && (
-                        <p className="text-xs font-mono text-gray-400 mt-0.5">
+                        <p className="text-xs font-mono text-dim mt-0.5">
                           {(job.job_trucks ?? []).map((jt) => jt.fleet?.registration ?? jt.fleet?.name).filter(Boolean).join(' + ')}
                         </p>
                       )}
@@ -273,12 +251,12 @@ export default function JobsPage() {
                     </td>
                     <td className="px-4 py-3 text-right hidden md:table-cell">
                       {rev !== null
-                        ? <span className="font-medium text-gray-800">{fmtAUD(rev)}</span>
-                        : <span className="text-gray-300">—</span>
+                        ? <span className="font-mono font-semibold text-gold">{fmtAUD(rev)}</span>
+                        : <span className="text-dim">—</span>
                       }
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <Link href={`/jobs/${job.id}/edit`} className="text-gray-400 hover:text-blue-600">
+                      <Link href={`/jobs/${job.id}/edit`} className="text-dim hover:text-gold transition-colors">
                         <Pencil size={15} />
                       </Link>
                     </td>

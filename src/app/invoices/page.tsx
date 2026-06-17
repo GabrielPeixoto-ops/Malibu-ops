@@ -3,12 +3,9 @@
 export const dynamic = 'force-dynamic'
 
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { calculateJobRevenue, calculateClientRevenue } from '@/lib/billing'
 import type { Employee, JobSource, JobStatus, Subcontractor, SubcontractorConfig } from '@/types/database'
-
-// ─── Shared types ─────────────────────────────────────────────────────────────
 
 type Tab = 'employees' | 'subcontractors' | 'contracts' | 'clients'
 
@@ -39,8 +36,6 @@ interface InvoiceJob {
   job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; start_time: string | null; end_time: string | null }>
 }
 
-// ─── Formatters ───────────────────────────────────────────────────────────────
-
 const fmtAUD = (n: number) =>
   n.toLocaleString('en-AU', { style: 'currency', currency: 'AUD', minimumFractionDigits: 0, maximumFractionDigits: 0 })
 
@@ -49,8 +44,6 @@ const fmtHours = (n: number) => (n % 1 === 0 ? `${n}h` : `${n.toFixed(2)}h`)
 function fmtMoney(n: number) {
   return n.toLocaleString('en-AU', { style: 'currency', currency: 'AUD', minimumFractionDigits: 2 })
 }
-
-// ─── Revenue helpers ──────────────────────────────────────────────────────────
 
 function calcRevenue(job: InvoiceJob): number | null {
   if (job.source === 'subcontract') {
@@ -74,28 +67,21 @@ function entityLabel(job: InvoiceJob): string {
   return job.subcontractor?.name ?? '—'
 }
 
-// ─── Date helpers ──────────────────────────────────────────────────────────────
-
-function today(): string {
-  return new Date().toISOString().split('T')[0]
-}
-
+function today(): string { return new Date().toISOString().split('T')[0] }
 function monthStart(): string {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
 }
 
-// ─── Status style ─────────────────────────────────────────────────────────────
-
 const STATUS_STYLE: Partial<Record<JobStatus, string>> = {
-  reviewed: 'bg-cyan-100 text-cyan-700',
-  invoiced: 'bg-purple-100 text-purple-700',
-  paid: 'bg-teal-100 text-teal-700',
+  reviewed: 'bg-cyan-500/10 text-cyan-300',
+  invoiced: 'bg-purple-500/10 text-purple-300',
+  paid:     'bg-teal-500/10 text-teal-300',
 }
 
 const MIN_CALL = 2
 
-// ─── Page ────────────────────────────────────────────────────────────────────
+const filterInput = 'px-3 py-1.5 text-sm border border-wire rounded-lg bg-panel text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring'
 
 export default function InvoicesPage() {
   const supabase = createClient()
@@ -147,7 +133,6 @@ export default function InvoicesPage() {
     return jobs.filter((j) => j.status === statusFilter)
   }, [jobs, statusFilter])
 
-  // ── Employees tab data ────────────────────────────────────────────────────
   const employeeData = useMemo(() => {
     return employees.map((emp) => {
       const entries: Array<{
@@ -176,7 +161,6 @@ export default function InvoicesPage() {
     }).filter((d) => d.entries.length > 0)
   }, [employees, filtered])
 
-  // ── Subcontractors tab data ───────────────────────────────────────────────
   const subcontractorData = useMemo(() => {
     const subJobs = filtered.filter((j) => j.source === 'subcontract' && j.subcontractor)
     const byId = new Map<string, { name: string; jobs: Array<{ job: InvoiceJob; revenue: number | null }> }>()
@@ -186,16 +170,10 @@ export default function InvoicesPage() {
       byId.get(sub.id)!.jobs.push({ job, revenue: calcRevenue(job) })
     }
     return [...byId.entries()]
-      .map(([id, { name, jobs: sj }]) => ({
-        id,
-        name,
-        jobs: sj,
-        totalRevenue: sj.reduce((s, { revenue }) => s + (revenue ?? 0), 0),
-      }))
+      .map(([id, { name, jobs: sj }]) => ({ id, name, jobs: sj, totalRevenue: sj.reduce((s, { revenue }) => s + (revenue ?? 0), 0) }))
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [filtered])
 
-  // ── Contracts tab data ───────────────────────────────────────────────────
   const contractData = useMemo(() => {
     const contractJobs = filtered.filter((j) => j.source === 'contract' && j.contract)
     const byId = new Map<string, { name: string; jobs: Array<{ job: InvoiceJob; revenue: number | null }> }>()
@@ -205,16 +183,10 @@ export default function InvoicesPage() {
       byId.get(c.id)!.jobs.push({ job, revenue: calcRevenue(job) })
     }
     return [...byId.entries()]
-      .map(([id, { name, jobs: cj }]) => ({
-        id,
-        name,
-        jobs: cj,
-        totalRevenue: cj.reduce((s, { revenue }) => s + (revenue ?? 0), 0),
-      }))
+      .map(([id, { name, jobs: cj }]) => ({ id, name, jobs: cj, totalRevenue: cj.reduce((s, { revenue }) => s + (revenue ?? 0), 0) }))
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [filtered])
 
-  // ── Clients tab data ──────────────────────────────────────────────────────
   const clientData = useMemo(() => {
     const clientJobs = filtered.filter((j) => j.source !== 'subcontract')
     const byKey = new Map<string, { label: string; jobs: Array<{ job: InvoiceJob; revenue: number | null }> }>()
@@ -227,12 +199,7 @@ export default function InvoicesPage() {
       byKey.get(key)!.jobs.push({ job, revenue: calcRevenue(job) })
     }
     return [...byKey.entries()]
-      .map(([key, { label, jobs: cj }]) => ({
-        key,
-        label,
-        jobs: cj,
-        totalRevenue: cj.reduce((s, { revenue }) => s + (revenue ?? 0), 0),
-      }))
+      .map(([key, { label, jobs: cj }]) => ({ key, label, jobs: cj, totalRevenue: cj.reduce((s, { revenue }) => s + (revenue ?? 0), 0) }))
       .sort((a, b) => a.label.localeCompare(b.label))
   }, [filtered])
 
@@ -254,50 +221,32 @@ export default function InvoicesPage() {
     { value: 'paid', label: 'Paid' },
   ]
 
+  const thCell = 'text-left px-4 py-2 text-[10px] font-semibold text-dim uppercase tracking-widest'
+  const groupHeader = 'flex items-center justify-between px-4 py-3 bg-panel border-b border-wire'
+  const totalBar = 'bg-gold/10 border border-gold-ring rounded-xl px-4 py-3 flex items-center justify-between'
+
   return (
     <div className="max-w-4xl">
       {/* Header */}
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <h1 className="text-2xl font-bold text-gray-900">Invoices</h1>
+        <h1 className="text-2xl font-display font-bold text-parchment">Invoices</h1>
         <div className="flex items-center gap-2 flex-wrap">
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          <span className="text-gray-400 text-sm">–</span>
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={filterInput} />
+          <span className="text-dim text-sm">–</span>
+          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={filterInput} />
           {tab !== 'employees' && (
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as JobStatus | 'all')}
-              className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as JobStatus | 'all')} className={filterInput}>
               {ALL_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
           )}
           {tab === 'subcontractors' && subcontractorData.length > 0 && (
-            <select
-              value={subFilter}
-              onChange={(e) => setSubFilter(e.target.value)}
-              className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
+            <select value={subFilter} onChange={(e) => setSubFilter(e.target.value)} className={filterInput}>
               <option value="all">All Subcontractors</option>
               {subcontractorData.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           )}
           {tab === 'contracts' && contractData.length > 0 && (
-            <select
-              value={contractFilter}
-              onChange={(e) => setContractFilter(e.target.value)}
-              className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
+            <select value={contractFilter} onChange={(e) => setContractFilter(e.target.value)} className={filterInput}>
               <option value="all">All Contracts</option>
               {contractData.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
@@ -306,13 +255,13 @@ export default function InvoicesPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-5 border-b border-gray-200">
+      <div className="flex gap-0 mb-5 border-b border-wire">
         {tabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              tab === t.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+              tab === t.id ? 'border-gold text-gold' : 'border-transparent text-dim hover:text-warm'
             }`}
           >
             {t.label}
@@ -321,10 +270,10 @@ export default function InvoicesPage() {
       </div>
 
       {loading ? (
-        <p className="text-gray-400 text-sm py-12 text-center">Loading…</p>
+        <p className="text-warm text-sm py-12 text-center">Loading…</p>
       ) : (
         <>
-          {/* ── Employees tab ─────────────────────────────────────────────── */}
+          {/* ── Employees ─────────────────────────────────────────────── */}
           {tab === 'employees' && (
             <div className="space-y-4">
               <input
@@ -332,243 +281,243 @@ export default function InvoicesPage() {
                 placeholder="Search employee…"
                 value={empSearch}
                 onChange={(e) => setEmpSearch(e.target.value)}
-                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-52"
+                className={`${filterInput} w-52`}
               />
               {employeeData.filter((d) => d.emp.name.toLowerCase().includes(empSearch.toLowerCase())).length === 0 && (
-                <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400">No job data for this period.</div>
+                <div className="bg-surface rounded-xl border border-wire p-12 text-center text-dim">No job data for this period.</div>
               )}
               {employeeData.filter((d) => d.emp.name.toLowerCase().includes(empSearch.toLowerCase())).map(({ emp, entries, totalPaidHours, totalPay }) => (
-                <div key={emp.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
+                <div key={emp.id} className="bg-surface rounded-xl border border-wire overflow-hidden">
+                  <div className={groupHeader}>
                     <div>
-                      <span className="font-semibold text-gray-900">{emp.name}</span>
-                      <span className="ml-2 text-xs text-gray-400">${emp.hourly_rate}/hr</span>
+                      <span className="font-semibold text-parchment">{emp.name}</span>
+                      <span className="ml-2 text-xs text-dim font-mono">${emp.hourly_rate}/hr</span>
                     </div>
                     <div className="text-right">
-                      <div className="text-sm font-bold text-gray-800">{fmtMoney(totalPay)}</div>
-                      <div className="text-xs text-gray-400">{fmtHours(totalPaidHours)}</div>
+                      <div className="text-sm font-mono font-bold text-gold">{fmtMoney(totalPay)}</div>
+                      <div className="text-xs text-dim font-mono">{fmtHours(totalPaidHours)}</div>
                     </div>
                   </div>
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-gray-100">
-                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-400">Date</th>
-                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-400">Job</th>
-                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-400 hidden sm:table-cell">Entity</th>
-                        <th className="text-right px-4 py-2 text-xs font-medium text-gray-400">Paid hrs</th>
-                        <th className="text-right px-4 py-2 text-xs font-medium text-gray-400">Amount</th>
+                      <tr className="border-b border-wire">
+                        <th className={thCell}>Date</th>
+                        <th className={thCell}>Job</th>
+                        <th className={`${thCell} hidden sm:table-cell`}>Entity</th>
+                        <th className={`${thCell} text-right`}>Paid hrs</th>
+                        <th className={`${thCell} text-right`}>Amount</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-50">
+                    <tbody className="divide-y divide-wire">
                       {entries.map(({ job, paidHours, pay, googleReviewBonus }, i) => (
-                        <tr key={`${job.id}-${i}`} className="hover:bg-gray-50/50">
-                          <td className="px-4 py-2 text-gray-700 whitespace-nowrap">{job.date}</td>
+                        <tr key={`${job.id}-${i}`} className="hover:bg-panel transition-colors">
+                          <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
                           <td className="px-4 py-2">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-mono text-gray-900">#{job.job_number}</span>
+                              <span className="font-mono text-parchment">#{job.job_number}</span>
                               {STATUS_STYLE[job.status] && (
                                 <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${STATUS_STYLE[job.status]}`}>{job.status}</span>
                               )}
-                              {googleReviewBonus && <span className="text-xs px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">★ +0.5h</span>}
+                              {googleReviewBonus && <span className="text-xs px-1.5 py-0.5 rounded-full bg-gold/15 text-gold font-medium">★ +0.5h</span>}
                             </div>
                           </td>
-                          <td className="px-4 py-2 text-gray-500 text-xs hidden sm:table-cell">{entityLabel(job)}</td>
-                          <td className="px-4 py-2 text-right font-medium text-gray-800">{fmtHours(paidHours)}</td>
-                          <td className="px-4 py-2 text-right font-semibold text-gray-900">{fmtMoney(pay)}</td>
+                          <td className="px-4 py-2 text-dim text-xs hidden sm:table-cell">{entityLabel(job)}</td>
+                          <td className="px-4 py-2 text-right font-mono font-medium text-parchment">{fmtHours(paidHours)}</td>
+                          <td className="px-4 py-2 text-right font-mono font-semibold text-gold">{fmtMoney(pay)}</td>
                         </tr>
                       ))}
                     </tbody>
                     <tfoot>
-                      <tr className="border-t border-gray-200 bg-gray-50">
-                        <td colSpan={3} className="px-4 py-2 text-xs font-semibold text-gray-500 hidden sm:table-cell">Total</td>
-                        <td colSpan={3} className="px-4 py-2 sm:hidden text-xs font-semibold text-gray-500">Total</td>
-                        <td className="px-4 py-2 text-right text-xs font-bold text-gray-800">{fmtHours(totalPaidHours)}</td>
-                        <td className="px-4 py-2 text-right text-xs font-bold text-gray-900">{fmtMoney(totalPay)}</td>
+                      <tr className="border-t border-wire bg-panel">
+                        <td colSpan={3} className="px-4 py-2 text-xs font-semibold text-dim hidden sm:table-cell">Total</td>
+                        <td colSpan={3} className="px-4 py-2 sm:hidden text-xs font-semibold text-dim">Total</td>
+                        <td className="px-4 py-2 text-right text-xs font-mono font-bold text-parchment">{fmtHours(totalPaidHours)}</td>
+                        <td className="px-4 py-2 text-right text-xs font-mono font-bold text-gold">{fmtMoney(totalPay)}</td>
                       </tr>
                     </tfoot>
                   </table>
                 </div>
               ))}
               {employeeData.length > 0 && (
-                <div className="bg-gray-900 text-white rounded-xl px-4 py-3 flex items-center justify-between">
-                  <span className="text-sm font-semibold">Total payroll</span>
-                  <span className="text-lg font-bold">{fmtMoney(employeeData.reduce((s, d) => s + d.totalPay, 0))}</span>
+                <div className={totalBar}>
+                  <span className="text-sm font-display font-semibold text-gold">Total payroll</span>
+                  <span className="text-lg font-mono font-bold text-gold">{fmtMoney(employeeData.reduce((s, d) => s + d.totalPay, 0))}</span>
                 </div>
               )}
             </div>
           )}
 
-          {/* ── Subcontractors tab ────────────────────────────────────────── */}
+          {/* ── Subcontractors ────────────────────────────────────────── */}
           {tab === 'subcontractors' && (
             <div className="space-y-4">
               {subcontractorData.length === 0 && (
-                <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400">No subcontract jobs for this period.</div>
+                <div className="bg-surface rounded-xl border border-wire p-12 text-center text-dim">No subcontract jobs for this period.</div>
               )}
               {subcontractorData.filter((s) => subFilter === 'all' || s.id === subFilter).map(({ id, name, jobs: sj, totalRevenue }) => (
-                <div key={id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
-                    <span className="font-semibold text-gray-900">{name}</span>
+                <div key={id} className="bg-surface rounded-xl border border-wire overflow-hidden">
+                  <div className={groupHeader}>
+                    <span className="font-semibold text-parchment">{name}</span>
                     <div className="text-right">
-                      <div className="text-sm font-bold text-gray-800">{fmtAUD(totalRevenue)}</div>
-                      <div className="text-xs text-gray-400">{sj.length} job{sj.length !== 1 ? 's' : ''}</div>
+                      <div className="text-sm font-mono font-bold text-gold">{fmtAUD(totalRevenue)}</div>
+                      <div className="text-xs text-dim">{sj.length} job{sj.length !== 1 ? 's' : ''}</div>
                     </div>
                   </div>
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-gray-100">
-                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-400">Date</th>
-                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-400">Job #</th>
-                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-400">Status</th>
-                        <th className="text-right px-4 py-2 text-xs font-medium text-gray-400">Revenue</th>
+                      <tr className="border-b border-wire">
+                        <th className={thCell}>Date</th>
+                        <th className={thCell}>Job #</th>
+                        <th className={thCell}>Status</th>
+                        <th className={`${thCell} text-right`}>Revenue</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-50">
+                    <tbody className="divide-y divide-wire">
                       {sj.map(({ job, revenue }) => (
-                        <tr key={job.id} className="hover:bg-gray-50/50">
-                          <td className="px-4 py-2 text-gray-700 whitespace-nowrap">{job.date}</td>
-                          <td className="px-4 py-2 font-mono text-gray-900">#{job.job_number}</td>
+                        <tr key={job.id} className="hover:bg-panel transition-colors">
+                          <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
+                          <td className="px-4 py-2 font-mono text-parchment">#{job.job_number}</td>
                           <td className="px-4 py-2">
-                            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[job.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[job.status] ?? 'bg-wire/50 text-warm'}`}>
                               {job.status.replace('_', ' ')}
                             </span>
                           </td>
-                          <td className="px-4 py-2 text-right font-medium text-gray-800">
-                            {revenue !== null ? fmtAUD(revenue) : <span className="text-gray-300">—</span>}
+                          <td className="px-4 py-2 text-right font-mono font-semibold text-gold">
+                            {revenue !== null ? fmtAUD(revenue) : <span className="text-dim">—</span>}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                     <tfoot>
-                      <tr className="border-t border-gray-200 bg-gray-50">
-                        <td colSpan={3} className="px-4 py-2 text-xs font-semibold text-gray-500">Total</td>
-                        <td className="px-4 py-2 text-right text-xs font-bold text-gray-900">{fmtAUD(totalRevenue)}</td>
+                      <tr className="border-t border-wire bg-panel">
+                        <td colSpan={3} className="px-4 py-2 text-xs font-semibold text-dim">Total</td>
+                        <td className="px-4 py-2 text-right text-xs font-mono font-bold text-gold">{fmtAUD(totalRevenue)}</td>
                       </tr>
                     </tfoot>
                   </table>
                 </div>
               ))}
               {subcontractorData.length > 0 && (
-                <div className="bg-gray-900 text-white rounded-xl px-4 py-3 flex items-center justify-between">
-                  <span className="text-sm font-semibold">Total revenue</span>
-                  <span className="text-lg font-bold">{fmtAUD(subcontractorData.filter((s) => subFilter === 'all' || s.id === subFilter).reduce((s, d) => s + d.totalRevenue, 0))}</span>
+                <div className={totalBar}>
+                  <span className="text-sm font-display font-semibold text-gold">Total revenue</span>
+                  <span className="text-lg font-mono font-bold text-gold">{fmtAUD(subcontractorData.filter((s) => subFilter === 'all' || s.id === subFilter).reduce((s, d) => s + d.totalRevenue, 0))}</span>
                 </div>
               )}
             </div>
           )}
 
-          {/* ── Contracts tab ────────────────────────────────────────────── */}
+          {/* ── Contracts ─────────────────────────────────────────────── */}
           {tab === 'contracts' && (
             <div className="space-y-4">
               {contractData.length === 0 && (
-                <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400">No contract jobs for this period.</div>
+                <div className="bg-surface rounded-xl border border-wire p-12 text-center text-dim">No contract jobs for this period.</div>
               )}
               {contractData.filter((c) => contractFilter === 'all' || c.id === contractFilter).map(({ id, name, jobs: cj, totalRevenue }) => (
-                <div key={id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
-                    <span className="font-semibold text-gray-900">{name}</span>
+                <div key={id} className="bg-surface rounded-xl border border-wire overflow-hidden">
+                  <div className={groupHeader}>
+                    <span className="font-semibold text-parchment">{name}</span>
                     <div className="text-right">
-                      <div className="text-sm font-bold text-gray-800">{fmtAUD(totalRevenue)}</div>
-                      <div className="text-xs text-gray-400">{cj.length} job{cj.length !== 1 ? 's' : ''}</div>
+                      <div className="text-sm font-mono font-bold text-gold">{fmtAUD(totalRevenue)}</div>
+                      <div className="text-xs text-dim">{cj.length} job{cj.length !== 1 ? 's' : ''}</div>
                     </div>
                   </div>
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-gray-100">
-                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-400">Date</th>
-                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-400">Job #</th>
-                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-400 hidden sm:table-cell">Client</th>
-                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-400">Status</th>
-                        <th className="text-right px-4 py-2 text-xs font-medium text-gray-400">Revenue</th>
+                      <tr className="border-b border-wire">
+                        <th className={thCell}>Date</th>
+                        <th className={thCell}>Job #</th>
+                        <th className={`${thCell} hidden sm:table-cell`}>Client</th>
+                        <th className={thCell}>Status</th>
+                        <th className={`${thCell} text-right`}>Revenue</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-50">
+                    <tbody className="divide-y divide-wire">
                       {cj.map(({ job, revenue }) => (
-                        <tr key={job.id} className="hover:bg-gray-50/50">
-                          <td className="px-4 py-2 text-gray-700 whitespace-nowrap">{job.date}</td>
-                          <td className="px-4 py-2 font-mono text-gray-900">#{job.job_number}</td>
-                          <td className="px-4 py-2 text-gray-500 text-xs hidden sm:table-cell">{job.contract_client?.name ?? '—'}</td>
+                        <tr key={job.id} className="hover:bg-panel transition-colors">
+                          <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
+                          <td className="px-4 py-2 font-mono text-parchment">#{job.job_number}</td>
+                          <td className="px-4 py-2 text-dim text-xs hidden sm:table-cell">{job.contract_client?.name ?? '—'}</td>
                           <td className="px-4 py-2">
-                            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[job.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[job.status] ?? 'bg-wire/50 text-warm'}`}>
                               {job.status.replace('_', ' ')}
                             </span>
                           </td>
-                          <td className="px-4 py-2 text-right font-medium text-gray-800">
-                            {revenue !== null ? fmtAUD(revenue) : <span className="text-gray-300">—</span>}
+                          <td className="px-4 py-2 text-right font-mono font-semibold text-gold">
+                            {revenue !== null ? fmtAUD(revenue) : <span className="text-dim">—</span>}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                     <tfoot>
-                      <tr className="border-t border-gray-200 bg-gray-50">
-                        <td colSpan={4} className="px-4 py-2 text-xs font-semibold text-gray-500">Total</td>
-                        <td className="px-4 py-2 text-right text-xs font-bold text-gray-900">{fmtAUD(totalRevenue)}</td>
+                      <tr className="border-t border-wire bg-panel">
+                        <td colSpan={4} className="px-4 py-2 text-xs font-semibold text-dim">Total</td>
+                        <td className="px-4 py-2 text-right text-xs font-mono font-bold text-gold">{fmtAUD(totalRevenue)}</td>
                       </tr>
                     </tfoot>
                   </table>
                 </div>
               ))}
               {contractData.length > 0 && (
-                <div className="bg-gray-900 text-white rounded-xl px-4 py-3 flex items-center justify-between">
-                  <span className="text-sm font-semibold">Total revenue</span>
-                  <span className="text-lg font-bold">{fmtAUD(contractData.filter((c) => contractFilter === 'all' || c.id === contractFilter).reduce((s, d) => s + d.totalRevenue, 0))}</span>
+                <div className={totalBar}>
+                  <span className="text-sm font-display font-semibold text-gold">Total revenue</span>
+                  <span className="text-lg font-mono font-bold text-gold">{fmtAUD(contractData.filter((c) => contractFilter === 'all' || c.id === contractFilter).reduce((s, d) => s + d.totalRevenue, 0))}</span>
                 </div>
               )}
             </div>
           )}
 
-          {/* ── Clients tab ───────────────────────────────────────────────── */}
+          {/* ── Clients ──────────────────────────────────────────────── */}
           {tab === 'clients' && (
             <div className="space-y-4">
               {clientData.length === 0 && (
-                <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400">No client jobs for this period.</div>
+                <div className="bg-surface rounded-xl border border-wire p-12 text-center text-dim">No client jobs for this period.</div>
               )}
               {clientData.map(({ key, label, jobs: cj, totalRevenue }) => (
-                <div key={key} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
-                    <span className="font-semibold text-gray-900">{label}</span>
+                <div key={key} className="bg-surface rounded-xl border border-wire overflow-hidden">
+                  <div className={groupHeader}>
+                    <span className="font-semibold text-parchment">{label}</span>
                     <div className="text-right">
-                      <div className="text-sm font-bold text-gray-800">{fmtAUD(totalRevenue)}</div>
-                      <div className="text-xs text-gray-400">{cj.length} job{cj.length !== 1 ? 's' : ''}</div>
+                      <div className="text-sm font-mono font-bold text-gold">{fmtAUD(totalRevenue)}</div>
+                      <div className="text-xs text-dim">{cj.length} job{cj.length !== 1 ? 's' : ''}</div>
                     </div>
                   </div>
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-gray-100">
-                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-400">Date</th>
-                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-400">Job #</th>
-                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-400">Status</th>
-                        <th className="text-right px-4 py-2 text-xs font-medium text-gray-400">Revenue</th>
+                      <tr className="border-b border-wire">
+                        <th className={thCell}>Date</th>
+                        <th className={thCell}>Job #</th>
+                        <th className={thCell}>Status</th>
+                        <th className={`${thCell} text-right`}>Revenue</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-50">
+                    <tbody className="divide-y divide-wire">
                       {cj.map(({ job, revenue }) => (
-                        <tr key={job.id} className="hover:bg-gray-50/50">
-                          <td className="px-4 py-2 text-gray-700 whitespace-nowrap">{job.date}</td>
-                          <td className="px-4 py-2 font-mono text-gray-900">#{job.job_number}</td>
+                        <tr key={job.id} className="hover:bg-panel transition-colors">
+                          <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
+                          <td className="px-4 py-2 font-mono text-parchment">#{job.job_number}</td>
                           <td className="px-4 py-2">
-                            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[job.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[job.status] ?? 'bg-wire/50 text-warm'}`}>
                               {job.status.replace('_', ' ')}
                             </span>
                           </td>
-                          <td className="px-4 py-2 text-right font-medium text-gray-800">
-                            {revenue !== null ? fmtAUD(revenue) : <span className="text-gray-300">—</span>}
+                          <td className="px-4 py-2 text-right font-mono font-semibold text-gold">
+                            {revenue !== null ? fmtAUD(revenue) : <span className="text-dim">—</span>}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                     <tfoot>
-                      <tr className="border-t border-gray-200 bg-gray-50">
-                        <td colSpan={3} className="px-4 py-2 text-xs font-semibold text-gray-500">Total</td>
-                        <td className="px-4 py-2 text-right text-xs font-bold text-gray-900">{fmtAUD(totalRevenue)}</td>
+                      <tr className="border-t border-wire bg-panel">
+                        <td colSpan={3} className="px-4 py-2 text-xs font-semibold text-dim">Total</td>
+                        <td className="px-4 py-2 text-right text-xs font-mono font-bold text-gold">{fmtAUD(totalRevenue)}</td>
                       </tr>
                     </tfoot>
                   </table>
                 </div>
               ))}
               {clientData.length > 0 && (
-                <div className="bg-gray-900 text-white rounded-xl px-4 py-3 flex items-center justify-between">
-                  <span className="text-sm font-semibold">Total revenue</span>
-                  <span className="text-lg font-bold">{fmtAUD(clientData.reduce((s, d) => s + d.totalRevenue, 0))}</span>
+                <div className={totalBar}>
+                  <span className="text-sm font-display font-semibold text-gold">Total revenue</span>
+                  <span className="text-lg font-mono font-bold text-gold">{fmtAUD(clientData.reduce((s, d) => s + d.totalRevenue, 0))}</span>
                 </div>
               )}
             </div>

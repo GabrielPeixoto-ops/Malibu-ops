@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Briefcase, Users, Truck, UserCircle, LayoutDashboard, X, Menu, Plus, DollarSign, Building2, FileText, Tag } from 'lucide-react'
 import { useState } from 'react'
+import MalibuLogo from '@/components/ui/MalibuLogo'
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -25,9 +26,11 @@ export default function Sidebar() {
   return (
     <>
       {/* Mobile top bar */}
-      <header className="lg:hidden flex items-center justify-between bg-gray-900 text-white px-4 py-3">
-        <span className="font-bold text-lg">Malibu Ops</span>
-        <button onClick={() => setOpen(true)} aria-label="Open menu">
+      <header className="lg:hidden flex items-center justify-between bg-surface border-b border-wire px-4 py-3">
+        <Link href="/" onClick={() => setOpen(false)} className="hover:opacity-80 transition-opacity">
+          <MalibuLogo size="sm" />
+        </Link>
+        <button onClick={() => setOpen(true)} aria-label="Open menu" className="text-warm hover:text-parchment transition-colors">
           <Menu size={24} />
         </button>
       </header>
@@ -35,39 +38,44 @@ export default function Sidebar() {
       {/* Overlay */}
       {open && (
         <div
-          className="fixed inset-0 bg-black/50 z-20 lg:hidden"
+          className="fixed inset-0 bg-black/70 z-20 lg:hidden"
           onClick={() => setOpen(false)}
         />
       )}
 
-      {/* Sidebar */}
+      {/* Sidebar panel */}
       <aside
         className={`
-          fixed inset-y-0 left-0 z-30 w-56 bg-gray-900 text-white flex flex-col
+          fixed inset-y-0 left-0 z-30 w-56 bg-surface border-r border-wire flex flex-col
           transform transition-transform duration-200
           ${open ? 'translate-x-0' : '-translate-x-full'}
           lg:translate-x-0 lg:static lg:flex
         `}
       >
-        <div className="flex items-center justify-between px-4 py-4 border-b border-gray-700">
-          <span className="font-bold text-lg">Malibu Ops</span>
-          <button onClick={() => setOpen(false)} className="lg:hidden" aria-label="Close menu">
-            <X size={20} />
+        {/* Logo header */}
+        <div className="flex items-center justify-between px-4 py-4 border-b border-wire">
+          <Link href="/" onClick={() => setOpen(false)} className="hover:opacity-80 transition-opacity cursor-pointer">
+            <MalibuLogo size="sm" />
+          </Link>
+          <button onClick={() => setOpen(false)} className="lg:hidden text-warm hover:text-parchment transition-colors" aria-label="Close menu">
+            <X size={18} />
           </button>
         </div>
 
-        <div className="px-3 pt-3 pb-2 border-b border-gray-700">
+        {/* New Job button */}
+        <div className="px-3 pt-3 pb-3 border-b border-wire">
           <Link
             href="/jobs/new"
             onClick={() => setOpen(false)}
-            className="flex items-center justify-center gap-2 w-full bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold py-2 px-3 rounded-lg transition-colors"
+            className="flex items-center justify-center gap-2 w-full bg-gold hover:bg-gold-bright text-void text-sm font-semibold py-2 px-3 rounded-lg transition-colors font-body focus:outline-none focus:ring-2 focus:ring-gold-ring focus:ring-offset-2 focus:ring-offset-surface"
           >
-            <Plus size={16} />
+            <Plus size={15} />
             New Job
           </Link>
         </div>
 
-        <nav className="flex-1 px-2 py-3 space-y-1">
+        {/* Nav */}
+        <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
           {navItems.map(({ href, label, icon: Icon }) => {
             const active = pathname === href || (href !== '/' && pathname.startsWith(href))
             return (
@@ -77,10 +85,14 @@ export default function Sidebar() {
                 onClick={() => setOpen(false)}
                 className={`
                   flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors
-                  ${active ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'}
+                  border-l-2 focus:outline-none focus-visible:ring-1 focus-visible:ring-gold
+                  ${active
+                    ? 'bg-gold/8 text-gold border-gold-ring'
+                    : 'text-warm hover:bg-panel hover:text-parchment border-transparent'
+                  }
                 `}
               >
-                <Icon size={18} />
+                <Icon size={16} className={active ? 'text-gold' : 'text-dim'} />
                 {label}
               </Link>
             )

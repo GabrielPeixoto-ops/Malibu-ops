@@ -103,22 +103,21 @@ interface CalendarJob {
   job_crew: CrewRow[]
   job_materials: MaterialRow[]
   job_trucks: Array<{ fleet: { name: string; registration: string | null } | null }>
-  // populated post-fetch
   subcontractor_rate_ph: number | null
   contract_rate_ph: number | null
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const STATUS_CARD: Record<JobStatus, { bg: string; text: string; dot: string }> = {
-  draft:       { bg: 'bg-gray-50 border-gray-200',     text: 'text-gray-600',   dot: 'bg-gray-400' },
-  scheduled:   { bg: 'bg-blue-50 border-blue-200',     text: 'text-blue-700',   dot: 'bg-blue-500' },
-  confirmed:   { bg: 'bg-indigo-50 border-indigo-200', text: 'text-indigo-700', dot: 'bg-indigo-500' },
-  in_progress: { bg: 'bg-amber-50 border-amber-200',   text: 'text-amber-700',  dot: 'bg-amber-500' },
-  completed:   { bg: 'bg-green-50 border-green-200',   text: 'text-green-700',  dot: 'bg-green-500' },
-  reviewed:    { bg: 'bg-cyan-50 border-cyan-200',     text: 'text-cyan-700',   dot: 'bg-cyan-500' },
-  invoiced:    { bg: 'bg-purple-50 border-purple-200', text: 'text-purple-700', dot: 'bg-purple-500' },
-  paid:        { bg: 'bg-teal-50 border-teal-200',     text: 'text-teal-700',   dot: 'bg-teal-500' },
-  cancelled:   { bg: 'bg-red-50 border-red-200',       text: 'text-red-600',    dot: 'bg-red-400' },
+  draft:       { bg: 'bg-surface border-wire',              text: 'text-warm',        dot: 'bg-dim' },
+  scheduled:   { bg: 'bg-blue-950/70 border-blue-800/40',   text: 'text-blue-300',    dot: 'bg-blue-400' },
+  confirmed:   { bg: 'bg-indigo-950/70 border-indigo-800/40', text: 'text-indigo-300', dot: 'bg-indigo-400' },
+  in_progress: { bg: 'bg-amber-950/70 border-amber-800/40', text: 'text-amber-300',   dot: 'bg-amber-400' },
+  completed:   { bg: 'bg-green-950/70 border-green-800/40', text: 'text-green-300',   dot: 'bg-green-400' },
+  reviewed:    { bg: 'bg-cyan-950/70 border-cyan-800/40',   text: 'text-cyan-300',    dot: 'bg-cyan-400' },
+  invoiced:    { bg: 'bg-purple-950/70 border-purple-800/40', text: 'text-purple-300', dot: 'bg-purple-400' },
+  paid:        { bg: 'bg-teal-950/70 border-teal-800/40',   text: 'text-teal-300',    dot: 'bg-teal-400' },
+  cancelled:   { bg: 'bg-red-950/70 border-red-900/40',     text: 'text-red-400',     dot: 'bg-red-500' },
 }
 
 const fmt = (n: number) =>
@@ -129,8 +128,8 @@ const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const ENTITY_COLORS: Record<string, string> = {
   private:  '#D4AF37',
   tmaat:    '#EC4899',
-  holloway: '#1E3A8A',
-  peter:    '#22C55E',
+  holloway: '#60A5FA',
+  peter:    '#4ADE80',
 }
 
 function getEntityColor(job: CalendarJob): string | undefined {
@@ -142,7 +141,6 @@ function getEntityColor(job: CalendarJob): string | undefined {
   return undefined
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 function entityLabel(job: CalendarJob): string {
   if (job.source === 'private') return job.customer?.name ?? '—'
   if (job.source === 'contract') {
@@ -211,7 +209,6 @@ export default function DashboardPage() {
     }
   }
 
-  // ── Fetch jobs ─────────────────────────────────────────────────────────────
   useEffect(() => {
     setLoading(true)
     void load()
@@ -219,7 +216,6 @@ export default function DashboardPage() {
       const start = view === 'week' ? toISO(weekStart) : view === 'day' ? toISO(dayRef) : toISO(firstOfMonth(monthRef))
       const end = view === 'week' ? toISO(addDays(weekStart, 6)) : view === 'day' ? toISO(dayRef) : toISO(lastOfMonth(monthRef))
 
-      // Step 1: load jobs — clean query without fleet join
       const { data, error } = await supabase
         .from('jobs')
         .select(`
@@ -242,7 +238,6 @@ export default function DashboardPage() {
 
       const baseJobs = (data ?? []) as unknown as Omit<CalendarJob, 'job_trucks' | 'subcontractor_rate_ph' | 'contract_rate_ph'>[]
 
-      // Step 2: truck plates — isolated query, skipped silently if tables don't exist
       const truckMap = new Map<string, CalendarJob['job_trucks']>()
       if (baseJobs.length > 0) {
         try {
@@ -255,12 +250,9 @@ export default function DashboardPage() {
             list.push({ fleet: row.fleet })
             truckMap.set(row.job_id, list)
           }
-        } catch {
-          // fleet / job_trucks not yet migrated
-        }
+        } catch { /* fleet / job_trucks not yet migrated */ }
       }
 
-      // Step 3: rate per hour — isolated queries, skipped if tables don't exist yet
       const subRatePHMap = new Map<string, number>()
       const contractRatePHMap = new Map<string, number>()
       const uniqueSubRateIds = [...new Set(baseJobs.map(j => j.subcontractor_rate_id).filter(Boolean) as string[])]
@@ -288,7 +280,6 @@ export default function DashboardPage() {
     }
   }, [view, weekStart, monthRef, dayRef])
 
-  // ── Week summary ───────────────────────────────────────────────────────────
   const weekSummary = useMemo(() => {
     let revenue = 0
     let payroll = 0
@@ -301,7 +292,6 @@ export default function DashboardPage() {
     return { revenue, payroll, profit: revenue - payroll, count: jobs.length }
   }, [jobs])
 
-  // ── Group jobs by date ─────────────────────────────────────────────────────
   const jobsByDate = useMemo(() => {
     const map = new Map<string, CalendarJob[]>()
     for (const job of jobs) {
@@ -312,7 +302,6 @@ export default function DashboardPage() {
     return map
   }, [jobs])
 
-  // ── Navigation ─────────────────────────────────────────────────────────────
   function prevPeriod() {
     if (view === 'week') setWeekStart((d) => addDays(d, -7))
     else if (view === 'day') setDayRef((d) => addDays(d, -1))
@@ -332,50 +321,40 @@ export default function DashboardPage() {
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
   const monthGrid = useMemo(() => getMonthGrid(monthRef), [monthRef])
 
-  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col gap-4">
       {/* ── Top bar ──────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <button onClick={prevPeriod} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500">
+        <div className="flex items-center gap-1">
+          <button onClick={prevPeriod} className="p-1.5 rounded-lg hover:bg-panel text-warm hover:text-parchment transition-colors">
             <ChevronLeft size={18} />
           </button>
           <button
             onClick={goToday}
-            className="text-sm font-semibold text-gray-700 min-w-[160px] text-center hover:text-blue-600"
+            className="text-sm font-semibold text-parchment min-w-[160px] text-center hover:text-gold transition-colors px-2"
           >
             {view === 'week' ? fmtWeekRange(weekStart) : view === 'day' ? dayRef.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : fmtMonthYear(monthRef)}
           </button>
-          <button onClick={nextPeriod} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500">
+          <button onClick={nextPeriod} className="p-1.5 rounded-lg hover:bg-panel text-warm hover:text-parchment transition-colors">
             <ChevronRight size={18} />
           </button>
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
-            <button
-              onClick={() => setView('day')}
-              className={`px-3 py-1.5 ${view === 'day' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
-            >
-              Day
-            </button>
-            <button
-              onClick={() => setView('week')}
-              className={`px-3 py-1.5 ${view === 'week' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
-            >
-              Week
-            </button>
-            <button
-              onClick={() => setView('month')}
-              className={`px-3 py-1.5 ${view === 'month' ? 'bg-gray-900 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
-            >
-              Month
-            </button>
+          <div className="flex rounded-lg border border-wire overflow-hidden text-sm">
+            {(['day', 'week', 'month'] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                className={`px-3 py-1.5 capitalize transition-colors ${view === v ? 'bg-gold text-void font-semibold' : 'bg-surface text-warm hover:bg-panel hover:text-parchment'}`}
+              >
+                {v}
+              </button>
+            ))}
           </div>
           <Link
             href="/jobs/new"
-            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-3 py-1.5 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 bg-gold hover:bg-gold-bright text-void text-sm font-semibold px-3 py-1.5 rounded-lg transition-colors"
           >
             <Plus size={15} /> New Job
           </Link>
@@ -385,18 +364,18 @@ export default function DashboardPage() {
       {/* ── Summary cards ────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <SummaryCard label="Jobs" value={String(weekSummary.count)} />
-        <SummaryCard label="Revenue" value={fmt(weekSummary.revenue)} color="text-gray-900" />
-        <SummaryCard label="Payroll" value={fmt(weekSummary.payroll)} color="text-orange-600" />
+        <SummaryCard label="Revenue" value={fmt(weekSummary.revenue)} />
+        <SummaryCard label="Payroll" value={fmt(weekSummary.payroll)} valueClass="text-amber-300" />
         <SummaryCard
           label="Profit"
           value={fmt(weekSummary.profit)}
-          color={weekSummary.profit >= 0 ? 'text-green-600' : 'text-red-600'}
+          valueClass={weekSummary.profit >= 0 ? 'text-success' : 'text-danger'}
         />
       </div>
 
       {/* ── Calendar ─────────────────────────────────────────────────────── */}
       {loading ? (
-        <p className="text-gray-400 text-sm py-8 text-center">Loading…</p>
+        <p className="text-warm text-sm py-8 text-center">Loading…</p>
       ) : view === 'day' ? (
         <DayView jobs={jobsByDate.get(toISO(dayRef)) ?? []} today={today} onJobClick={(id) => router.push(`/jobs/${id}/edit`)} onStart={openStart} onFinish={openFinish} />
       ) : view === 'week' ? (
@@ -430,29 +409,29 @@ export default function DashboardPage() {
         />
       )}
 
-      {/* ── Quick-action modal ───────────────────────────────────────── */}
+      {/* ── Quick-action modal ───────────────────────────────────────────── */}
       {modal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-xs">
-            <h2 className="text-base font-semibold text-gray-900 mb-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="bg-panel border border-wire rounded-xl shadow-2xl p-6 w-full max-w-xs">
+            <h2 className="text-base font-display font-semibold text-parchment mb-4">
               {modal.type === 'start' ? 'What time did the job start?' : 'What time did the job finish?'}
             </h2>
             <input
               type="time"
               value={modal.time}
               onChange={(e) => setModal((m) => m ? { ...m, time: e.target.value } : m)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
+              className="w-full px-3 py-2 border border-wire rounded-lg text-sm bg-surface text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring mb-4"
             />
             <div className="flex gap-2">
               <button
                 onClick={() => setModal(null)}
-                className="flex-1 px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50"
+                className="flex-1 px-4 py-2 text-sm border border-wire rounded-lg text-warm hover:bg-surface hover:text-parchment transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmModal}
-                className={`flex-1 px-4 py-2 text-sm font-semibold rounded-lg text-white ${modal.type === 'start' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-green-600 hover:bg-green-700'}`}
+                className={`flex-1 px-4 py-2 text-sm font-semibold rounded-lg text-void transition-colors ${modal.type === 'start' ? 'bg-amber-500 hover:bg-amber-400' : 'bg-green-600 hover:bg-green-500'}`}
               >
                 Confirm
               </button>
@@ -466,8 +445,8 @@ export default function DashboardPage() {
 
 // ─── Source badge ─────────────────────────────────────────────────────────────
 function SourceBadge({ source }: { source: JobSource }) {
-  if (source === 'private') return <span className="inline-flex px-1 py-0.5 rounded text-[10px] font-semibold bg-violet-100 text-violet-700 leading-none">Private</span>
-  if (source === 'contract') return <span className="inline-flex px-1 py-0.5 rounded text-[10px] font-semibold bg-teal-100 text-teal-700 leading-none">Contract</span>
+  if (source === 'private') return <span className="inline-flex px-1 py-0.5 rounded text-[9px] font-semibold bg-gold/15 text-gold leading-none">Private</span>
+  if (source === 'contract') return <span className="inline-flex px-1 py-0.5 rounded text-[9px] font-semibold bg-teal-500/15 text-teal-300 leading-none">Contract</span>
   return null
 }
 
@@ -490,20 +469,20 @@ function WeekView({
   onDrop: (date: string) => void
 }) {
   return (
-    <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+    <div className="overflow-x-auto rounded-xl border border-wire bg-surface">
       <div className="min-w-[640px]">
         {/* Day headers */}
-        <div className="grid grid-cols-7 border-b border-gray-200">
+        <div className="grid grid-cols-7 border-b border-wire">
           {days.map((day, i) => {
             const iso = toISO(day)
             const isToday = iso === today
             return (
               <div
                 key={iso}
-                className={`px-2 py-2 text-center border-r last:border-r-0 border-gray-100 ${isToday ? 'bg-blue-50' : ''}`}
+                className={`px-2 py-2 text-center border-r last:border-r-0 border-wire ${isToday ? 'bg-gold/5' : ''}`}
               >
-                <div className="text-xs text-gray-400">{WEEK_DAYS[i]}</div>
-                <div className={`text-sm font-semibold mt-0.5 ${isToday ? 'text-blue-600' : 'text-gray-700'}`}>
+                <div className="text-xs text-dim">{WEEK_DAYS[i]}</div>
+                <div className={`text-sm font-semibold mt-0.5 w-6 h-6 flex items-center justify-center rounded-full mx-auto ${isToday ? 'bg-gold text-void' : 'text-parchment'}`}>
                   {day.getDate()}
                 </div>
               </div>
@@ -521,9 +500,9 @@ function WeekView({
             return (
               <div
                 key={iso}
-                className={`p-1.5 border-r last:border-r-0 border-gray-100 space-y-1 transition-colors
-                  ${isToday ? 'bg-blue-50/40' : ''}
-                  ${isDragOver ? 'bg-blue-100/70 ring-2 ring-inset ring-blue-400' : ''}`}
+                className={`p-1.5 border-r last:border-r-0 border-wire space-y-1 transition-colors
+                  ${isToday ? 'bg-gold/3' : ''}
+                  ${isDragOver ? 'bg-gold/10 ring-2 ring-inset ring-gold-ring' : ''}`}
                 onDragOver={(e) => { e.preventDefault(); onDragOver(iso) }}
                 onDrop={(e) => { e.preventDefault(); onDrop(iso) }}
               >
@@ -569,17 +548,16 @@ function MonthView({
   const currentMonth = monthRef.getMonth()
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+    <div className="rounded-xl border border-wire bg-surface overflow-hidden">
       {/* Day headers */}
-      <div className="grid grid-cols-7 border-b border-gray-200">
+      <div className="grid grid-cols-7 border-b border-wire">
         {WEEK_DAYS.map((d) => (
-          <div key={d} className="px-2 py-2 text-xs font-medium text-gray-400 text-center">
+          <div key={d} className="px-2 py-2 text-xs font-medium text-dim text-center uppercase tracking-wide">
             {d}
           </div>
         ))}
       </div>
 
-      {/* Weeks */}
       <div className="grid grid-cols-7">
         {grid.map((day) => {
           const iso = toISO(day)
@@ -592,17 +570,17 @@ function MonthView({
             <div
               key={iso}
               className={`
-                min-h-[80px] p-1.5 border-r border-b last-of-type:border-r-0 border-gray-100 transition-colors
-                ${isToday ? 'bg-blue-50/50' : ''}
-                ${!isCurrentMonth ? 'bg-gray-50/50' : ''}
-                ${isDragOver ? 'bg-blue-100/70 ring-2 ring-inset ring-blue-400' : ''}
+                min-h-[80px] p-1.5 border-r border-b last-of-type:border-r-0 border-wire transition-colors
+                ${isToday ? 'bg-gold/4' : ''}
+                ${!isCurrentMonth ? 'opacity-40' : ''}
+                ${isDragOver ? 'bg-gold/10 ring-2 ring-inset ring-gold-ring' : ''}
               `}
               onDragOver={(e) => { e.preventDefault(); onDragOver(iso) }}
               onDrop={(e) => { e.preventDefault(); onDrop(iso) }}
             >
               <div
                 className={`text-xs font-medium w-6 h-6 flex items-center justify-center rounded-full mb-1
-                  ${isToday ? 'bg-blue-600 text-white' : isCurrentMonth ? 'text-gray-700' : 'text-gray-300'}
+                  ${isToday ? 'bg-gold text-void' : 'text-warm'}
                 `}
               >
                 {day.getDate()}
@@ -619,9 +597,9 @@ function MonthView({
                       onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.stopPropagation(); onDragStart(job.id) }}
                       onDragEnd={onDragEnd}
                       onClick={() => onJobClick(job.id)}
-                      className={`w-full text-left text-xs px-1.5 py-0.5 rounded border truncate ${s.bg} ${s.text} hover:opacity-80 cursor-grab`}
+                      className={`w-full text-left text-xs px-1.5 py-0.5 rounded border truncate ${s.bg} ${s.text} hover:opacity-80 cursor-grab font-mono`}
                       style={{
-                        ...(ec ? { borderLeftColor: ec, borderLeftWidth: '3px' } : {}),
+                        ...(ec ? { borderLeftColor: ec, borderLeftWidth: '2px' } : {}),
                         opacity: draggingJobId === job.id ? 0.4 : 1,
                       }}
                     >
@@ -630,7 +608,7 @@ function MonthView({
                   )
                 })}
                 {dayJobs.length > 3 && (
-                  <p className="text-xs text-gray-400 pl-1">+{dayJobs.length - 3} more</p>
+                  <p className="text-xs text-dim pl-1">+{dayJobs.length - 3} more</p>
                 )}
               </div>
             </div>
@@ -666,9 +644,9 @@ function JobCard({
   )
   const isLate = job.status === 'in_progress' && job.date < today
   const alertRing = isOverdue
-    ? 'ring-2 ring-red-500 animate-pulse'
+    ? 'ring-2 ring-danger animate-pulse'
     : isLate
-    ? 'ring-2 ring-orange-500 animate-pulse'
+    ? 'ring-2 ring-amber-500 animate-pulse'
     : ''
 
   const canStart = job.status === 'scheduled' || job.status === 'confirmed'
@@ -685,37 +663,35 @@ function JobCard({
       onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart?.() }}
       onDragEnd={onDragEnd}
     >
-      {/* Clickable info area */}
       <button
         onClick={onClick}
         className="w-full text-left p-1.5 hover:opacity-80 transition-opacity"
       >
-        <div className="font-semibold truncate">#{job.job_number}</div>
+        <div className="font-mono font-semibold truncate">#{job.job_number}</div>
         <div className="flex items-center gap-1 flex-wrap mt-0.5">
           <span className="truncate opacity-80">{entityLabel(job)}</span>
           <SourceBadge source={job.source} />
         </div>
-        {revenue !== null && <div className="font-medium mt-0.5">{fmt(revenue)}</div>}
+        {revenue !== null && <div className="font-mono font-medium mt-0.5">{fmt(revenue)}</div>}
         <div className="flex items-center gap-1 mt-0.5">
           <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
           <span className="opacity-70 capitalize">{job.status.replace('_', ' ')}</span>
         </div>
         {(job.job_trucks ?? []).length > 0 && (
-          <div className="mt-0.5 font-mono opacity-70">
+          <div className="mt-0.5 font-mono opacity-60 text-[10px]">
             {(job.job_trucks ?? []).map((jt) => jt.fleet?.registration ?? jt.fleet?.name).filter(Boolean).join(' + ')}
           </div>
         )}
         {job.actual_start_time && (
-          <div className="opacity-60 mt-0.5">▶ {job.actual_start_time}</div>
+          <div className="opacity-60 mt-0.5 font-mono">▶ {job.actual_start_time}</div>
         )}
       </button>
-      {/* Quick-action buttons */}
       {(canStart || canFinish) && (
         <div className="px-1.5 pb-1.5">
           {canStart && isOverdue && (
             <button
               onClick={(e) => { e.stopPropagation(); onStart(job.id) }}
-              className="w-full text-center text-xs font-semibold py-1 rounded bg-amber-500 hover:bg-amber-600 text-white"
+              className="w-full text-center text-xs font-semibold py-1 rounded bg-amber-500 hover:bg-amber-400 text-void"
             >
               Start
             </button>
@@ -723,7 +699,7 @@ function JobCard({
           {canFinish && (
             <button
               onClick={(e) => { e.stopPropagation(); onFinish(job.id) }}
-              className="w-full text-center text-xs font-semibold py-1 rounded bg-green-600 hover:bg-green-700 text-white"
+              className="w-full text-center text-xs font-semibold py-1 rounded bg-green-700 hover:bg-green-600 text-void"
             >
               Finish
             </button>
@@ -735,11 +711,11 @@ function JobCard({
 }
 
 // ─── Summary card ─────────────────────────────────────────────────────────────
-function SummaryCard({ label, value, color = 'text-gray-900' }: { label: string; value: string; color?: string }) {
+function SummaryCard({ label, value, valueClass = 'text-parchment' }: { label: string; value: string; valueClass?: string }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 px-4 py-3">
-      <div className="text-xs text-gray-500 mb-1">{label}</div>
-      <div className={`text-lg font-bold ${color}`}>{value}</div>
+    <div className="bg-surface rounded-xl border-l-[3px] border-gold-ring border border-wire px-4 py-3">
+      <div className="text-[10px] font-display font-semibold text-dim uppercase tracking-widest mb-1">{label}</div>
+      <div className={`text-lg font-display font-bold font-mono ${valueClass}`}>{value}</div>
     </div>
   )
 }
@@ -760,14 +736,14 @@ function DayView({
 }) {
   if (jobs.length === 0) {
     return (
-      <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400 text-sm">
+      <div className="bg-surface rounded-xl border border-wire p-12 text-center text-dim text-sm">
         No jobs for this day.
       </div>
     )
   }
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
+    <div className="bg-surface rounded-xl border border-wire divide-y divide-wire">
       {jobs.map((job) => {
         const s = STATUS_CARD[job.status]
         const ec = getEntityColor(job)
@@ -789,36 +765,36 @@ function DayView({
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-bold text-gray-900">#{job.job_number}</span>
+                    <span className="text-sm font-mono font-bold text-parchment">#{job.job_number}</span>
                     <SourceBadge source={job.source} />
                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${s.bg} ${s.text}`}>
                       <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
                       {job.status.replace('_', ' ')}
                     </span>
-                    {time && <span className="text-xs text-gray-400">@ {time}</span>}
+                    {time && <span className="text-xs text-dim font-mono">@ {time}</span>}
                   </div>
-                  <div className="mt-1 text-sm text-gray-700 font-medium">{entityLabel(job)}</div>
-                  {job.notes && <div className="mt-1 text-xs text-gray-400 line-clamp-1">{job.notes}</div>}
+                  <div className="mt-1 text-sm text-parchment font-medium">{entityLabel(job)}</div>
+                  {job.notes && <div className="mt-1 text-xs text-warm line-clamp-1">{job.notes}</div>}
                   {job.job_crew.length > 0 && (
-                    <div className="mt-1 text-xs text-gray-500">
+                    <div className="mt-1 text-xs text-warm">
                       Crew: {job.job_crew.map((c) => c.employee?.name ?? '?').join(', ')}
                     </div>
                   )}
                   {(job.job_trucks ?? []).length > 0 && (
-                    <div className="mt-0.5 text-xs font-mono text-gray-500">
+                    <div className="mt-0.5 text-xs font-mono text-dim">
                       {(job.job_trucks ?? []).map((jt) => jt.fleet?.registration ?? jt.fleet?.name).filter(Boolean).join(' + ')}
                     </div>
                   )}
                 </div>
                 <div className="flex flex-col items-end gap-2 shrink-0">
                   {revenue !== null && (
-                    <span className="text-base font-bold text-gray-900">{fmt(revenue)}</span>
+                    <span className="text-base font-mono font-bold text-gold">{fmt(revenue)}</span>
                   )}
                   <div className="flex gap-2">
                     {canStart && isDayOverdue && (
                       <button
                         onClick={() => onStart(job.id)}
-                        className="px-3 py-1 text-xs font-semibold rounded-lg bg-amber-500 hover:bg-amber-600 text-white"
+                        className="px-3 py-1 text-xs font-semibold rounded-lg bg-amber-500 hover:bg-amber-400 text-void"
                       >
                         Start
                       </button>
@@ -826,14 +802,14 @@ function DayView({
                     {canFinish && (
                       <button
                         onClick={() => onFinish(job.id)}
-                        className="px-3 py-1 text-xs font-semibold rounded-lg bg-green-600 hover:bg-green-700 text-white"
+                        className="px-3 py-1 text-xs font-semibold rounded-lg bg-green-700 hover:bg-green-600 text-void"
                       >
                         Finish
                       </button>
                     )}
                     <button
                       onClick={() => onJobClick(job.id)}
-                      className="px-3 py-1 text-xs font-semibold rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50"
+                      className="px-3 py-1 text-xs font-semibold rounded-lg border border-wire text-warm hover:bg-panel hover:text-parchment transition-colors"
                     >
                       Open
                     </button>

@@ -74,9 +74,16 @@ function formFromSub(sub: Subcontractor): ReturnType<typeof emptyForm> {
 }
 
 function billingBadge(type: BillingType) {
-  const map = { percent: 'bg-purple-100 text-purple-700', ratecard: 'bg-blue-100 text-blue-700', formula: 'bg-amber-100 text-amber-700' }
+  const map = {
+    percent: 'bg-purple-500/10 text-purple-300',
+    ratecard: 'bg-blue-500/10 text-blue-300',
+    formula: 'bg-amber-500/10 text-amber-300',
+  }
   return map[type]
 }
+
+const inlineInput = 'flex-1 px-3 py-1.5 text-sm border border-wire rounded-lg bg-panel text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring'
+const checkboxCls = 'rounded border-wire bg-panel text-gold focus:ring-gold-ring'
 
 export default function SubcontractorsPage() {
   const supabase = createClient()
@@ -192,40 +199,40 @@ export default function SubcontractorsPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Subcontractors</h1>
+        <h1 className="text-2xl font-display font-bold text-parchment">Subcontractors</h1>
         <Button onClick={openCreate} size="sm">
           <Plus size={16} /> Add Subcontractor
         </Button>
       </div>
 
       {loading ? (
-        <p className="text-gray-500">Loading...</p>
+        <p className="text-warm">Loading...</p>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-surface rounded-xl border border-wire overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="bg-panel border-b border-wire">
               <tr>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Name</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Billing</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600 hidden sm:table-cell">Config summary</th>
+                <th className="text-left px-4 py-3 text-[10px] font-semibold text-dim uppercase tracking-widest">Name</th>
+                <th className="text-left px-4 py-3 text-[10px] font-semibold text-dim uppercase tracking-widest">Billing</th>
+                <th className="text-left px-4 py-3 text-[10px] font-semibold text-dim uppercase tracking-widest hidden sm:table-cell">Config summary</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-wire">
               {subs.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-gray-400">No subcontractors yet.</td>
+                  <td colSpan={4} className="px-4 py-8 text-center text-dim">No subcontractors yet.</td>
                 </tr>
               )}
               {subs.map((sub) => (
-                <tr key={sub.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-900">{sub.name}</td>
+                <tr key={sub.id} className="hover:bg-panel transition-colors">
+                  <td className="px-4 py-3 font-medium text-parchment">{sub.name}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${billingBadge(sub.billing_type)}`}>
                       {sub.billing_type}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-500 text-xs hidden sm:table-cell">
+                  <td className="px-4 py-3 text-dim text-xs hidden sm:table-cell">
                     {sub.billing_type === 'percent' && `${((sub.config as PercentConfig).percent * 100).toFixed(0)}%`}
                     {sub.billing_type === 'ratecard' && (() => {
                       const c = sub.config as RateCardConfig
@@ -237,10 +244,10 @@ export default function SubcontractorsPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2 justify-end">
-                      <button onClick={() => openEdit(sub)} className="text-gray-400 hover:text-blue-600" aria-label="Edit">
+                      <button onClick={() => openEdit(sub)} className="text-dim hover:text-gold transition-colors" aria-label="Edit">
                         <Pencil size={15} />
                       </button>
-                      <button onClick={() => handleDelete(sub)} className="text-gray-400 hover:text-red-600" aria-label="Delete">
+                      <button onClick={() => handleDelete(sub)} className="text-dim hover:text-danger transition-colors" aria-label="Delete">
                         <Trash2 size={15} />
                       </button>
                     </div>
@@ -256,8 +263,8 @@ export default function SubcontractorsPage() {
         <div className="space-y-4">
           <Input label="Name" value={form.name} onChange={(e) => setField('name', e.target.value)} placeholder="e.g. TMAAT" />
 
-          <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
-            <input type="checkbox" checked={form.google_review_bonus} onChange={(e) => setField('google_review_bonus', e.target.checked)} className="rounded" />
+          <label className="flex items-center gap-2 text-sm font-medium text-warm cursor-pointer">
+            <input type="checkbox" checked={form.google_review_bonus} onChange={(e) => setField('google_review_bonus', e.target.checked)} className={checkboxCls} />
             Google Review Bonus eligible
           </label>
 
@@ -282,19 +289,15 @@ export default function SubcontractorsPage() {
 
           {form.billing_type === 'ratecard' && (
             <>
-              <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
-                <input type="checkbox" checked={form.gst} onChange={(e) => setField('gst', e.target.checked)} className="rounded" />
+              <label className="flex items-center gap-2 text-sm font-medium text-warm cursor-pointer">
+                <input type="checkbox" checked={form.gst} onChange={(e) => setField('gst', e.target.checked)} className={checkboxCls} />
                 Include GST (10%)
               </label>
 
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-sm font-medium text-gray-700">Rates</label>
-                  <button
-                    type="button"
-                    onClick={addRateEntry}
-                    className="text-xs text-blue-600 hover:text-blue-700 font-medium"
-                  >
+                  <label className="text-xs font-semibold text-dim uppercase tracking-wide">Rates</label>
+                  <button type="button" onClick={addRateEntry} className="text-xs text-gold hover:text-gold-bright font-medium transition-colors">
                     + Add rate
                   </button>
                 </div>
@@ -306,19 +309,19 @@ export default function SubcontractorsPage() {
                         value={key}
                         onChange={(e) => updateRateEntry(i, 0, e.target.value)}
                         placeholder="e.g. 3 Men + Large Truck"
-                        className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className={inlineInput}
                       />
                       <input
                         type="number"
                         value={val}
                         onChange={(e) => updateRateEntry(i, 1, e.target.value)}
                         placeholder="0.00"
-                        className="w-24 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-24 px-3 py-1.5 text-sm border border-wire rounded-lg bg-panel text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
                       />
                       <button
                         type="button"
                         onClick={() => removeRateEntry(i)}
-                        className="text-gray-300 hover:text-red-500 shrink-0"
+                        className="text-dim hover:text-danger shrink-0 transition-colors"
                         aria-label="Remove rate"
                       >
                         <X size={15} />
@@ -349,32 +352,30 @@ export default function SubcontractorsPage() {
           {form.billing_type === 'formula' && (
             <>
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700">Expression</label>
-                <p className="text-xs text-gray-400">
-                  Built-ins: gst(1.10), cof, additionalHours, additionalRate, extraMenHours, breakHours
-                </p>
+                <label className="text-xs font-semibold text-dim uppercase tracking-wide">Expression</label>
+                <p className="text-xs text-dim">Built-ins: gst(1.10), cof, additionalHours, additionalRate, extraMenHours, breakHours</p>
                 <textarea
                   rows={2}
                   value={form.expression}
                   onChange={(e) => setField('expression', e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                  className="w-full px-3 py-2 text-sm border border-wire rounded-lg bg-panel text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring font-mono"
                   placeholder="(firstHour + extraHours*hourlyRate) * 0.75 * gst"
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-gray-700">Defaults (JSON)</label>
+                <label className="text-xs font-semibold text-dim uppercase tracking-wide">Defaults (JSON)</label>
                 <textarea
                   rows={2}
                   value={form.defaults}
                   onChange={(e) => setField('defaults', e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                  className="w-full px-3 py-2 text-sm border border-wire rounded-lg bg-panel text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring font-mono"
                   placeholder='{"firstHour": 250, "hourlyRate": 50}'
                 />
               </div>
             </>
           )}
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && <p className="text-sm text-danger">{error}</p>}
           <div className="flex gap-2 pt-2">
             <Button onClick={handleSave} disabled={saving} className="flex-1">
               {saving ? 'Saving...' : 'Save'}
@@ -385,22 +386,22 @@ export default function SubcontractorsPage() {
           </div>
 
           {editing && (
-            <div className="border-t border-gray-200 pt-4 mt-2">
+            <div className="border-t border-wire pt-4 mt-2">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold text-gray-700">Rates</h3>
-                <span className="text-xs text-gray-400">rate × COF hours = revenue</span>
+                <h3 className="text-sm font-semibold text-parchment">Rates</h3>
+                <span className="text-xs text-dim">rate × COF hours = revenue</span>
               </div>
               <div className="space-y-1 mb-3">
                 {subRates.map((r) => (
-                  <div key={r.id} className="flex items-center justify-between px-3 py-1.5 bg-gray-50 rounded-lg">
+                  <div key={r.id} className="flex items-center justify-between px-3 py-1.5 bg-panel rounded-lg">
                     <div>
-                      <span className="text-sm text-gray-700">{r.name}</span>
-                      <span className="ml-2 text-xs text-gray-400">${r.rate_per_hour}/hr</span>
+                      <span className="text-sm text-parchment">{r.name}</span>
+                      <span className="ml-2 text-xs font-mono text-dim">${r.rate_per_hour}/hr</span>
                     </div>
-                    <button onClick={() => handleDeleteRate(r.id)} className="text-gray-300 hover:text-red-500"><X size={14} /></button>
+                    <button onClick={() => handleDeleteRate(r.id)} className="text-dim hover:text-danger transition-colors"><X size={14} /></button>
                   </div>
                 ))}
-                {subRates.length === 0 && <p className="text-xs text-gray-400">No rates yet.</p>}
+                {subRates.length === 0 && <p className="text-xs text-dim">No rates yet.</p>}
               </div>
               <div className="flex gap-2">
                 <input
@@ -409,14 +410,14 @@ export default function SubcontractorsPage() {
                   onChange={(e) => setNewRateName(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleAddRate()}
                   placeholder="Rate name (e.g. 2 Men + Truck)"
-                  className="flex-1 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className={inlineInput}
                 />
                 <input
                   type="number"
                   value={newRatePH}
                   onChange={(e) => setNewRatePH(e.target.value)}
                   placeholder="$/hr"
-                  className="w-20 px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-20 px-3 py-1.5 text-sm border border-wire rounded-lg bg-panel text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
                 />
                 <Button size="sm" onClick={handleAddRate} disabled={!newRateName.trim() || !newRatePH || addingRate}>
                   {addingRate ? '…' : 'Add'}
