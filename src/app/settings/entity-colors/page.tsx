@@ -32,94 +32,214 @@ function ColorPicker({ value, onChange }: { value: string; onChange: (c: string)
   )
 }
 
-interface EntityRow {
+interface ColorEntity {
   id: string
-  entity_key: string
-  color_hex: string
+  name: string
+  type: 'private' | 'subcontractor' | 'contract'
+  savedColor: string
 }
 
-const ENTITY_LABELS: Record<string, string> = {
-  private: 'Private Jobs',
+function SectionHeader({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-3 mb-3">
+      <span className="text-[10px] font-semibold tracking-widest text-dim uppercase">{label}</span>
+      <div className="flex-1 h-px bg-wire" />
+    </div>
+  )
+}
+
+function EntityCard({
+  entity,
+  draft,
+  saving,
+  saved,
+  onChange,
+  onSave,
+}: {
+  entity: ColorEntity
+  draft: string
+  saving: boolean
+  saved: boolean
+  onChange: (c: string) => void
+  onSave: () => void
+}) {
+  const isDirty = draft !== entity.savedColor
+
+  return (
+    <div className="bg-surface rounded-xl border border-wire p-5">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <span className="w-5 h-5 rounded-full border border-wire shrink-0" style={{ background: draft }} />
+          <div>
+            <p className="font-semibold text-parchment">{entity.name}</p>
+            <p className="text-xs font-mono text-dim">{draft}</p>
+          </div>
+        </div>
+        <Button
+          size="sm"
+          onClick={onSave}
+          disabled={saving || !isDirty}
+        >
+          {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save'}
+        </Button>
+      </div>
+      <ColorPicker value={draft} onChange={onChange} />
+      <div className="mt-4 pt-3 border-t border-wire">
+        <div
+          className="flex items-center gap-2 px-3 py-1.5 bg-panel rounded-lg border-l-[3px]"
+          style={{ borderLeftColor: draft }}
+        >
+          <span className="text-xs text-dim">Preview job card border</span>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function EntityColorsPage() {
   const supabase = createClient()
-  const [rows, setRows] = useState<EntityRow[]>([])
-  const [draft, setDraft] = useState<Record<string, string>>({})
+  const [entities, setEntities] = useState<ColorEntity[]>([])
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState<string | null>(null)
   const [saved, setSaved] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
 
   async function load() {
-    const { data } = await supabase.from('entity_colors').select('*').order('entity_key')
-    const loaded = (data ?? []) as EntityRow[]
-    setRows(loaded)
-    const initial: Record<string, string> = {}
-    for (const r of loaded) initial[r.entity_key] = r.color_hex
-    setDraft(initial)
+    const [{ data: ec }, { data: subs }, { data: contracts }] = await Promise.all([
+      supabase.from('entity_colors').select('id, entity_key, color_hex').order('entity_key'),
+      supabase.from('subcontractors').select('id, name, color_hex').order('name'),
+      supabase.from('contracts').select('id, name, color_hex').order('name'),
+    ])
+
+    const built: ColorEntity[] = [
+      ...((ec ?? []) as { id: string; entity_key: string; color_hex: string }[]).map((r) => ({
+        id: r.id,
+        name: r.entity_key === 'private' ? 'Private Jobs' : r.entity_key,
+        type: 'private' as const,
+        savedColor: r.color_hex ?? '#D4AF37',
+      })),
+      ...((subs ?? []) as { id: string; name: string; color_hex: string | null }[]).map((r) => ({
+        id: r.id,
+        name: r.name,
+        type: 'subcontractor' as const,
+        savedColor: r.color_hex ?? '#6B6660',
+      })),
+      ...((contracts ?? []) as { id: string; name: string; color_hex: string | null }[]).map((r) => ({
+        id: r.id,
+        name: r.name,
+        type: 'contract' as const,
+        savedColor: r.color_hex ?? '#6B6660',
+      })),
+    ]
+
+    setEntities(built)
+    const d: Record<string, string> = {}
+    for (const e of built) d[e.id] = e.savedColor
+    setDrafts(d)
+    setLoading(false)
   }
 
   useEffect(() => { load() }, [])
 
-  async function handleSave(entityKey: string) {
-    const row = rows.find((r) => r.entity_key === entityKey)
-    if (!row) return
-    setSaving(entityKey)
-    await supabase.from('entity_colors').update({ color_hex: draft[entityKey] }).eq('id', row.id)
+  async function handleSave(entity: ColorEntity) {
+    const color = drafts[entity.id]
+    setSaving(entity.id)
+
+    if (entity.type === 'private') {
+      await supabase.from('entity_colors').update({ color_hex: color }).eq('id', entity.id)
+    } else if (entity.type === 'subcontractor') {
+      await supabase.from('subcontractors').update({ color_hex: color }).eq('id', entity.id)
+    } else {
+      await supabase.from('contracts').update({ color_hex: color }).eq('id', entity.id)
+    }
+
     setSaving(null)
-    setSaved(entityKey)
+    setSaved(entity.id)
     setTimeout(() => setSaved(null), 2000)
     load()
   }
+
+  const privateEntities = entities.filter((e) => e.type === 'private')
+  const subEntities = entities.filter((e) => e.type === 'subcontractor')
+  const contractEntities = entities.filter((e) => e.type === 'contract')
 
   return (
     <div className="max-w-lg">
       <div className="mb-6">
         <h1 className="text-2xl font-display font-bold text-parchment">Entity Colors</h1>
-        <p className="text-sm text-dim mt-1">Configure the card border color per entity type on the Dashboard.</p>
+        <p className="text-sm text-dim mt-1">Configure the Dashboard job card border color per entity.</p>
       </div>
 
-      <div className="space-y-4">
-        {rows.length === 0 && (
-          <div className="bg-surface rounded-xl border border-wire p-12 text-center text-dim">Loading…</div>
-        )}
+      {loading ? (
+        <div className="bg-surface rounded-xl border border-wire p-12 text-center text-dim">Loading…</div>
+      ) : (
+        <div className="space-y-8">
 
-        {rows.map((row) => {
-          const label = ENTITY_LABELS[row.entity_key] ?? row.entity_key
-          const color = draft[row.entity_key] ?? row.color_hex
-          return (
-            <div key={row.entity_key} className="bg-surface rounded-xl border border-wire p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <span className="w-5 h-5 rounded-full border border-wire shrink-0" style={{ background: color }} />
-                  <div>
-                    <p className="font-semibold text-parchment">{label}</p>
-                    <p className="text-xs font-mono text-dim">{color}</p>
-                  </div>
-                </div>
-                <Button
-                  size="sm"
-                  onClick={() => handleSave(row.entity_key)}
-                  disabled={saving === row.entity_key || color === row.color_hex}
-                >
-                  {saving === row.entity_key ? 'Saving…' : saved === row.entity_key ? 'Saved ✓' : 'Save'}
-                </Button>
-              </div>
-              <ColorPicker
-                value={color}
-                onChange={(c) => setDraft((d) => ({ ...d, [row.entity_key]: c }))}
-              />
-              <div className="mt-4 pt-3 border-t border-wire">
-                <div
-                  className="flex items-center gap-2 px-3 py-1.5 bg-panel rounded-lg border-l-[3px]"
-                  style={{ borderLeftColor: color }}
-                >
-                  <span className="text-xs text-dim">Preview job card border</span>
-                </div>
-              </div>
+          {/* PRIVATE */}
+          <section>
+            <SectionHeader label="Private" />
+            <div className="space-y-4">
+              {privateEntities.map((e) => (
+                <EntityCard
+                  key={e.id}
+                  entity={e}
+                  draft={drafts[e.id] ?? e.savedColor}
+                  saving={saving === e.id}
+                  saved={saved === e.id}
+                  onChange={(c) => setDrafts((d) => ({ ...d, [e.id]: c }))}
+                  onSave={() => handleSave(e)}
+                />
+              ))}
+              {privateEntities.length === 0 && (
+                <p className="text-sm text-dim px-1">No private entity found.</p>
+              )}
             </div>
-          )
-        })}
-      </div>
+          </section>
+
+          {/* SUBCONTRACTORS */}
+          <section>
+            <SectionHeader label="Subcontractors" />
+            <div className="space-y-4">
+              {subEntities.map((e) => (
+                <EntityCard
+                  key={e.id}
+                  entity={e}
+                  draft={drafts[e.id] ?? e.savedColor}
+                  saving={saving === e.id}
+                  saved={saved === e.id}
+                  onChange={(c) => setDrafts((d) => ({ ...d, [e.id]: c }))}
+                  onSave={() => handleSave(e)}
+                />
+              ))}
+              {subEntities.length === 0 && (
+                <p className="text-sm text-dim px-1">No subcontractors found.</p>
+              )}
+            </div>
+          </section>
+
+          {/* CONTRACTS */}
+          <section>
+            <SectionHeader label="Contracts" />
+            <div className="space-y-4">
+              {contractEntities.map((e) => (
+                <EntityCard
+                  key={e.id}
+                  entity={e}
+                  draft={drafts[e.id] ?? e.savedColor}
+                  saving={saving === e.id}
+                  saved={saved === e.id}
+                  onChange={(c) => setDrafts((d) => ({ ...d, [e.id]: c }))}
+                  onSave={() => handleSave(e)}
+                />
+              ))}
+              {contractEntities.length === 0 && (
+                <p className="text-sm text-dim px-1">No contracts found.</p>
+              )}
+            </div>
+          </section>
+
+        </div>
+      )}
     </div>
   )
 }
