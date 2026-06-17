@@ -131,6 +131,15 @@ export interface Contract {
   billing_type: string
   billing_config: SubcontractorConfig
   google_review_bonus: boolean
+  client_company_name: string | null
+  contact_name: string | null
+  contact_email: string | null
+  contact_phone: string | null
+  start_date: string | null
+  end_date: string | null
+  payment_terms: string | null
+  notes: string | null
+  is_active: boolean
   created_at?: string
 }
 
@@ -186,6 +195,9 @@ export interface Job {
   minimum_charge_applied: boolean
   minimum_charge_amount: number
   override_revenue: number | null
+  subcontractor_service_type: string | null
+  subcontractor_trucks: string | null
+  subcontractor_crew_size: number | null
   created_at?: string
   subcontractor?: Subcontractor
   customer?: Customer

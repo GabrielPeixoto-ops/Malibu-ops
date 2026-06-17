@@ -118,6 +118,10 @@ interface FormState {
   cancellation_reason: string
   minimum_charge_applied: boolean
   minimum_charge_amount: string
+  // Subcontract service details
+  subcontractor_service_type: string
+  subcontractor_trucks: string
+  subcontractor_crew_size: string
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -214,6 +218,9 @@ function defaultForm(): FormState {
     cancellation_reason: '',
     minimum_charge_applied: false,
     minimum_charge_amount: '',
+    subcontractor_service_type: '',
+    subcontractor_trucks: '',
+    subcontractor_crew_size: '',
   }
 }
 
@@ -362,6 +369,9 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             payment_collected_by: string | null
             cancellation_reason: string | null
             minimum_charge_applied: boolean; minimum_charge_amount: number
+            subcontractor_service_type: string | null
+            subcontractor_trucks: string | null
+            subcontractor_crew_size: number | null
             job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; start_time: string | null; end_time: string | null }>
             job_materials: Array<{ material_name: string; quantity: number; cost_price: number; sale_price: number }>
           }
@@ -428,6 +438,9 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             cancellation_reason: j.cancellation_reason ?? '',
             minimum_charge_applied: j.minimum_charge_applied ?? false,
             minimum_charge_amount: j.minimum_charge_amount > 0 ? j.minimum_charge_amount.toString() : '',
+            subcontractor_service_type: j.subcontractor_service_type ?? '',
+            subcontractor_trucks: j.subcontractor_trucks ?? '',
+            subcontractor_crew_size: j.subcontractor_crew_size != null ? j.subcontractor_crew_size.toString() : '',
           })
 
           if (j.client_billing_config) {
@@ -836,6 +849,9 @@ const filteredCustomers = useMemo(
       cancellation_reason: form.cancellation_reason || null,
       minimum_charge_applied: form.minimum_charge_applied,
       minimum_charge_amount: parseFloat(form.minimum_charge_amount) || 0,
+      subcontractor_service_type: form.source === 'subcontract' ? (form.subcontractor_service_type.trim() || null) : null,
+      subcontractor_trucks: form.source === 'subcontract' ? (form.subcontractor_trucks.trim() || null) : null,
+      subcontractor_crew_size: form.source === 'subcontract' ? (parseInt(form.subcontractor_crew_size) || null) : null,
     }
 
     const crewRows = crew.filter((r) => r.employee_id).map((r) => ({
@@ -979,9 +995,10 @@ const filteredCustomers = useMemo(
           locked ? (
             <div className="space-y-1">
               <p className="text-sm font-medium text-gray-800">{selectedSub?.name ?? '—'}</p>
-              {form.reference_number && (
-                <p className="text-xs text-gray-500">Ref: {form.reference_number}</p>
-              )}
+              {form.reference_number && <p className="text-xs text-gray-500">Ref: {form.reference_number}</p>}
+              {form.subcontractor_service_type && <p className="text-xs text-gray-500">Service: {form.subcontractor_service_type}</p>}
+              {form.subcontractor_trucks && <p className="text-xs text-gray-500">Trucks: {form.subcontractor_trucks}</p>}
+              {form.subcontractor_crew_size && <p className="text-xs text-gray-500">Crew: {form.subcontractor_crew_size}</p>}
             </div>
           ) : (
             <div className="space-y-3">
@@ -997,6 +1014,27 @@ const filteredCustomers = useMemo(
                 value={form.reference_number ?? ''}
                 onChange={(e) => setField('reference_number', e.target.value)}
                 placeholder="e.g. INV-2024-001 (optional)"
+              />
+              <Input
+                label="Service Type"
+                value={form.subcontractor_service_type ?? ''}
+                onChange={(e) => setField('subcontractor_service_type', e.target.value)}
+                placeholder="e.g. 2 Men + 1 Truck, Packing Only"
+              />
+              <Input
+                label="Subcontractor Truck(s)"
+                value={form.subcontractor_trucks ?? ''}
+                onChange={(e) => setField('subcontractor_trucks', e.target.value)}
+                placeholder="e.g. 1x 4.5T truck, Truck A + Truck B"
+              />
+              <Input
+                label="Crew Size"
+                type="number"
+                min="1"
+                step="1"
+                value={form.subcontractor_crew_size ?? ''}
+                onChange={(e) => setField('subcontractor_crew_size', e.target.value)}
+                placeholder="e.g. 3"
               />
             </div>
           )
@@ -1113,6 +1151,13 @@ const filteredCustomers = useMemo(
                 </>
               )}
 
+              <Input
+                label="Job ID"
+                value={form.reference_number ?? ''}
+                onChange={(e) => setField('reference_number', e.target.value)}
+                placeholder="e.g. JOB-001 (optional)"
+              />
+
             </div>
           )
         )}
@@ -1120,7 +1165,11 @@ const filteredCustomers = useMemo(
         {/* CONTRACT */}
         {form.source === 'contract' && (
           locked ? (
-            <p className="text-sm font-medium text-gray-800">{entityDisplayName}</p>
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-gray-800">{entityDisplayName}</p>
+              {form.rate_card_key && <p className="text-xs text-gray-500">Rate: {form.rate_card_key}</p>}
+              {form.reference_number && <p className="text-xs text-gray-500">Job ID: {form.reference_number}</p>}
+            </div>
           ) : (
             <div className="space-y-3">
               <Select
@@ -1139,7 +1188,36 @@ const filteredCustomers = useMemo(
                   onChange={(e) => setField('contract_client_id', e.target.value)}
                 />
               )}
+              {/* Rate selector for ratecard contracts */}
+              {form.contract_id && activeBillingType === 'ratecard' && rateCardKeys.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Rate <span className="text-red-400">*</span></label>
+                  <select
+                    value={form.rate_card_key ?? ''}
+                    onChange={(e) => setField('rate_card_key', e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  >
+                    <option value="">Select rate…</option>
+                    {rateCardKeys.map((r) => (
+                      <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {/* Additional hours/rate (visible once a rate is selected) */}
+              {form.contract_id && activeBillingType === 'ratecard' && form.rate_card_key && (
+                <div className="grid grid-cols-2 gap-3">
+                  <Input label="Additional Hrs" type="number" min="0" step="0.25" value={form.additional_hours ?? ''} onChange={(e) => setField('additional_hours', e.target.value)} placeholder="0" />
+                  <Input label="Addtl Rate ($/hr)" type="number" min="0" step="0.01" value={form.additional_rate ?? ''} onChange={(e) => setField('additional_rate', e.target.value)} placeholder="0.00" />
+                </div>
+              )}
               <Input label="COF (hrs)" type="number" min="0" step="0.25" value={form.cof ?? ''} onChange={(e) => setField('cof', e.target.value)} placeholder="0.5" />
+              <Input
+                label="Job ID"
+                value={form.reference_number ?? ''}
+                onChange={(e) => setField('reference_number', e.target.value)}
+                placeholder="e.g. JOB-001 (optional)"
+              />
             </div>
           )
         )}
