@@ -877,7 +877,7 @@ const filteredCustomers = useMemo(
       if (photos.length) await supabase.from('job_photos').insert(photos.map((p) => ({ job_id: newId, url: p.url, caption: p.caption || null, category: p.category })))
     }
 
-    router.push('/jobs')
+    router.push('/')
   }
 
   function extractMsg(e: unknown, fallback: string): string {
@@ -931,7 +931,7 @@ const filteredCustomers = useMemo(
     if (!confirm('Delete this job permanently? This cannot be undone.')) return
     setDeleting(true)
     await supabase.from('jobs').delete().eq('id', jobId)
-    router.push('/jobs')
+    router.push('/')
   }
 
   const usedEmployeeIds = new Set(crew.map((r) => r.employee_id).filter(Boolean))
@@ -1550,7 +1550,7 @@ const filteredCustomers = useMemo(
 
         <div className="space-y-4">
           {/* SERVIÇO PRESTADO */}
-          <Card title="Serviço Prestado">
+          <Card title="Service Details">
             <div className="space-y-2 text-sm">
               <div className="flex gap-4">
                 <span className="text-gray-400 w-20 shrink-0">Client</span>
@@ -1589,7 +1589,7 @@ const filteredCustomers = useMemo(
 
           {/* EQUIPE */}
           {crewLines.length > 0 && (
-            <Card title="Equipe">
+            <Card title="Crew">
               <div className="space-y-2">
                 {crewLines.map((l, i) => l && (
                   <div key={i} className="flex items-center justify-between text-sm">
@@ -1610,7 +1610,7 @@ const filteredCustomers = useMemo(
 
           {/* FINANCEIRO */}
           {summary && (
-            <Card title="Financeiro">
+            <Card title="Financials">
               <div className="space-y-1.5 text-sm">
                 <div className="flex justify-between">
                   <span className="text-gray-500">Revenue</span>
@@ -1645,7 +1645,7 @@ const filteredCustomers = useMemo(
 
           {/* NOTAS */}
           {(form.completion_notes || form.notes) && (
-            <Card title="Notas">
+            <Card title="Notes">
               {form.completion_notes && (
                 <div className="mb-2">
                   <p className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">Completion</p>
@@ -1663,7 +1663,7 @@ const filteredCustomers = useMemo(
 
           {/* PAGAMENTO (paid status only) */}
           {isPaid && (form.payment_date || form.payment_methods.length > 0) && (
-            <Card title="Pagamento">
+            <Card title="Payment">
               <div className="space-y-1.5 text-sm">
                 {form.payment_date && (
                   <div className="flex justify-between">
@@ -2097,6 +2097,20 @@ const filteredCustomers = useMemo(
               disabled={isReviewed}
             />
           </div>
+          {isEdit && (
+            <div className="mt-3">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+              <select
+                value={form.status}
+                onChange={(e) => setField('status', e.target.value as JobStatus)}
+                className="w-full sm:w-48 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {(Object.entries(STATUS_LABEL) as [JobStatus, string][]).map(([val, label]) => (
+                  <option key={val} value={val}>{label}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </Card>
 
         {/* ── Entity + Billing ─────────────────────────────────────────── */}

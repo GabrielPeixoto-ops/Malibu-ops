@@ -310,7 +310,7 @@ export default function ContractsPage() {
           </Section>
 
           {/* ── Dates ───────────────────────────────────────────────────────── */}
-          <Section title="Vigência">
+          <Section title="Term">
             <div className="grid grid-cols-2 gap-3">
               <Input label="Start date" type="date" value={form.start_date} onChange={(e) => setField('start_date', e.target.value)} />
               <Input label="End date" type="date" value={form.end_date} onChange={(e) => setField('end_date', e.target.value)} />
@@ -372,7 +372,7 @@ export default function ContractsPage() {
           </Section>
 
           {/* ── Notes ───────────────────────────────────────────────────────── */}
-          <Section title="Notas">
+          <Section title="Notes">
             <textarea rows={3} value={form.notes} onChange={(e) => setField('notes', e.target.value)} placeholder="Internal notes…" className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </Section>
 
