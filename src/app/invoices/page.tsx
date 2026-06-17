@@ -10,7 +10,7 @@ import type { Employee, JobSource, JobStatus, Subcontractor, SubcontractorConfig
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
 
-type Tab = 'employees' | 'subcontractors' | 'clients'
+type Tab = 'employees' | 'subcontractors' | 'contracts' | 'clients'
 
 interface InvoiceJob {
   id: string
@@ -104,6 +104,9 @@ export default function InvoicesPage() {
   const [dateFrom, setDateFrom] = useState(monthStart())
   const [dateTo, setDateTo] = useState(today())
   const [statusFilter, setStatusFilter] = useState<JobStatus | 'all'>('all')
+  const [empSearch, setEmpSearch] = useState('')
+  const [subFilter, setSubFilter] = useState('all')
+  const [contractFilter, setContractFilter] = useState('all')
   const [jobs, setJobs] = useState<InvoiceJob[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
@@ -192,6 +195,25 @@ export default function InvoicesPage() {
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [filtered])
 
+  // ── Contracts tab data ───────────────────────────────────────────────────
+  const contractData = useMemo(() => {
+    const contractJobs = filtered.filter((j) => j.source === 'contract' && j.contract)
+    const byId = new Map<string, { name: string; jobs: Array<{ job: InvoiceJob; revenue: number | null }> }>()
+    for (const job of contractJobs) {
+      const c = job.contract!
+      if (!byId.has(c.id)) byId.set(c.id, { name: c.name, jobs: [] })
+      byId.get(c.id)!.jobs.push({ job, revenue: calcRevenue(job) })
+    }
+    return [...byId.entries()]
+      .map(([id, { name, jobs: cj }]) => ({
+        id,
+        name,
+        jobs: cj,
+        totalRevenue: cj.reduce((s, { revenue }) => s + (revenue ?? 0), 0),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [filtered])
+
   // ── Clients tab data ──────────────────────────────────────────────────────
   const clientData = useMemo(() => {
     const clientJobs = filtered.filter((j) => j.source !== 'subcontract')
@@ -217,6 +239,7 @@ export default function InvoicesPage() {
   const tabs: Array<{ id: Tab; label: string }> = [
     { id: 'employees', label: 'Employees' },
     { id: 'subcontractors', label: 'Subcontractors' },
+    { id: 'contracts', label: 'Contracts' },
     { id: 'clients', label: 'Clients' },
   ]
 
@@ -259,6 +282,26 @@ export default function InvoicesPage() {
               {ALL_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
           )}
+          {tab === 'subcontractors' && subcontractorData.length > 0 && (
+            <select
+              value={subFilter}
+              onChange={(e) => setSubFilter(e.target.value)}
+              className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">All Subcontractors</option>
+              {subcontractorData.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          )}
+          {tab === 'contracts' && contractData.length > 0 && (
+            <select
+              value={contractFilter}
+              onChange={(e) => setContractFilter(e.target.value)}
+              className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">All Contracts</option>
+              {contractData.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          )}
         </div>
       </div>
 
@@ -284,10 +327,17 @@ export default function InvoicesPage() {
           {/* ── Employees tab ─────────────────────────────────────────────── */}
           {tab === 'employees' && (
             <div className="space-y-4">
-              {employeeData.length === 0 && (
+              <input
+                type="text"
+                placeholder="Search employee…"
+                value={empSearch}
+                onChange={(e) => setEmpSearch(e.target.value)}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-52"
+              />
+              {employeeData.filter((d) => d.emp.name.toLowerCase().includes(empSearch.toLowerCase())).length === 0 && (
                 <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400">No job data for this period.</div>
               )}
-              {employeeData.map(({ emp, entries, totalPaidHours, totalPay }) => (
+              {employeeData.filter((d) => d.emp.name.toLowerCase().includes(empSearch.toLowerCase())).map(({ emp, entries, totalPaidHours, totalPay }) => (
                 <div key={emp.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
                     <div>
@@ -354,7 +404,7 @@ export default function InvoicesPage() {
               {subcontractorData.length === 0 && (
                 <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400">No subcontract jobs for this period.</div>
               )}
-              {subcontractorData.map(({ id, name, jobs: sj, totalRevenue }) => (
+              {subcontractorData.filter((s) => subFilter === 'all' || s.id === subFilter).map(({ id, name, jobs: sj, totalRevenue }) => (
                 <div key={id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
                     <span className="font-semibold text-gray-900">{name}</span>
@@ -400,7 +450,67 @@ export default function InvoicesPage() {
               {subcontractorData.length > 0 && (
                 <div className="bg-gray-900 text-white rounded-xl px-4 py-3 flex items-center justify-between">
                   <span className="text-sm font-semibold">Total revenue</span>
-                  <span className="text-lg font-bold">{fmtAUD(subcontractorData.reduce((s, d) => s + d.totalRevenue, 0))}</span>
+                  <span className="text-lg font-bold">{fmtAUD(subcontractorData.filter((s) => subFilter === 'all' || s.id === subFilter).reduce((s, d) => s + d.totalRevenue, 0))}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Contracts tab ────────────────────────────────────────────── */}
+          {tab === 'contracts' && (
+            <div className="space-y-4">
+              {contractData.length === 0 && (
+                <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400">No contract jobs for this period.</div>
+              )}
+              {contractData.filter((c) => contractFilter === 'all' || c.id === contractFilter).map(({ id, name, jobs: cj, totalRevenue }) => (
+                <div key={id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
+                    <span className="font-semibold text-gray-900">{name}</span>
+                    <div className="text-right">
+                      <div className="text-sm font-bold text-gray-800">{fmtAUD(totalRevenue)}</div>
+                      <div className="text-xs text-gray-400">{cj.length} job{cj.length !== 1 ? 's' : ''}</div>
+                    </div>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-100">
+                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-400">Date</th>
+                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-400">Job #</th>
+                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-400 hidden sm:table-cell">Client</th>
+                        <th className="text-left px-4 py-2 text-xs font-medium text-gray-400">Status</th>
+                        <th className="text-right px-4 py-2 text-xs font-medium text-gray-400">Revenue</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {cj.map(({ job, revenue }) => (
+                        <tr key={job.id} className="hover:bg-gray-50/50">
+                          <td className="px-4 py-2 text-gray-700 whitespace-nowrap">{job.date}</td>
+                          <td className="px-4 py-2 font-mono text-gray-900">#{job.job_number}</td>
+                          <td className="px-4 py-2 text-gray-500 text-xs hidden sm:table-cell">{job.contract_client?.name ?? '—'}</td>
+                          <td className="px-4 py-2">
+                            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[job.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                              {job.status.replace('_', ' ')}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 text-right font-medium text-gray-800">
+                            {revenue !== null ? fmtAUD(revenue) : <span className="text-gray-300">—</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t border-gray-200 bg-gray-50">
+                        <td colSpan={4} className="px-4 py-2 text-xs font-semibold text-gray-500">Total</td>
+                        <td className="px-4 py-2 text-right text-xs font-bold text-gray-900">{fmtAUD(totalRevenue)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              ))}
+              {contractData.length > 0 && (
+                <div className="bg-gray-900 text-white rounded-xl px-4 py-3 flex items-center justify-between">
+                  <span className="text-sm font-semibold">Total revenue</span>
+                  <span className="text-lg font-bold">{fmtAUD(contractData.filter((c) => contractFilter === 'all' || c.id === contractFilter).reduce((s, d) => s + d.totalRevenue, 0))}</span>
                 </div>
               )}
             </div>
