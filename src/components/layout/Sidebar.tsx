@@ -1,10 +1,11 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { Briefcase, Users, Truck, UserCircle, LayoutDashboard, X, Menu, Plus, DollarSign, Building2, FileText, Tag, Palette, BadgeDollarSign } from 'lucide-react'
+import { usePathname, useRouter } from 'next/navigation'
+import { Briefcase, Users, Truck, UserCircle, LayoutDashboard, X, Menu, Plus, DollarSign, Building2, FileText, Tag, Palette, BadgeDollarSign, LogOut } from 'lucide-react'
 import { useState } from 'react'
 import MalibuLogo from '@/components/ui/MalibuLogo'
+import { createClient } from '@/lib/supabase/client'
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -23,7 +24,17 @@ const navItems = [
 
 export default function Sidebar() {
   const pathname = usePathname()
+  const router = useRouter()
   const [open, setOpen] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
+
+  async function handleSignOut() {
+    setSigningOut(true)
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.push('/login')
+    router.refresh()
+  }
 
   return (
     <>
@@ -100,6 +111,18 @@ export default function Sidebar() {
             )
           })}
         </nav>
+
+        {/* Sign Out */}
+        <div className="px-2 py-3 border-t border-wire">
+          <button
+            onClick={handleSignOut}
+            disabled={signingOut}
+            className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm font-medium text-dim hover:bg-panel hover:text-danger transition-colors disabled:opacity-50"
+          >
+            <LogOut size={16} />
+            {signingOut ? 'Signing out…' : 'Sign Out'}
+          </button>
+        </div>
       </aside>
     </>
   )
