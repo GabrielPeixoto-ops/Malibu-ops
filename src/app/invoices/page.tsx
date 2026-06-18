@@ -34,6 +34,7 @@ interface InvoiceJob {
   contract: { id: string; name: string; billing_type: string; billing_config: Record<string, unknown> } | null
   contract_client: { name: string } | null
   job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; start_time: string | null; end_time: string | null }>
+  job_commissions: Array<{ employee_id: string | null; rate_per_hour: number; hours: number; commission_type: { name: string } | null }>
 }
 
 const fmtAUD = (n: number) =>
@@ -116,7 +117,8 @@ export default function InvoicesPage() {
         customer:customers(id, name, billing_type, billing_config),
         contract:contracts(id, name, billing_type, billing_config),
         contract_client:contract_clients(name),
-        job_crew(employee_id, hours, cof_share, cof_hours, start_time, end_time)
+        job_crew(employee_id, hours, cof_share, cof_hours, start_time, end_time),
+        job_commissions(employee_id, rate_per_hour, hours, commission_type:commission_types(name))
       `)
       .gte('date', dateFrom)
       .lte('date', dateTo)
@@ -142,6 +144,7 @@ export default function InvoicesPage() {
         paidHours: number
         pay: number
         googleReviewBonus: boolean
+        label?: string
       }> = []
       for (const job of filtered) {
         const row = job.job_crew.find((c) => c.employee_id === emp.id)
@@ -153,6 +156,19 @@ export default function InvoicesPage() {
         }
         if (job.extra_man_employee_id === emp.id && job.extra_men_hours > 0) {
           entries.push({ job, workedHours: job.extra_men_hours, cofHours: 0, paidHours: job.extra_men_hours, pay: job.extra_men_hours * emp.hourly_rate, googleReviewBonus: false })
+        }
+        for (const com of (job.job_commissions ?? [])) {
+          if (com.employee_id === emp.id && com.hours > 0 && com.rate_per_hour > 0) {
+            entries.push({
+              job,
+              workedHours: com.hours,
+              cofHours: 0,
+              paidHours: com.hours,
+              pay: com.hours * com.rate_per_hour,
+              googleReviewBonus: false,
+              label: com.commission_type?.name ?? 'Commission',
+            })
+          }
         }
       }
       const totalPaidHours = entries.reduce((s, e) => s + e.paidHours, 0)
@@ -309,12 +325,13 @@ export default function InvoicesPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-wire">
-                      {entries.map(({ job, paidHours, pay, googleReviewBonus }, i) => (
+                      {entries.map(({ job, paidHours, pay, googleReviewBonus, label }, i) => (
                         <tr key={`${job.id}-${i}`} className="hover:bg-panel transition-colors">
                           <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
                           <td className="px-4 py-2">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="font-mono text-parchment">#{job.job_number}</span>
+                              {label && <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-300 font-medium">Commission: {label}</span>}
                               {STATUS_STYLE[job.status] && (
                                 <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${STATUS_STYLE[job.status]}`}>{job.status}</span>
                               )}

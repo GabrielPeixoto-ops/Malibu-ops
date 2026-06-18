@@ -10,6 +10,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { calculateJobSummary, extractFormulaVars, type JobSummary, type PrivateRateInput } from '@/lib/billing'
 import type {
+  CommissionType,
   Contract,
   ContractClient,
   ContractRate,
@@ -81,6 +82,24 @@ interface PhotoLocal {
   caption: string
   storagePath?: string
   category: string
+}
+
+interface CasualCrewRow {
+  _id: string
+  dbId?: string
+  name: string
+  rate_per_hour: string
+  start_time: string
+  finish_time: string
+}
+
+interface CommissionRow {
+  _id: string
+  dbId?: string
+  commission_type_id: string
+  employee_id: string
+  rate_per_hour: string
+  hours: string
 }
 
 interface FormState {
@@ -312,6 +331,9 @@ export default function JobForm({ jobId }: { jobId?: string }) {
   const [form, setForm] = useState<FormState>(defaultForm())
   const [crew, setCrew] = useState<CrewRow[]>([])
   const [extraMen, setExtraMan] = useState<ExtraManRow[]>([])
+  const [casualCrew, setCasualCrew] = useState<CasualCrewRow[]>([])
+  const [commissions, setCommissions] = useState<CommissionRow[]>([])
+  const [commissionTypes, setCommissionTypes] = useState<CommissionType[]>([])
   const [materials, setMaterials] = useState<MaterialRow[]>([])
   const [photos, setPhotos] = useState<PhotoLocal[]>([])
   const [photoCaption, setPhotoCaption] = useState('')
@@ -356,6 +378,10 @@ export default function JobForm({ jobId }: { jobId?: string }) {
       setPrivateRates((ratesRes.data ?? []) as PrivateRate[])
       setFleet((fleetRes.data ?? []) as unknown as Fleet[])
       setCatalog((catalogRes.data ?? []) as unknown as MaterialCatalog[])
+      try {
+        const { data: ctData } = await supabase.from('commission_types').select('*').eq('is_active', true).order('sort_order')
+        setCommissionTypes((ctData ?? []) as CommissionType[])
+      } catch { /* migration not yet applied */ }
 
       try {
         const { data: srData } = await supabase.from('subcontractor_rates').select('*').eq('is_active', true).order('sort_order')
@@ -502,6 +528,30 @@ export default function JobForm({ jobId }: { jobId?: string }) {
               employee_id: r.employee_id ?? '',
               start_time: r.start_time ?? '',
               finish_time: r.finish_time ?? '',
+            })))
+          } catch { /* migration not yet applied */ }
+
+          try {
+            const { data: ccData } = await supabase.from('job_casual_crew').select('*').eq('job_id', jobId).order('created_at')
+            setCasualCrew((ccData ?? []).map((r: { id: string; name: string; rate_per_hour: number; start_time: string | null; finish_time: string | null }) => ({
+              _id: r.id,
+              dbId: r.id,
+              name: r.name,
+              rate_per_hour: r.rate_per_hour.toString(),
+              start_time: r.start_time ?? '',
+              finish_time: r.finish_time ?? '',
+            })))
+          } catch { /* migration not yet applied */ }
+
+          try {
+            const { data: comData } = await supabase.from('job_commissions').select('*').eq('job_id', jobId).order('created_at')
+            setCommissions((comData ?? []).map((r: { id: string; commission_type_id: string | null; employee_id: string | null; rate_per_hour: number; hours: number }) => ({
+              _id: r.id,
+              dbId: r.id,
+              commission_type_id: r.commission_type_id ?? '',
+              employee_id: r.employee_id ?? '',
+              rate_per_hour: r.rate_per_hour.toString(),
+              hours: r.hours.toString(),
             })))
           } catch { /* migration not yet applied */ }
 
@@ -673,6 +723,30 @@ const filteredCustomers = useMemo(
     const selectedContractRatePH = form.source === 'contract'
       ? (contractRates.find((r) => r.id === form.contract_rate_id)?.rate_per_hour ?? null)
       : null
+
+    const casualCrewForBilling = casualCrew
+      .filter((r) => r.name.trim())
+      .map((r) => ({
+        name: r.name,
+        rate_per_hour: parseFloat(r.rate_per_hour) || 0,
+        hours: (r.start_time.length === 5 && r.finish_time.length === 5)
+          ? Math.max(0, calcCrewHours(r.start_time, r.finish_time))
+          : 0,
+      }))
+      .filter((r) => r.hours > 0 && r.rate_per_hour > 0)
+
+    const commissionsForBilling = commissions
+      .filter((r) => r.employee_id && (parseFloat(r.hours) || 0) > 0 && (parseFloat(r.rate_per_hour) || 0) > 0)
+      .map((r) => {
+        const type = commissionTypes.find((t) => t.id === r.commission_type_id)
+        return {
+          employee_id: r.employee_id,
+          rate_per_hour: parseFloat(r.rate_per_hour) || 0,
+          hours: parseFloat(r.hours) || 0,
+          label: type ? `Commission: ${type.name}` : 'Commission',
+        }
+      })
+
     return calculateJobSummary(
       jobData,
       form.source === 'subcontract' ? selectedSub : null,
@@ -682,9 +756,11 @@ const filteredCustomers = useMemo(
       form.source !== 'subcontract' && form.source !== 'private' ? selectedEntity : null,
       form.source === 'private' ? selectedPrivateRateInput : null,
       { subcontractorRatePerHour: selectedSubRatePH, contractRatePerHour: selectedContractRatePH },
-      extraMenForBilling
+      extraMenForBilling,
+      casualCrewForBilling,
+      commissionsForBilling
     )
-  }, [form, crew, extraMen, materials, selectedSub, selectedEntity, selectedPrivateRateInput, employees, overrideOpen, overrideBilling, subRates, contractRates])
+  }, [form, crew, extraMen, casualCrew, commissions, commissionTypes, materials, selectedSub, selectedEntity, selectedPrivateRateInput, employees, overrideOpen, overrideBilling, subRates, contractRates])
 
   // ── COF suggestion from actual times ──────────────────────────────────────
   const suggestedCofFinal = useMemo<number | null>(() => {
@@ -805,6 +881,32 @@ const filteredCustomers = useMemo(
     setMaterials((m) => m.map((r) => (r._id === _id ? { ...r, [field]: value } : r)))
   }
   function removeMaterial(_id: string) { setMaterials((m) => m.filter((r) => r._id !== _id)) }
+
+  // ── Casual crew helpers ────────────────────────────────────────────────────
+  function addCasualCrew() {
+    setCasualCrew((c) => [...c, { _id: crypto.randomUUID(), name: '', rate_per_hour: '0', start_time: '', finish_time: '' }])
+  }
+  function updateCasualCrew(_id: string, field: keyof Omit<CasualCrewRow, '_id' | 'dbId'>, value: string) {
+    setCasualCrew((c) => c.map((r) => r._id === _id ? { ...r, [field]: value } : r))
+  }
+  function removeCasualCrew(_id: string) { setCasualCrew((c) => c.filter((r) => r._id !== _id)) }
+
+  // ── Commission helpers ─────────────────────────────────────────────────────
+  function addCommission() {
+    setCommissions((c) => [...c, { _id: crypto.randomUUID(), commission_type_id: '', employee_id: '', rate_per_hour: '', hours: '' }])
+  }
+  function updateCommission(_id: string, field: keyof Omit<CommissionRow, '_id' | 'dbId'>, value: string) {
+    setCommissions((c) => c.map((r) => {
+      if (r._id !== _id) return r
+      const updated = { ...r, [field]: value }
+      if (field === 'commission_type_id' && value) {
+        const type = commissionTypes.find((t) => t.id === value)
+        if (type) updated.rate_per_hour = type.rate_per_hour.toString()
+      }
+      return updated
+    }))
+  }
+  function removeCommission(_id: string) { setCommissions((c) => c.filter((r) => r._id !== _id)) }
 
   // ── Photo helpers ──────────────────────────────────────────────────────────
   async function uploadPhoto(file: File, category = photoCategory) {
@@ -998,6 +1100,32 @@ const filteredCustomers = useMemo(
           })))
         }
       } catch { /* migration not yet applied */ }
+      try {
+        await supabase.from('job_casual_crew').delete().eq('job_id', jobId)
+        const ccRows = casualCrew.filter((r) => r.name.trim())
+        if (ccRows.length) {
+          await supabase.from('job_casual_crew').insert(ccRows.map((r) => ({
+            job_id: jobId,
+            name: r.name.trim(),
+            rate_per_hour: parseFloat(r.rate_per_hour) || 0,
+            start_time: r.start_time || null,
+            finish_time: r.finish_time || null,
+          })))
+        }
+      } catch { /* migration not yet applied */ }
+      try {
+        await supabase.from('job_commissions').delete().eq('job_id', jobId)
+        const comRows = commissions.filter((r) => r.employee_id)
+        if (comRows.length) {
+          await supabase.from('job_commissions').insert(comRows.map((r) => ({
+            job_id: jobId,
+            commission_type_id: r.commission_type_id || null,
+            employee_id: r.employee_id || null,
+            rate_per_hour: parseFloat(r.rate_per_hour) || 0,
+            hours: parseFloat(r.hours) || 0,
+          })))
+        }
+      } catch { /* migration not yet applied */ }
     } else {
       const { data: job, error: insErr } = await supabase.from('jobs').insert(payload).select().single()
       if (insErr || !job) throw insErr ?? new Error('Insert failed')
@@ -1013,6 +1141,30 @@ const filteredCustomers = useMemo(
             employee_id: r.employee_id || null,
             start_time: r.start_time || null,
             finish_time: r.finish_time || null,
+          })))
+        }
+      } catch { /* migration not yet applied */ }
+      try {
+        const ccRows = casualCrew.filter((r) => r.name.trim())
+        if (ccRows.length) {
+          await supabase.from('job_casual_crew').insert(ccRows.map((r) => ({
+            job_id: newId,
+            name: r.name.trim(),
+            rate_per_hour: parseFloat(r.rate_per_hour) || 0,
+            start_time: r.start_time || null,
+            finish_time: r.finish_time || null,
+          })))
+        }
+      } catch { /* migration not yet applied */ }
+      try {
+        const comRows = commissions.filter((r) => r.employee_id)
+        if (comRows.length) {
+          await supabase.from('job_commissions').insert(comRows.map((r) => ({
+            job_id: newId,
+            commission_type_id: r.commission_type_id || null,
+            employee_id: r.employee_id || null,
+            rate_per_hour: parseFloat(r.rate_per_hour) || 0,
+            hours: parseFloat(r.hours) || 0,
           })))
         }
       } catch { /* migration not yet applied */ }
@@ -1642,6 +1794,187 @@ const filteredCustomers = useMemo(
             </div>
           )
         })}
+      </Card>
+    )
+  }
+
+  // ── SHARED: Casual / Packing Crew card ────────────────────────────────────
+  function renderCasualCrewCard(locked = false) {
+    return (
+      <Card
+        title="Casual / Packing Crew"
+        action={!locked ? (
+          <button type="button" onClick={addCasualCrew} className="flex items-center gap-1 text-xs text-gold hover:text-gold-bright font-medium">
+            <Plus size={14} /> Add Person
+          </button>
+        ) : undefined}
+      >
+        {casualCrew.length === 0 && <p className="text-sm text-dim text-center py-2">No casual crew added.</p>}
+        <div className="space-y-2">
+          {casualCrew.map((row) => {
+            const hasTime = row.start_time.length === 5 && row.finish_time.length === 5
+            const computed = hasTime ? Math.max(0, calcCrewHours(row.start_time, row.finish_time)) : null
+            const pay = computed !== null ? computed * (parseFloat(row.rate_per_hour) || 0) : null
+            return (
+              <div key={row._id} className="flex items-center gap-2 flex-wrap">
+                <input
+                  type="text"
+                  value={row.name}
+                  onChange={(e) => updateCasualCrew(row._id, 'name', e.target.value)}
+                  disabled={locked}
+                  placeholder="Person name…"
+                  className="flex-1 min-w-[120px] px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel disabled:text-dim"
+                />
+                <input
+                  type="time"
+                  value={row.start_time}
+                  onChange={(e) => updateCasualCrew(row._id, 'start_time', e.target.value)}
+                  disabled={locked}
+                  className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel"
+                />
+                <span className="text-dim text-xs">–</span>
+                <input
+                  type="time"
+                  value={row.finish_time}
+                  onChange={(e) => updateCasualCrew(row._id, 'finish_time', e.target.value)}
+                  disabled={locked}
+                  className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel"
+                />
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-dim">$</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.50"
+                    value={row.rate_per_hour}
+                    onChange={(e) => updateCasualCrew(row._id, 'rate_per_hour', e.target.value)}
+                    disabled={locked}
+                    placeholder="0"
+                    className="w-20 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel"
+                  />
+                  <span className="text-xs text-dim">/hr</span>
+                </div>
+                {computed !== null && (
+                  <span className="text-xs text-dim tabular-nums w-10">{computed}h</span>
+                )}
+                {pay !== null && (
+                  <span className="text-xs font-medium text-warm tabular-nums">{fmt(pay)}</span>
+                )}
+                {!locked && (
+                  <button type="button" onClick={() => removeCasualCrew(row._id)} className="text-dim hover:text-danger">
+                    <Trash2 size={15} />
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        {summary && summary.casualEntries.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-wire space-y-1">
+            {summary.casualEntries.map((e, i) => (
+              <div key={i} className="flex justify-between text-xs text-dim">
+                <span>{e.name} — {e.hours}h × ${e.rate_per_hour}</span>
+                <span className="font-medium">{fmt(e.pay)}</span>
+              </div>
+            ))}
+            <div className="flex justify-between text-xs font-semibold text-warm pt-1 border-t border-wire">
+              <span>Casual crew total</span>
+              <span>{fmt(summary.casualEntries.reduce((s, e) => s + e.pay, 0))}</span>
+            </div>
+          </div>
+        )}
+      </Card>
+    )
+  }
+
+  // ── SHARED: Commissions card ───────────────────────────────────────────────
+  function renderCommissionsCard(locked = false) {
+    return (
+      <Card
+        title="Commissions"
+        action={!locked ? (
+          <button type="button" onClick={addCommission} className="flex items-center gap-1 text-xs text-gold hover:text-gold-bright font-medium">
+            <Plus size={14} /> Add Commission
+          </button>
+        ) : undefined}
+      >
+        {commissions.length === 0 && <p className="text-sm text-dim text-center py-2">No commissions.</p>}
+        <div className="space-y-2">
+          {commissions.map((row) => {
+            const total = (parseFloat(row.rate_per_hour) || 0) * (parseFloat(row.hours) || 0)
+            return (
+              <div key={row._id} className="flex items-center gap-2 flex-wrap">
+                <select
+                  value={row.commission_type_id}
+                  onChange={(e) => updateCommission(row._id, 'commission_type_id', e.target.value)}
+                  disabled={locked}
+                  className="flex-1 min-w-[140px] px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel disabled:text-dim"
+                >
+                  <option value="">Type…</option>
+                  {commissionTypes.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name} (${t.rate_per_hour}/hr)</option>
+                  ))}
+                </select>
+                <select
+                  value={row.employee_id}
+                  onChange={(e) => updateCommission(row._id, 'employee_id', e.target.value)}
+                  disabled={locked}
+                  className="flex-1 min-w-[120px] px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel disabled:text-dim"
+                >
+                  <option value="">Employee…</option>
+                  {employees.map((e) => (
+                    <option key={e.id} value={e.id}>{e.name}</option>
+                  ))}
+                </select>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-dim">$</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.50"
+                    value={row.rate_per_hour}
+                    onChange={(e) => updateCommission(row._id, 'rate_per_hour', e.target.value)}
+                    disabled={locked}
+                    placeholder="0"
+                    className="w-20 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel"
+                  />
+                  <span className="text-xs text-dim">/hr</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={row.hours}
+                    onChange={(e) => updateCommission(row._id, 'hours', e.target.value)}
+                    disabled={locked}
+                    placeholder="hrs"
+                    className="w-16 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel"
+                  />
+                  <span className="text-xs text-dim">h</span>
+                </div>
+                {total > 0 && (
+                  <span className="text-xs font-medium text-warm tabular-nums">{fmt(total)}</span>
+                )}
+                {!locked && (
+                  <button type="button" onClick={() => removeCommission(row._id)} className="text-dim hover:text-danger">
+                    <Trash2 size={15} />
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        {summary && commissions.some((r) => r.employee_id && parseFloat(r.hours) > 0) && (
+          <div className="mt-3 pt-3 border-t border-wire space-y-1">
+            {summary.payrollEntries.filter((e) => e.label).map((e, i) => (
+              <div key={i} className="flex justify-between text-xs text-dim">
+                <span>{e.employee_name} — {e.label} — {e.hours}h × ${e.hourly_rate}</span>
+                <span className="font-medium">{fmt(e.pay)}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
     )
   }
@@ -2466,6 +2799,12 @@ const filteredCustomers = useMemo(
 
         {/* ── Crew ─────────────────────────────────────────────────────── */}
         {renderCrewCard(!isBooking, isReviewed)}
+
+        {/* ── Casual / Packing Crew ────────────────────────────────────── */}
+        {renderCasualCrewCard(isReviewed)}
+
+        {/* ── Commissions ──────────────────────────────────────────────── */}
+        {renderCommissionsCard(isReviewed)}
 
         {/* ── Materials ────────────────────────────────────────────────── */}
         {renderMaterialsCard(isReviewed)}

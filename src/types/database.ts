@@ -271,6 +271,37 @@ export interface JobPhoto {
   created_at?: string
 }
 
+export interface JobCasualCrew {
+  id: string
+  job_id: string
+  name: string
+  rate_per_hour: number
+  start_time: string | null
+  finish_time: string | null
+  created_at?: string
+}
+
+export interface CommissionType {
+  id: string
+  name: string
+  rate_per_hour: number
+  is_active: boolean
+  sort_order: number
+  created_at?: string
+}
+
+export interface JobCommission {
+  id: string
+  job_id: string
+  commission_type_id: string | null
+  employee_id: string | null
+  rate_per_hour: number
+  hours: number
+  created_at?: string
+  commission_type?: CommissionType
+  employee?: Employee
+}
+
 type TableDef<Row, Insert, Update> = {
   Row: Row
   Insert: Insert
