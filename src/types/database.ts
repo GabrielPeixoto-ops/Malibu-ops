@@ -60,6 +60,10 @@ export interface Subcontractor {
   config: SubcontractorConfig
   google_review_bonus: boolean
   color_hex: string | null
+  invoice_number_prefix: string | null
+  next_invoice_number: number | null
+  invoice_frequency: string | null
+  invoice_due_days: number | null
   created_at?: string
 }
 
@@ -223,6 +227,9 @@ export interface Job {
   subcontractor_crew_size: number | null
   subcontractor_rate_id: string | null
   contract_rate_id: string | null
+  contractor_job_id: string | null
+  gross_job_value: number | null
+  malibu_revenue: number | null
   created_at?: string
   subcontractor?: Subcontractor
   customer?: Customer

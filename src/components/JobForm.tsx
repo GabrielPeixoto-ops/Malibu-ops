@@ -154,6 +154,8 @@ interface FormState {
   subcontractor_crew_size: string
   subcontractor_rate_id: string
   contract_rate_id: string
+  contractor_job_id: string
+  gross_job_value: string
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -256,6 +258,8 @@ function defaultForm(): FormState {
     subcontractor_crew_size: '',
     subcontractor_rate_id: '',
     contract_rate_id: '',
+    contractor_job_id: '',
+    gross_job_value: '',
   }
 }
 
@@ -428,6 +432,8 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             subcontractor_crew_size: number | null
             subcontractor_rate_id: string | null
             contract_rate_id: string | null
+            contractor_job_id: string | null
+            gross_job_value: number | null
             job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; start_time: string | null; end_time: string | null }>
             job_materials: Array<{ material_name: string; quantity: number; cost_price: number; sale_price: number }>
           }
@@ -500,6 +506,8 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             subcontractor_crew_size: j.subcontractor_crew_size != null ? j.subcontractor_crew_size.toString() : '',
             subcontractor_rate_id: j.subcontractor_rate_id ?? '',
             contract_rate_id: j.contract_rate_id ?? '',
+            contractor_job_id: j.contractor_job_id ?? '',
+            gross_job_value: j.gross_job_value != null ? j.gross_job_value.toString() : '',
           })
 
           if (j.client_billing_config) {
@@ -604,6 +612,14 @@ export default function JobForm({ jobId }: { jobId?: string }) {
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const selectedSub = subs.find((s) => s.id === form.subcontractor_id) ?? null
+
+  const malibuRevenue = useMemo<number | null>(() => {
+    if (form.source !== 'subcontract' || selectedSub?.billing_type !== 'percent') return null
+    const gross = parseFloat(form.gross_job_value)
+    if (!gross || isNaN(gross)) return null
+    return gross * (selectedSub.config as PercentConfig).percent
+  }, [form.source, form.gross_job_value, selectedSub])
+
   const isBooking = ['draft', 'scheduled', 'confirmed'].includes(form.status)
   const isInProgress = form.status === 'in_progress'
   const isCompletionMode = form.status === 'completed' || form.status === 'reviewed'
@@ -1007,6 +1023,11 @@ const filteredCustomers = useMemo(
       return s + (h > 0 ? h : 0)
     }, 0)
 
+    const isPercentSub = form.source === 'subcontract' && selectedSub?.billing_type === 'percent'
+    const computedMalibuRevenue = isPercentSub && form.gross_job_value
+      ? (parseFloat(form.gross_job_value) || 0) * (selectedSub!.config as PercentConfig).percent
+      : null
+
     const payload = {
       job_number: form.job_number.trim(),
       date: form.date,
@@ -1058,6 +1079,9 @@ const filteredCustomers = useMemo(
       subcontractor_crew_size: form.source === 'subcontract' ? (parseInt(form.subcontractor_crew_size) || null) : null,
       subcontractor_rate_id: form.source === 'subcontract' ? (form.subcontractor_rate_id || null) : null,
       contract_rate_id: form.source === 'contract' ? (form.contract_rate_id || null) : null,
+      contractor_job_id: form.source === 'subcontract' ? (form.contractor_job_id.trim() || null) : null,
+      gross_job_value: isPercentSub ? (parseFloat(form.gross_job_value) || null) : null,
+      malibu_revenue: computedMalibuRevenue || null,
     }
 
     const crewRows = crew.filter((r) => r.employee_id).map((r) => ({
@@ -1279,6 +1303,7 @@ const filteredCustomers = useMemo(
               {form.subcontractor_rate_id && <p className="text-xs text-dim">Rate: {subRates.find((r) => r.id === form.subcontractor_rate_id)?.name ?? '—'}</p>}
               {form.subcontractor_trucks && <p className="text-xs text-dim">Trucks: {form.subcontractor_trucks}</p>}
               {form.subcontractor_crew_size && <p className="text-xs text-dim">Crew: {form.subcontractor_crew_size}</p>}
+              {form.contractor_job_id && <p className="text-xs text-dim">Contractor Job ID: {form.contractor_job_id}</p>}
             </div>
           ) : (
             <div className="space-y-3">
@@ -1324,6 +1349,12 @@ const filteredCustomers = useMemo(
                 value={form.subcontractor_crew_size ?? ''}
                 onChange={(e) => setField('subcontractor_crew_size', e.target.value)}
                 placeholder="e.g. 3"
+              />
+              <Input
+                label="Contractor Job ID"
+                value={form.contractor_job_id}
+                onChange={(e) => setField('contractor_job_id', e.target.value)}
+                placeholder="e.g. ABC-1234 (optional)"
               />
             </div>
           )
@@ -2102,6 +2133,12 @@ const filteredCustomers = useMemo(
                   <span className="text-warm">{form.reference_number}</span>
                 </div>
               )}
+              {form.contractor_job_id && (
+                <div className="flex gap-4">
+                  <span className="text-dim w-20 shrink-0">Ctrt. Job</span>
+                  <span className="text-warm">{form.contractor_job_id}</span>
+                </div>
+              )}
               <div className="flex gap-4">
                 <span className="text-dim w-20 shrink-0">Date</span>
                 <span className="text-warm">{form.date}</span>
@@ -2152,6 +2189,18 @@ const filteredCustomers = useMemo(
           {summary && (
             <Card title="Financials">
               <div className="space-y-1.5 text-sm">
+                {form.gross_job_value && (
+                  <div className="flex justify-between">
+                    <span className="text-dim">Gross Value</span>
+                    <span className="font-semibold text-parchment">{fmt(parseFloat(form.gross_job_value))}</span>
+                  </div>
+                )}
+                {malibuRevenue !== null && (
+                  <div className="flex justify-between">
+                    <span className="text-dim">Malibu Revenue</span>
+                    <span className="font-semibold text-gold">{fmt(malibuRevenue)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-dim">Revenue</span>
                   <span className="font-semibold text-parchment">{fmt(summary.totalRevenue)}</span>
@@ -2464,6 +2513,30 @@ const filteredCustomers = useMemo(
               <Input id="rfv-start" label="Actual Start" type="time" value={form.actual_start_time ?? ''} onChange={(e) => setField('actual_start_time', e.target.value)} disabled={isReviewed} />
               <Input id="rfv-finish" label="Actual Finish" type="time" value={form.actual_finish_time ?? ''} onChange={(e) => setField('actual_finish_time', e.target.value)} disabled={isReviewed} />
             </div>
+
+            {/* Gross Job Value (percent subs only) */}
+            {form.source === 'subcontract' && selectedSub?.billing_type === 'percent' && (
+              <div className="mb-3 pt-2 border-t border-wire">
+                <div className="grid grid-cols-2 gap-3">
+                  <Input
+                    label="Gross Job Value ($)"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.gross_job_value}
+                    onChange={(e) => setField('gross_job_value', e.target.value)}
+                    disabled={isReviewed}
+                    placeholder="0.00"
+                  />
+                  <div>
+                    <label className="block text-sm font-medium text-warm mb-1">Malibu Revenue</label>
+                    <p className="px-3 py-2 text-sm rounded-lg bg-panel border border-wire font-semibold text-gold">
+                      {malibuRevenue !== null ? fmt(malibuRevenue) : '—'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Extra Men */}
             <div className="mb-3 pt-2 border-t border-wire">

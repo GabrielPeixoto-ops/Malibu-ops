@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic'
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Plus, Pencil } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { calculateJobRevenue, calculateClientRevenue } from '@/lib/billing'
@@ -105,6 +106,7 @@ const filterInput = 'px-3 py-1.5 text-sm border border-wire rounded-lg bg-panel 
 
 export default function JobsPage() {
   const supabase = createClient()
+  const router = useRouter()
   const [jobs, setJobs] = useState<JobRow[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -229,8 +231,13 @@ export default function JobsPage() {
             <tbody className="divide-y divide-wire">
               {filtered.map((job) => {
                 const rev = calcRevenue(job)
+                const isViewable = job.status === 'invoiced' || job.status === 'paid'
                 return (
-                  <tr key={job.id} className="hover:bg-panel transition-colors">
+                  <tr
+                    key={job.id}
+                    className={`hover:bg-panel transition-colors ${isViewable ? 'cursor-pointer' : ''}`}
+                    onClick={isViewable ? () => router.push(`/jobs/${job.id}/edit`) : undefined}
+                  >
                     <td className="px-4 py-3 font-mono font-semibold text-parchment">{job.job_number}</td>
                     <td className="px-4 py-3 text-warm">{job.date}</td>
                     <td className="px-4 py-3 hidden sm:table-cell">

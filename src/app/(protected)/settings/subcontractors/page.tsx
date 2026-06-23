@@ -56,6 +56,8 @@ function emptyForm() {
     defaults: '{}',
     google_review_bonus: false,
     color_hex: '#6B6660',
+    next_invoice_number: '',
+    invoice_due_days: '7',
   }
 }
 
@@ -84,6 +86,8 @@ function formFromSub(sub: Subcontractor): ReturnType<typeof emptyForm> {
   f.billing_type = sub.billing_type
   f.google_review_bonus = sub.google_review_bonus ?? false
   f.color_hex = sub.color_hex ?? '#6B6660'
+  f.next_invoice_number = sub.next_invoice_number != null ? String(sub.next_invoice_number) : ''
+  f.invoice_due_days = sub.invoice_due_days != null ? String(sub.invoice_due_days) : '7'
   if (sub.billing_type === 'percent') {
     f.percent = String((sub.config as PercentConfig).percent)
   } else if (sub.billing_type === 'ratecard') {
@@ -207,7 +211,15 @@ export default function SubcontractorsPage() {
   async function handleSave() {
     if (!form.name.trim()) { setError('Name is required'); return }
     setSaving(true)
-    const payload = { name: form.name.trim(), billing_type: form.billing_type, config: buildConfig(form), google_review_bonus: form.google_review_bonus, color_hex: form.color_hex || '#6B6660' }
+    const payload = {
+      name: form.name.trim(),
+      billing_type: form.billing_type,
+      config: buildConfig(form),
+      google_review_bonus: form.google_review_bonus,
+      color_hex: form.color_hex || '#6B6660',
+      next_invoice_number: form.next_invoice_number.trim() ? parseInt(form.next_invoice_number) : null,
+      invoice_due_days: parseInt(form.invoice_due_days) || 7,
+    }
     if (editing) {
       await supabase.from('subcontractors').update(payload).eq('id', editing.id)
     } else {
@@ -415,6 +427,30 @@ export default function SubcontractorsPage() {
               </div>
             </>
           )}
+
+          <div className="border-t border-wire pt-4">
+            <p className="text-xs font-semibold text-dim uppercase tracking-wide mb-3">Invoice Settings</p>
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Next Invoice #"
+                type="number"
+                step="1"
+                min="1"
+                value={form.next_invoice_number}
+                onChange={(e) => setField('next_invoice_number', e.target.value)}
+                placeholder="e.g. 3001"
+              />
+              <Input
+                label="Due Days"
+                type="number"
+                step="1"
+                min="0"
+                value={form.invoice_due_days}
+                onChange={(e) => setField('invoice_due_days', e.target.value)}
+                placeholder="7"
+              />
+            </div>
+          </div>
 
           {error && <p className="text-sm text-danger">{error}</p>}
           <div className="flex gap-2 pt-2">
