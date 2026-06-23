@@ -246,7 +246,7 @@ export default function CustomersPage() {
           </div>
 
           <div>
-            <p className="text-xs font-medium text-dim mb-2">Secondary Contact <span className="font-normal text-dim/70">(optional)</span></p>
+            <p className="text-xs font-medium text-dim mb-2">Secondary Contact <span className="font-normal text-dim">(optional)</span></p>
             <div className="grid grid-cols-2 gap-2">
               <Input label="Name" value={form.secondary_contact_name} onChange={(e) => setForm((f) => ({ ...f, secondary_contact_name: e.target.value }))} placeholder="e.g. Jack, husband" />
               <Input label="Phone" value={form.secondary_contact_phone} onChange={(e) => setForm((f) => ({ ...f, secondary_contact_phone: e.target.value }))} placeholder="0412 345 679" />

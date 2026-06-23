@@ -24,7 +24,7 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(
             w-full px-3 py-2 text-sm rounded-lg bg-panel text-parchment
             border transition-colors
             focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring
-            disabled:opacity-40 disabled:cursor-not-allowed
+            disabled:opacity-60 disabled:cursor-not-allowed
             ${error ? 'border-danger/60' : 'border-wire'}
             ${className}
           `}

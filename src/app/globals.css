@@ -5,7 +5,7 @@
   --color-void:    #0A0A0A;
   --color-surface: #161616;
   --color-panel:   #1F1F1F;
-  --color-wire:    #2A2A2A;
+  --color-wire:    #363330;
 
   /* Gold palette */
   --color-gold:        #D4AF37;
@@ -15,7 +15,7 @@
   /* Text */
   --color-parchment: #F5F2EA;
   --color-warm:      #A8A29A;
-  --color-dim:       #6B6660;
+  --color-dim:       #8C8680;
 
   /* Semantic */
   --color-success: #4ADE80;
