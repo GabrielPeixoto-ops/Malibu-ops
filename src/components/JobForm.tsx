@@ -2465,7 +2465,7 @@ const filteredCustomers = useMemo(
 
         {/* ── Reviewed lock banner ──────────────────────────────────────── */}
         {form.status === 'reviewed' && !editAnyway && (
-          <div className="bg-amber-50 border border-amber-300 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+          <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
             <span className="text-sm font-medium text-amber-300">This job has been reviewed and is locked.</span>
             <button
               type="button"
@@ -2479,11 +2479,11 @@ const filteredCustomers = useMemo(
 
         {/* ── FINAL REVIEW (completed / reviewed) ──────────────────────── */}
         {isCompletionMode && (
-          <div className={`rounded-xl border-2 p-4 ${isReviewed ? 'border-cyan-300 bg-cyan-50/60' : 'border-amber-300 bg-amber-50/60'}`}>
+          <div className={`rounded-xl border-2 p-4 ${isReviewed ? 'border-cyan-500/50 bg-cyan-500/10' : 'border-amber-500/50 bg-amber-500/10'}`}>
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 {isReviewed
-                  ? <Lock size={16} className="text-cyan-600" />
+                  ? <Lock size={16} className="text-cyan-300" />
                   : <CheckCircle size={16} className="text-gold" />
                 }
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-warm">Final Review</h2>
@@ -2529,7 +2529,7 @@ const filteredCustomers = useMemo(
                     placeholder="0.00"
                   />
                   <div>
-                    <label className="block text-sm font-medium text-warm mb-1">Malibu Revenue</label>
+                    <label className="block text-sm font-medium text-parchment mb-1">Malibu Revenue</label>
                     <p className="px-3 py-2 text-sm rounded-lg bg-panel border border-wire font-semibold text-gold">
                       {malibuRevenue !== null ? fmt(malibuRevenue) : '—'}
                     </p>
@@ -2541,14 +2541,14 @@ const filteredCustomers = useMemo(
             {/* Extra Men */}
             <div className="mb-3 pt-2 border-t border-wire">
               <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-medium text-warm">Extra Men</label>
+                <label className="text-sm font-medium text-white">Extra Men</label>
                 {!isReviewed && (
                   <button type="button" onClick={addExtraMan} className="flex items-center gap-1 text-xs text-gold hover:text-gold-bright font-medium">
                     <Plus size={13} /> Add Extra Man
                   </button>
                 )}
               </div>
-              {extraMen.length === 0 && <p className="text-xs text-dim">No extra men added.</p>}
+              {extraMen.length === 0 && <p className="text-xs text-dim opacity-100">No extra men added.</p>}
               <div className="space-y-2">
                 {extraMen.map((row) => {
                   const hasTime = row.start_time.length === 5 && row.finish_time.length === 5
@@ -2582,7 +2582,7 @@ const filteredCustomers = useMemo(
             {/* Completion notes */}
             <div className="mb-3">
               <div className="flex items-center justify-between mb-1">
-                <label className="text-sm font-medium text-warm">Completion Notes</label>
+                <label className="text-sm font-medium text-white">Completion Notes</label>
                 <label className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-dim border border-wire rounded-lg hover:bg-panel cursor-pointer">
                   <ImagePlus size={13} />
                   Photo
@@ -2607,7 +2607,7 @@ const filteredCustomers = useMemo(
 
             {/* Google Review */}
             <div className="mb-3 pt-3 border-t border-wire">
-              <label className="flex items-center gap-2 text-sm font-medium text-warm cursor-pointer mb-2">
+              <label className="flex items-center gap-2 text-sm font-medium text-white cursor-pointer mb-2">
                 <input
                   type="checkbox"
                   checked={form.google_review}
@@ -2624,7 +2624,7 @@ const filteredCustomers = useMemo(
               {form.google_review && (
                 <div className="space-y-2 pl-1">
                   <div>
-                    <p className="text-xs text-dim mb-1.5">Who received the review <span className="text-gold">(+0.5h each)</span></p>
+                    <p className="text-xs text-white mb-1.5">Who received the review <span className="text-gold">(+0.5h each)</span></p>
                     <div className="flex flex-wrap gap-1.5">
                       {(() => {
                         const crewEmpIds = crew.filter((r) => r.employee_id).map((r) => r.employee_id)
@@ -2647,7 +2647,7 @@ const filteredCustomers = useMemo(
                                   : [...form.google_review_employee_ids, emp.id]
                               )}
                               disabled={isReviewed}
-                              className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors disabled:opacity-50 ${
+                              className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
                                 checked ? 'bg-gold/10 text-gold border-gold-ring' : 'bg-panel text-warm border-wire hover:border-gold-ring'
                               }`}
                             >
@@ -2662,7 +2662,7 @@ const filteredCustomers = useMemo(
                     </div>
                   </div>
                   <div>
-                    <p className="text-xs text-dim mb-1.5">Screenshot (optional)</p>
+                    <p className="text-xs text-white mb-1.5">Screenshot (optional)</p>
                     <label className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gold border border-gold-ring/50 rounded-lg hover:bg-gold/8 cursor-pointer w-fit">
                       <ImagePlus size={13} />
                       {uploadingPhoto ? 'Uploading…' : 'Upload screenshot'}
