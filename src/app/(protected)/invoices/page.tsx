@@ -4,11 +4,28 @@ export const dynamic = 'force-dynamic'
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { ExternalLink } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { calculateJobRevenue, calculateClientRevenue } from '@/lib/billing'
 import type { Employee, JobSource, JobStatus, Subcontractor, SubcontractorConfig } from '@/types/database'
 
 type Tab = 'employees' | 'subcontractors' | 'contracts' | 'clients'
+
+interface FormalInvoice {
+  id: string
+  invoice_number: string
+  type: 'subcontractor' | 'b2b_client' | 'tmaat'
+  entity_id: string
+  entity_name: string
+  period_from: string
+  period_to: string
+  status: 'draft' | 'sent' | 'paid'
+  total_amount: number
+  notes: string | null
+  xero_invoice_id: string | null
+  xero_invoice_url: string | null
+  created_at: string
+}
 
 interface InvoiceJob {
   id: string
@@ -98,12 +115,20 @@ export default function InvoicesPage() {
   const [contractFilter, setContractFilter] = useState('all')
   const [jobs, setJobs] = useState<InvoiceJob[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
+  const [formalInvoices, setFormalInvoices] = useState<FormalInvoice[]>([])
+  const [sendingInvoice, setSendingInvoice] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     supabase.from('employees').select('*').eq('active', true).order('name').then(({ data }) => {
       setEmployees((data ?? []) as Employee[])
     })
+    supabase
+      .from('invoices')
+      .select('id,invoice_number,type,entity_id,entity_name,period_from,period_to,status,total_amount,notes,xero_invoice_id,xero_invoice_url,created_at')
+      .in('type', ['subcontractor', 'b2b_client'])
+      .order('created_at', { ascending: false })
+      .then(({ data }) => setFormalInvoices((data ?? []) as FormalInvoice[]))
   }, [])
 
   useEffect(() => {
@@ -220,6 +245,37 @@ export default function InvoicesPage() {
       .map(([key, { label, jobs: cj }]) => ({ key, label, jobs: cj, totalRevenue: cj.reduce((s, { revenue }) => s + (revenue ?? 0), 0) }))
       .sort((a, b) => a.label.localeCompare(b.label))
   }, [filtered])
+
+  async function handleSendToXero(invoiceId: string) {
+    setSendingInvoice(invoiceId)
+    try {
+      const res = await fetch('/api/xero/send-invoice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoice_id: invoiceId }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        alert(`Erro ao enviar para Xero: ${data.error ?? res.status}`)
+      } else {
+        setFormalInvoices((prev) =>
+          prev.map((inv) =>
+            inv.id === invoiceId
+              ? { ...inv, status: 'sent', xero_invoice_id: data.xero_invoice_id, xero_invoice_url: data.xero_invoice_url }
+              : inv
+          )
+        )
+        if (data.xero_invoice_url) window.open(data.xero_invoice_url, '_blank', 'noopener')
+      }
+    } catch (err) {
+      alert(`Erro de rede: ${err}`)
+    } finally {
+      setSendingInvoice(null)
+    }
+  }
+
+  const formalSubInvoices = formalInvoices.filter((inv) => inv.type === 'subcontractor')
+  const formalClientInvoices = formalInvoices.filter((inv) => inv.type === 'b2b_client')
 
   const tabs: Array<{ id: Tab; label: string }> = [
     { id: 'employees', label: 'Employees' },
@@ -369,6 +425,63 @@ export default function InvoicesPage() {
           {/* ── Subcontractors ────────────────────────────────────────── */}
           {tab === 'subcontractors' && (
             <div className="space-y-4">
+              {formalSubInvoices.length > 0 && (
+                <div className="bg-surface rounded-xl border border-wire overflow-hidden">
+                  <div className={groupHeader}>
+                    <span className="font-semibold text-parchment">Formal Invoices</span>
+                    <span className="text-xs text-dim">{formalSubInvoices.length} invoice{formalSubInvoices.length !== 1 ? 's' : ''}</span>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-wire">
+                        <th className={thCell}>Invoice #</th>
+                        <th className={thCell}>Entity</th>
+                        <th className={`${thCell} hidden sm:table-cell`}>Period</th>
+                        <th className={`${thCell} text-right`}>Total</th>
+                        <th className={`${thCell} text-right`}>Status</th>
+                        <th className={thCell} />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-wire">
+                      {formalSubInvoices.map((inv) => (
+                        <tr key={inv.id}>
+                          <td className="px-4 py-2 font-mono text-parchment text-xs">{inv.invoice_number}</td>
+                          <td className="px-4 py-2 text-warm text-xs">{inv.entity_name}</td>
+                          <td className="px-4 py-2 text-dim text-xs hidden sm:table-cell">{inv.period_from} – {inv.period_to}</td>
+                          <td className="px-4 py-2 text-right font-mono font-semibold text-gold text-xs">{fmtAUD(inv.total_amount)}</td>
+                          <td className="px-4 py-2 text-right">
+                            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                              inv.status === 'paid' ? 'bg-teal-500/10 text-teal-300' :
+                              inv.status === 'sent' ? 'bg-purple-500/10 text-purple-300' :
+                              'bg-wire/50 text-warm'
+                            }`}>{inv.status}</span>
+                          </td>
+                          <td className="px-4 py-2 text-right whitespace-nowrap">
+                            {inv.status === 'draft' ? (
+                              <button
+                                onClick={() => handleSendToXero(inv.id)}
+                                disabled={sendingInvoice === inv.id}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-gold/15 text-gold hover:bg-gold/25 transition-colors disabled:opacity-50"
+                              >
+                                {sendingInvoice === inv.id ? 'Enviando…' : 'Enviar para Xero'}
+                              </button>
+                            ) : inv.xero_invoice_url ? (
+                              <a
+                                href={inv.xero_invoice_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-xs text-gold hover:text-gold-bright"
+                              >
+                                Ver no Xero <ExternalLink size={11} />
+                              </a>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
               {subcontractorData.length === 0 && (
                 <div className="bg-surface rounded-xl border border-wire p-12 text-center text-dim">No subcontract jobs for this period.</div>
               )}
@@ -487,6 +600,63 @@ export default function InvoicesPage() {
           {/* ── Clients ──────────────────────────────────────────────── */}
           {tab === 'clients' && (
             <div className="space-y-4">
+              {formalClientInvoices.length > 0 && (
+                <div className="bg-surface rounded-xl border border-wire overflow-hidden">
+                  <div className={groupHeader}>
+                    <span className="font-semibold text-parchment">Formal Invoices (B2B)</span>
+                    <span className="text-xs text-dim">{formalClientInvoices.length} invoice{formalClientInvoices.length !== 1 ? 's' : ''}</span>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-wire">
+                        <th className={thCell}>Invoice #</th>
+                        <th className={thCell}>Client</th>
+                        <th className={`${thCell} hidden sm:table-cell`}>Period</th>
+                        <th className={`${thCell} text-right`}>Total</th>
+                        <th className={`${thCell} text-right`}>Status</th>
+                        <th className={thCell} />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-wire">
+                      {formalClientInvoices.map((inv) => (
+                        <tr key={inv.id}>
+                          <td className="px-4 py-2 font-mono text-parchment text-xs">{inv.invoice_number}</td>
+                          <td className="px-4 py-2 text-warm text-xs">{inv.entity_name}</td>
+                          <td className="px-4 py-2 text-dim text-xs hidden sm:table-cell">{inv.period_from} – {inv.period_to}</td>
+                          <td className="px-4 py-2 text-right font-mono font-semibold text-gold text-xs">{fmtAUD(inv.total_amount)}</td>
+                          <td className="px-4 py-2 text-right">
+                            <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
+                              inv.status === 'paid' ? 'bg-teal-500/10 text-teal-300' :
+                              inv.status === 'sent' ? 'bg-purple-500/10 text-purple-300' :
+                              'bg-wire/50 text-warm'
+                            }`}>{inv.status}</span>
+                          </td>
+                          <td className="px-4 py-2 text-right whitespace-nowrap">
+                            {inv.status === 'draft' ? (
+                              <button
+                                onClick={() => handleSendToXero(inv.id)}
+                                disabled={sendingInvoice === inv.id}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-gold/15 text-gold hover:bg-gold/25 transition-colors disabled:opacity-50"
+                              >
+                                {sendingInvoice === inv.id ? 'Enviando…' : 'Enviar para Xero'}
+                              </button>
+                            ) : inv.xero_invoice_url ? (
+                              <a
+                                href={inv.xero_invoice_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-xs text-gold hover:text-gold-bright"
+                              >
+                                Ver no Xero <ExternalLink size={11} />
+                              </a>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
               {clientData.length === 0 && (
                 <div className="bg-surface rounded-xl border border-wire p-12 text-center text-dim">No client jobs for this period.</div>
               )}

@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Briefcase, Users, Truck, UserCircle, LayoutDashboard, X, Menu, Plus, DollarSign, Building2, FileText, Tag, Palette, BadgeDollarSign, LogOut } from 'lucide-react'
+import { Briefcase, Users, Truck, UserCircle, LayoutDashboard, X, Menu, Plus, DollarSign, Building2, FileText, Tag, Palette, BadgeDollarSign, LogOut, Plug } from 'lucide-react'
 import { useState } from 'react'
 import MalibuLogo from '@/components/ui/MalibuLogo'
 import { createClient } from '@/lib/supabase/client'
@@ -20,6 +20,7 @@ const navItems = [
   { href: '/settings/fleet', label: 'Fleet', icon: Truck },
   { href: '/settings/entity-colors', label: 'Entity Colors', icon: Palette },
   { href: '/settings/commissions', label: 'Commissions', icon: BadgeDollarSign },
+  { href: '/settings/xero', label: 'Xero', icon: Plug },
 ]
 
 export default function Sidebar() {
