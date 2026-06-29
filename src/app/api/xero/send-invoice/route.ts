@@ -50,7 +50,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   }
 
   const lineItems = invJobs && invJobs.length > 0
-    ? (invJobs as InvJob[]).map((ij) => ({
+    ? (invJobs as unknown as InvJob[]).map((ij) => ({
         Description: ij.job
           ? `Job #${ij.job.job_number} — ${ij.job.date}` +
             (ij.job.pickup_address ? ` (${ij.job.pickup_address})` : '')
