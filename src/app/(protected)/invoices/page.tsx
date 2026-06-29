@@ -3,6 +3,7 @@
 export const dynamic = 'force-dynamic'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { calculateJobRevenue, calculateClientRevenue } from '@/lib/billing'
 import type { Employee, JobSource, JobStatus, Subcontractor, SubcontractorConfig } from '@/types/database'
@@ -86,6 +87,7 @@ const filterInput = 'px-3 py-1.5 text-sm border border-wire rounded-lg bg-panel 
 
 export default function InvoicesPage() {
   const supabase = createClient()
+  const router = useRouter()
 
   const [tab, setTab] = useState<Tab>('employees')
   const [dateFrom, setDateFrom] = useState(monthStart())
@@ -326,7 +328,7 @@ export default function InvoicesPage() {
                     </thead>
                     <tbody className="divide-y divide-wire">
                       {entries.map(({ job, paidHours, pay, googleReviewBonus, label }, i) => (
-                        <tr key={`${job.id}-${i}`} className="hover:bg-panel transition-colors">
+                        <tr key={`${job.id}-${i}`} className="hover:bg-panel transition-colors cursor-pointer" onClick={() => router.push(`/jobs/${job.id}/edit`)}>
                           <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
                           <td className="px-4 py-2">
                             <div className="flex items-center gap-1.5 flex-wrap">
@@ -390,7 +392,7 @@ export default function InvoicesPage() {
                     </thead>
                     <tbody className="divide-y divide-wire">
                       {sj.map(({ job, revenue }) => (
-                        <tr key={job.id} className="hover:bg-panel transition-colors">
+                        <tr key={job.id} className="hover:bg-panel transition-colors cursor-pointer" onClick={() => router.push(`/jobs/${job.id}/edit`)}>
                           <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
                           <td className="px-4 py-2 font-mono text-parchment">#{job.job_number}</td>
                           <td className="px-4 py-2">
@@ -449,7 +451,7 @@ export default function InvoicesPage() {
                     </thead>
                     <tbody className="divide-y divide-wire">
                       {cj.map(({ job, revenue }) => (
-                        <tr key={job.id} className="hover:bg-panel transition-colors">
+                        <tr key={job.id} className="hover:bg-panel transition-colors cursor-pointer" onClick={() => router.push(`/jobs/${job.id}/edit`)}>
                           <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
                           <td className="px-4 py-2 font-mono text-parchment">#{job.job_number}</td>
                           <td className="px-4 py-2 text-dim text-xs hidden sm:table-cell">{job.contract_client?.name ?? '—'}</td>
@@ -508,7 +510,7 @@ export default function InvoicesPage() {
                     </thead>
                     <tbody className="divide-y divide-wire">
                       {cj.map(({ job, revenue }) => (
-                        <tr key={job.id} className="hover:bg-panel transition-colors">
+                        <tr key={job.id} className="hover:bg-panel transition-colors cursor-pointer" onClick={() => router.push(`/jobs/${job.id}/edit`)}>
                           <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
                           <td className="px-4 py-2 font-mono text-parchment">#{job.job_number}</td>
                           <td className="px-4 py-2">
