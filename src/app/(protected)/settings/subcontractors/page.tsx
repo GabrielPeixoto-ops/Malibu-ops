@@ -331,9 +331,9 @@ export default function SubcontractorsPage() {
 
           {form.billing_type === 'percent' && (
             <Input
-              label="Percent (e.g. 0.57 = 57%)"
+              label="Percent (e.g. 0.575 = 57.5%)"
               type="number"
-              step="0.01"
+              step="0.001"
               min="0"
               max="1"
               value={form.percent}
