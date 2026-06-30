@@ -279,7 +279,7 @@ export default function SubcontractorsPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-dim text-xs hidden sm:table-cell">
-                    {sub.billing_type === 'percent' && `${((sub.config as PercentConfig).percent * 100).toFixed(0)}%`}
+                    {sub.billing_type === 'percent' && `${parseFloat(((sub.config as PercentConfig).percent * 100).toFixed(1))}%`}
                     {sub.billing_type === 'ratecard' && (() => {
                       const c = sub.config as RateCardConfig
                       if (!c?.rates) return ''
