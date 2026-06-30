@@ -29,16 +29,16 @@ export default function XeroSettingsPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     if (params.get('connected')) {
-      setBanner({ type: 'ok', text: 'Xero conectado com sucesso!' })
+      setBanner({ type: 'ok', text: 'Xero connected successfully!' })
     } else if (params.get('error')) {
       const code = params.get('error')
       const msgs: Record<string, string> = {
-        invalid_state: 'Estado OAuth inválido — tenta novamente.',
-        token_exchange: 'Erro ao trocar o código por token — verifica as credenciais.',
-        db_save: 'Tokens obtidos mas falhou a guardar na base de dados.',
-        network: 'Erro de rede ao contactar o Xero.',
+        invalid_state: 'Invalid OAuth state — please try again.',
+        token_exchange: 'Failed to exchange code for token — check your credentials.',
+        db_save: 'Tokens received but failed to save to the database.',
+        network: 'Network error contacting Xero.',
       }
-      setBanner({ type: 'err', text: msgs[code ?? ''] ?? `Erro: ${code}` })
+      setBanner({ type: 'err', text: msgs[code ?? ''] ?? `Error: ${code}` })
     }
 
     fetchStatus().finally(() => setLoading(false))
@@ -49,14 +49,14 @@ export default function XeroSettingsPage() {
     try {
       const res = await fetch('/api/xero/refresh', { method: 'POST' })
       if (res.ok) {
-        setBanner({ type: 'ok', text: 'Token renovado com sucesso.' })
+        setBanner({ type: 'ok', text: 'Token refreshed successfully.' })
         await fetchStatus()
       } else {
         const d = await res.json()
-        setBanner({ type: 'err', text: d.error ?? 'Falhou a renovação.' })
+        setBanner({ type: 'err', text: d.error ?? 'Token refresh failed.' })
       }
     } catch {
-      setBanner({ type: 'err', text: 'Erro de rede ao renovar token.' })
+      setBanner({ type: 'err', text: 'Network error refreshing token.' })
     } finally {
       setRefreshing(false)
     }
@@ -81,31 +81,31 @@ export default function XeroSettingsPage() {
       {/* Connection status card */}
       <div className="bg-surface rounded-xl border border-wire p-6 mb-4">
         <h2 className="text-xs font-semibold text-dim uppercase tracking-wide mb-5">
-          Estado da Conexão
+          Connection Status
         </h2>
 
         {loading ? (
-          <p className="text-warm text-sm">A verificar…</p>
+          <p className="text-warm text-sm">Checking…</p>
         ) : status?.connected ? (
           <div className="space-y-4">
             <div className="flex items-start gap-3">
               <CheckCircle size={20} className="text-success shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-semibold text-parchment">Conectado</p>
+                <p className="text-sm font-semibold text-parchment">Connected</p>
                 {status.tenant_name && (
                   <p className="text-xs text-dim mt-0.5">
-                    Organização: <span className="text-warm">{status.tenant_name}</span>
+                    Organisation: <span className="text-warm">{status.tenant_name}</span>
                   </p>
                 )}
                 {status.expires_at && (
                   <p className="text-xs text-dim mt-0.5">
-                    Token expira em{' '}
-                    {new Date(status.expires_at).toLocaleString('pt-AU', {
+                    Token expires{' '}
+                    {new Date(status.expires_at).toLocaleString('en-AU', {
                       dateStyle: 'medium',
                       timeStyle: 'short',
                     })}
                     {status.token_expired && (
-                      <span className="ml-1 text-danger font-medium">(expirado)</span>
+                      <span className="ml-1 text-danger font-medium">(expired)</span>
                     )}
                   </p>
                 )}
@@ -120,7 +120,7 @@ export default function XeroSettingsPage() {
                 variant="secondary"
               >
                 <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
-                {refreshing ? 'A renovar…' : 'Renovar Token'}
+                {refreshing ? 'Refreshing…' : 'Refresh Token'}
               </Button>
             )}
 
@@ -129,7 +129,7 @@ export default function XeroSettingsPage() {
                 href="/api/xero/auth"
                 className="text-sm text-gold hover:text-gold-bright underline"
               >
-                Reconectar / Trocar conta Xero
+                Reconnect / Switch Xero account
               </a>
             </div>
           </div>
@@ -137,12 +137,12 @@ export default function XeroSettingsPage() {
           <div className="space-y-4">
             <div className="flex items-center gap-3">
               <XCircle size={20} className="text-dim shrink-0" />
-              <p className="text-sm text-warm">Não conectado</p>
+              <p className="text-sm text-warm">Not connected</p>
             </div>
             <a href="/api/xero/auth">
               <Button size="md">
                 <Plug size={15} />
-                Conectar Xero
+                Connect Xero
               </Button>
             </a>
           </div>
@@ -152,11 +152,11 @@ export default function XeroSettingsPage() {
       {/* Webhook instructions */}
       <div className="bg-surface rounded-xl border border-wire p-4 text-sm space-y-3">
         <h2 className="text-xs font-semibold text-dim uppercase tracking-wide">
-          Webhook (para pagamentos automáticos)
+          Webhook (automatic payment updates)
         </h2>
         <div className="space-y-1 text-xs text-dim">
           <p>
-            1. No Xero: <span className="text-warm">Settings → Webhooks → New</span>
+            1. In Xero: <span className="text-warm">Settings → Webhooks → New</span>
           </p>
           <p>
             2. URL:{' '}
@@ -164,8 +164,8 @@ export default function XeroSettingsPage() {
               https://malibu-ops.vercel.app/api/xero/webhook
             </code>
           </p>
-          <p>3. Copia a <span className="text-warm">Webhook Key</span> e adiciona ao Vercel como <code className="font-mono">XERO_WEBHOOK_KEY</code></p>
-          <p className="text-dim/70">Eventos: Invoice — Update</p>
+          <p>3. Copy the <span className="text-warm">Webhook Key</span> and add it to Vercel as <code className="font-mono">XERO_WEBHOOK_KEY</code></p>
+          <p className="text-dim/70">Events: Invoice — Update</p>
         </div>
         <a
           href="https://developer.xero.com/documentation/guides/webhooks/overview/"
@@ -173,7 +173,7 @@ export default function XeroSettingsPage() {
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1 text-xs text-gold hover:text-gold-bright"
         >
-          Documentação Xero Webhooks
+          Xero Webhooks Documentation
           <ExternalLink size={11} />
         </a>
       </div>

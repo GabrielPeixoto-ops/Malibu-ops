@@ -256,7 +256,7 @@ export default function InvoicesPage() {
       })
       const data = await res.json()
       if (!res.ok) {
-        alert(`Erro ao enviar para Xero: ${data.error ?? res.status}`)
+        alert(`Failed to send to Xero: ${data.error ?? res.status}`)
       } else {
         setFormalInvoices((prev) =>
           prev.map((inv) =>
@@ -268,7 +268,7 @@ export default function InvoicesPage() {
         if (data.xero_invoice_url) window.open(data.xero_invoice_url, '_blank', 'noopener')
       }
     } catch (err) {
-      alert(`Erro de rede: ${err}`)
+      alert(`Network error: ${err}`)
     } finally {
       setSendingInvoice(null)
     }
@@ -463,7 +463,7 @@ export default function InvoicesPage() {
                                 disabled={sendingInvoice === inv.id}
                                 className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-gold/15 text-gold hover:bg-gold/25 transition-colors disabled:opacity-50"
                               >
-                                {sendingInvoice === inv.id ? 'Enviando…' : 'Enviar para Xero'}
+                                {sendingInvoice === inv.id ? 'Sending…' : 'Send to Xero'}
                               </button>
                             ) : inv.xero_invoice_url ? (
                               <a
@@ -472,7 +472,7 @@ export default function InvoicesPage() {
                                 rel="noopener noreferrer"
                                 className="inline-flex items-center gap-1 text-xs text-gold hover:text-gold-bright"
                               >
-                                Ver no Xero <ExternalLink size={11} />
+                                View in Xero <ExternalLink size={11} />
                               </a>
                             ) : null}
                           </td>
@@ -638,7 +638,7 @@ export default function InvoicesPage() {
                                 disabled={sendingInvoice === inv.id}
                                 className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-gold/15 text-gold hover:bg-gold/25 transition-colors disabled:opacity-50"
                               >
-                                {sendingInvoice === inv.id ? 'Enviando…' : 'Enviar para Xero'}
+                                {sendingInvoice === inv.id ? 'Sending…' : 'Send to Xero'}
                               </button>
                             ) : inv.xero_invoice_url ? (
                               <a
@@ -647,7 +647,7 @@ export default function InvoicesPage() {
                                 rel="noopener noreferrer"
                                 className="inline-flex items-center gap-1 text-xs text-gold hover:text-gold-bright"
                               >
-                                Ver no Xero <ExternalLink size={11} />
+                                View in Xero <ExternalLink size={11} />
                               </a>
                             ) : null}
                           </td>
