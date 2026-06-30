@@ -60,7 +60,6 @@ export interface Subcontractor {
   config: SubcontractorConfig
   google_review_bonus: boolean
   color_hex: string | null
-  next_invoice_number: number | null
   created_at?: string
 }
 
