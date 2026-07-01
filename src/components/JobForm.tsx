@@ -485,8 +485,8 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             discount: j.discount?.toString() ?? '',
             notes: j.notes ?? '',
             completion_notes: j.completion_notes ?? '',
-            actual_start_time: j.actual_start_time ?? (j.scheduled_time ?? ''),
-            actual_finish_time: j.actual_finish_time ?? (j.scheduled_finish_time ?? ''),
+            actual_start_time: j.actual_start_time ?? '',
+            actual_finish_time: j.actual_finish_time ?? '',
             scheduled_time: j.scheduled_time ?? '',
             scheduled_finish_time: j.scheduled_finish_time ?? '',
             reference_number: j.reference_number ?? '',
@@ -731,13 +731,21 @@ const filteredCustomers = useMemo(
       override_revenue: malibuRevenue ?? null,
     }
     const cofFinalHrs = form.cof_final.trim() ? (parseFloat(form.cof_final) || null) : null
+    const _billingWorkedHrs = (() => {
+      if (!form.actual_start_time || !form.actual_finish_time) return null
+      const [sh, sm] = form.actual_start_time.split(':').map(Number)
+      const [eh, em] = form.actual_finish_time.split(':').map(Number)
+      const rawMins = (eh * 60 + em) - (sh * 60 + sm) - (parseFloat(form.break_minutes) || 0)
+      if (rawMins <= 0) return null
+      return Math.round(rawMins / 15) * 15 / 60
+    })()
     const crewData = crew.filter((r) => r.employee_id).map((r) => ({
       employee_id: r.employee_id,
       hours: crewHasTime(r) ? calcCrewHours(r.start_time, r.end_time)
-             : r.cof_share ? (cofFinalHrs ?? (parseFloat(r.hours) || 0))
+             : _billingWorkedHrs !== null ? _billingWorkedHrs
              : (parseFloat(r.hours) || 0),
       cof_share: r.cof_share,
-      cof_hours: r.cof_share ? (parseFloat(r.cof_hours) || 0.5) : 0,
+      cof_hours: r.cof_share ? (cofFinalHrs ?? 0) : 0,
     }))
     const matsData = materials.map((m) => ({
       quantity: parseFloat(m.quantity) || 0,
@@ -755,9 +763,14 @@ const filteredCustomers = useMemo(
       .filter((r) => r.name.trim())
       .map((r) => {
         const hasTime = r.start_time.length === 5 && r.finish_time.length === 5
-        const hours = hasTime
-          ? Math.max(0, calcCrewHours(r.start_time, r.finish_time))
-          : (r.cof_share ? (cofFinalHrs ?? 0) : 0)
+        let hours: number
+        if (hasTime) {
+          hours = Math.max(0, calcCrewHours(r.start_time, r.finish_time))
+        } else if (_billingWorkedHrs !== null) {
+          hours = Math.max(2, _billingWorkedHrs) + (r.cof_share ? (cofFinalHrs ?? 0) : 0)
+        } else {
+          hours = r.cof_share ? (cofFinalHrs ?? 0) : 0
+        }
         return { name: r.name, rate_per_hour: parseFloat(r.rate_per_hour) || 0, hours }
       })
       .filter((r) => r.hours > 0 && r.rate_per_hour > 0)
@@ -789,29 +802,18 @@ const filteredCustomers = useMemo(
     )
   }, [form, crew, extraMen, casualCrew, commissions, commissionTypes, materials, selectedSub, selectedEntity, selectedPrivateRateInput, employees, overrideOpen, overrideBilling, subRates, contractRates])
 
-  // ── COF suggestion from actual times ──────────────────────────────────────
-  const suggestedCofFinal = useMemo<number | null>(() => {
+  // ── Worked hours from actual times (rounded to nearest 15 min) ──────────
+  const workedHoursCalc = useMemo<number | null>(() => {
     if (!form.actual_start_time || !form.actual_finish_time) return null
     const [sh, sm] = form.actual_start_time.split(':').map(Number)
     const [eh, em] = form.actual_finish_time.split(':').map(Number)
     const totalMins = (eh * 60 + em) - (sh * 60 + sm)
     if (totalMins <= 0) return null
     const breakMins = parseFloat(form.break_minutes) || 0
-    const hrs = Math.round(((totalMins - breakMins) / 60) * 100) / 100
-    return hrs > 0 ? hrs : null
+    const rawMins = totalMins - breakMins
+    if (rawMins <= 0) return null
+    return Math.round(rawMins / 15) * 15 / 60
   }, [form.actual_start_time, form.actual_finish_time, form.break_minutes])
-
-  useEffect(() => {
-    if (!form.actual_start_time || !form.actual_finish_time) return
-    const [sh, sm] = form.actual_start_time.split(':').map(Number)
-    const [eh, em] = form.actual_finish_time.split(':').map(Number)
-    const totalMins = (eh * 60 + em) - (sh * 60 + sm)
-    if (totalMins <= 0) return
-    const breakMins = parseFloat(form.break_minutes) || 0
-    const hrs = Math.round(((totalMins - breakMins) / 60) * 100) / 100
-    if (hrs > 0) setForm((f) => ({ ...f, cof_final: hrs.toString() }))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.actual_start_time, form.actual_finish_time])
 
   // ── Field helpers ──────────────────────────────────────────────────────────
   function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -1104,17 +1106,34 @@ const filteredCustomers = useMemo(
 
     const cofFinalVal = form.cof_final.trim() ? (parseFloat(form.cof_final) || null) : null
 
-    const crewRows = crew.filter((r) => r.employee_id).map((r) => ({
-      employee_id: r.employee_id,
-      hours: crewHasTime(r) ? calcCrewHours(r.start_time, r.end_time)
-             : r.cof_share ? (cofFinalVal ?? (parseFloat(r.hours) || 0))
-             : (parseFloat(r.hours) || 0),
-      cof_share: r.cof_share,
-      cof_hours: parseFloat(r.cof_hours) || 0.5,
-      role: null,
-      start_time: r.start_time || null,
-      end_time: r.end_time || null,
-    }))
+    const workedHrsForSave = (() => {
+      if (!form.actual_start_time || !form.actual_finish_time) return null
+      const [sh, sm] = form.actual_start_time.split(':').map(Number)
+      const [eh, em] = form.actual_finish_time.split(':').map(Number)
+      const rawMins = (eh * 60 + em) - (sh * 60 + sm) - (parseFloat(form.break_minutes) || 0)
+      if (rawMins <= 0) return null
+      return Math.round(rawMins / 15) * 15 / 60
+    })()
+
+    const crewRows = crew.filter((r) => r.employee_id).map((r) => {
+      let hours: number
+      if (crewHasTime(r)) {
+        hours = calcCrewHours(r.start_time, r.end_time)
+      } else if (workedHrsForSave !== null) {
+        hours = Math.max(2, workedHrsForSave) + (r.cof_share ? (cofFinalVal ?? 0) : 0)
+      } else {
+        hours = r.cof_share ? (cofFinalVal ?? (parseFloat(r.hours) || 0)) : (parseFloat(r.hours) || 0)
+      }
+      return {
+        employee_id: r.employee_id,
+        hours,
+        cof_share: r.cof_share,
+        cof_hours: 0,
+        role: null,
+        start_time: r.start_time || null,
+        end_time: r.end_time || null,
+      }
+    })
     const matRows = materials.filter((m) => m.material_name.trim()).map((m) => ({
       material_name: m.material_name.trim(),
       quantity: parseFloat(m.quantity) || 1,
@@ -1152,9 +1171,14 @@ const filteredCustomers = useMemo(
         if (ccRows.length) {
           await supabase.from('job_casual_crew').insert(ccRows.map((r) => {
             const hasTime = r.start_time.length === 5 && r.finish_time.length === 5
-            const hours = hasTime
-              ? Math.max(0, calcCrewHours(r.start_time, r.finish_time))
-              : (r.cof_share ? (cofFinalVal ?? 0) : 0)
+            let hours: number
+            if (hasTime) {
+              hours = Math.max(0, calcCrewHours(r.start_time, r.finish_time))
+            } else if (workedHrsForSave !== null) {
+              hours = Math.max(2, workedHrsForSave) + (r.cof_share ? (cofFinalVal ?? 0) : 0)
+            } else {
+              hours = r.cof_share ? (cofFinalVal ?? 0) : 0
+            }
             return {
               job_id: jobId,
               name: r.name.trim(),
@@ -1203,9 +1227,14 @@ const filteredCustomers = useMemo(
         if (ccRows.length) {
           await supabase.from('job_casual_crew').insert(ccRows.map((r) => {
             const hasTime = r.start_time.length === 5 && r.finish_time.length === 5
-            const hours = hasTime
-              ? Math.max(0, calcCrewHours(r.start_time, r.finish_time))
-              : (r.cof_share ? (cofFinalVal ?? 0) : 0)
+            let hours: number
+            if (hasTime) {
+              hours = Math.max(0, calcCrewHours(r.start_time, r.finish_time))
+            } else if (workedHrsForSave !== null) {
+              hours = Math.max(2, workedHrsForSave) + (r.cof_share ? (cofFinalVal ?? 0) : 0)
+            } else {
+              hours = r.cof_share ? (cofFinalVal ?? 0) : 0
+            }
             return {
               job_id: newId,
               name: r.name.trim(),
@@ -1660,22 +1689,6 @@ const filteredCustomers = useMemo(
                     />
                     COF
                   </label>
-                  {row.cof_share && (
-                    <div className="flex items-center gap-1 shrink-0">
-                      <input
-                        type="number"
-                        min="0.5"
-                        step="0.5"
-                        value={row.cof_hours ?? ''}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value)
-                          updateCrew(row._id, 'cof_hours', isNaN(val) ? '0.5' : Math.max(0.5, val).toString())
-                        }}
-                        className="w-16 px-2 py-1.5 text-sm text-center border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
-                      />
-                      <span className="text-xs text-dim whitespace-nowrap">hrs</span>
-                    </div>
-                  )}
                   <button type="button" onClick={() => removeCrew(row._id)} className="text-dim hover:text-danger shrink-0" aria-label="Remove">
                     <Trash2 size={15} />
                   </button>
@@ -1733,23 +1746,6 @@ const filteredCustomers = useMemo(
                     <input type="checkbox" checked={row.cof_share} onChange={(e) => updateCrew(row._id, 'cof_share', e.target.checked)} disabled={locked} className="rounded" />
                     COF
                   </label>
-                  {row.cof_share && (
-                    <div className="flex items-center gap-1 shrink-0">
-                      <input
-                        type="number"
-                        min="0.5"
-                        step="0.5"
-                        value={row.cof_hours ?? ''}
-                        disabled={locked}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value)
-                          updateCrew(row._id, 'cof_hours', isNaN(val) ? '0.5' : Math.max(0.5, val).toString())
-                        }}
-                        className="w-16 px-2 py-1.5 text-sm text-center border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel"
-                      />
-                      <span className="text-xs text-dim">hrs</span>
-                    </div>
-                  )}
                   {!locked && (
                     <button type="button" onClick={() => removeCrew(row._id)} className="ml-auto text-dim hover:text-danger" aria-label="Remove">
                       <Trash2 size={15} />
@@ -2187,7 +2183,7 @@ const filteredCustomers = useMemo(
       const emp = empMap.get(r.employee_id)
       if (!emp) return null
       const workedHours = resolveCrewHours(r)
-      const cofHours = r.cof_share ? (parseFloat(r.cof_hours) || 0.5) : 0
+      const cofHours = r.cof_share ? (parseFloat(r.cof_hours) || 0) : 0
       const reviewBonus = form.google_review && form.google_review_employee_ids.includes(emp.id) ? 0.5 : 0
       const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus
       const pay = paidHours * emp.hourly_rate
@@ -2597,24 +2593,45 @@ const filteredCustomers = useMemo(
               )}
             </div>
 
-            {/* Adjustment fields */}
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <div>
-                <Input id="rfv-cof-final" label="COF Final (hrs)" type="number" min="0" step="0.25" value={form.cof_final ?? ''} onChange={(e) => setField('cof_final', e.target.value)} placeholder={form.cof || '—'} disabled={isReviewed} />
-                {suggestedCofFinal !== null && !isReviewed && (
-                  <button type="button" onClick={() => setField('cof_final', suggestedCofFinal.toString())} className="mt-1 text-xs text-gold hover:text-gold-bright">
-                    ↑ Use {suggestedCofFinal}h from actual times
-                  </button>
-                )}
-              </div>
-              <Input id="rfv-break" label="Break (min)" type="number" step="1" value={form.break_minutes ?? ''} onChange={(e) => setField('break_minutes', e.target.value)} placeholder="0" disabled={isReviewed} />
-            </div>
-
             {/* Actual times */}
             <div className="grid grid-cols-2 gap-3 mb-3">
               <Input id="rfv-start" label="Actual Start" type="time" value={form.actual_start_time ?? ''} onChange={(e) => setField('actual_start_time', e.target.value)} disabled={isReviewed} />
               <Input id="rfv-finish" label="Actual Finish" type="time" value={form.actual_finish_time ?? ''} onChange={(e) => setField('actual_finish_time', e.target.value)} disabled={isReviewed} />
             </div>
+
+            {/* Break + Call Out Fee */}
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <Input id="rfv-break" label="Break (min)" type="number" step="1" value={form.break_minutes ?? ''} onChange={(e) => setField('break_minutes', e.target.value)} placeholder="0" disabled={isReviewed} />
+              <Input id="rfv-cof-final" label="Call Out Fee (hrs)" type="number" min="0" step="0.25" value={form.cof_final ?? ''} onChange={(e) => setField('cof_final', e.target.value)} placeholder="0" disabled={isReviewed} />
+            </div>
+
+            {/* Hours worked breakdown */}
+            {workedHoursCalc !== null && (
+              <div className="mb-3 p-3 rounded-lg bg-panel/60 border border-wire space-y-1.5 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-dim">Hours worked</span>
+                  <span className="font-mono text-warm">{workedHoursCalc.toFixed(2)}h</span>
+                </div>
+                {workedHoursCalc < 2 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-amber-400 bg-amber-500/15 px-2 py-0.5 rounded-full">Minimum Call Applied</span>
+                    <span className="text-xs text-dim font-mono">2.00h</span>
+                  </div>
+                )}
+                {(parseFloat(form.cof_final) || 0) > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-dim">Call Out Fee</span>
+                    <span className="font-mono text-warm">+{(parseFloat(form.cof_final) || 0).toFixed(2)}h</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between font-semibold pt-1.5 border-t border-wire">
+                  <span className="text-parchment">Total paid per crew</span>
+                  <span className="font-mono text-gold">
+                    {(Math.max(2, workedHoursCalc) + (parseFloat(form.cof_final) || 0)).toFixed(2)}h
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* Gross Job Value (percent subs only) */}
             {form.source === 'subcontract' && selectedSub?.billing_type === 'percent' && (

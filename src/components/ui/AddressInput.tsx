@@ -1,9 +1,29 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import type { InputHTMLAttributes } from 'react'
 import Input from './Input'
-import { useGoogleMapsPlaces } from '@/hooks/useGoogleMapsPlaces'
+
+interface Suggestion {
+  placeId: string
+  text: string
+  mainText: string
+  secondaryText: string
+}
+
+interface PlacesResponse {
+  suggestions?: Array<{
+    placePrediction: {
+      placeId: string
+      text: { text: string }
+      structuredFormat: {
+        mainText: { text: string }
+        secondaryText?: { text: string }
+      }
+    }
+  }>
+  error?: { message: string; status: string }
+}
 
 interface AddressInputProps
   extends Omit<InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value'> {
@@ -12,48 +32,108 @@ interface AddressInputProps
   onValueChange: (value: string) => void
 }
 
+const API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+
+async function fetchPlaceSuggestions(input: string): Promise<Suggestion[]> {
+  if (!input || input.length < 3 || !API_KEY) return []
+
+  try {
+    const res = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': API_KEY,
+        'X-Goog-FieldMask':
+          'suggestions.placePrediction.placeId,suggestions.placePrediction.text,suggestions.placePrediction.structuredFormat',
+      },
+      body: JSON.stringify({
+        input,
+        includedRegionCodes: ['au'],
+        languageCode: 'en',
+      }),
+    })
+
+    const data: PlacesResponse = await res.json()
+
+    if (data.error) {
+      console.warn('[AddressInput] Places API error:', data.error.status, data.error.message)
+      return []
+    }
+
+    return (data.suggestions ?? []).map(({ placePrediction: p }) => ({
+      placeId: p.placeId,
+      text: p.text.text,
+      mainText: p.structuredFormat.mainText.text,
+      secondaryText: p.structuredFormat.secondaryText?.text ?? '',
+    }))
+  } catch (err) {
+    console.warn('[AddressInput] fetch error:', err)
+    return []
+  }
+}
+
 export default function AddressInput({
   value,
   onValueChange,
   disabled,
+  label,
   ...rest
 }: AddressInputProps) {
-  const inputRef = useRef<HTMLInputElement>(null)
-  const { ready, failed } = useGoogleMapsPlaces()
-  const acRef = useRef<google.maps.places.Autocomplete | null>(null)
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  const [open, setOpen] = useState(false)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  useEffect(() => {
-    // Skip autocomplete entirely if Maps failed, not ready yet, or field is disabled.
-    if (!ready || failed || !inputRef.current || disabled) return
+  const query = useCallback(async (input: string) => {
+    const results = await fetchPlaceSuggestions(input)
+    setSuggestions(results)
+    setOpen(results.length > 0)
+  }, [])
 
-    try {
-      acRef.current = new google.maps.places.Autocomplete(inputRef.current, {
-        types: ['address'],
-        componentRestrictions: { country: 'au' },
-      })
-
-      const listener = acRef.current.addListener('place_changed', () => {
-        const place = acRef.current!.getPlace()
-        const addr = place.formatted_address ?? inputRef.current?.value ?? ''
-        onValueChange(addr)
-      })
-
-      return () => {
-        google.maps.event.removeListener(listener)
-      }
-    } catch (err) {
-      console.warn('[AddressInput] Failed to initialise Places Autocomplete:', err)
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const v = e.target.value
+    onValueChange(v)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (v.length >= 3) {
+      debounceRef.current = setTimeout(() => query(v), 300)
+    } else {
+      setSuggestions([])
+      setOpen(false)
     }
-  }, [ready, failed, disabled])
+  }
 
-  // Always render a functional Input — autocomplete is progressive enhancement.
+  function handleSelect(text: string) {
+    onValueChange(text)
+    setSuggestions([])
+    setOpen(false)
+  }
+
   return (
-    <Input
-      ref={inputRef}
-      value={value}
-      onChange={(e) => onValueChange(e.target.value)}
-      disabled={disabled}
-      {...rest}
-    />
+    <div className="relative">
+      <Input
+        label={label}
+        value={value}
+        onChange={handleChange}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        disabled={disabled}
+        autoComplete="off"
+        {...rest}
+      />
+      {open && suggestions.length > 0 && (
+        <ul className="absolute z-50 w-full mt-1 bg-panel border border-wire rounded-lg shadow-xl overflow-hidden">
+          {suggestions.map((s) => (
+            <li
+              key={s.placeId}
+              onMouseDown={() => handleSelect(s.text)}
+              className="px-3 py-2 text-sm cursor-pointer border-t border-wire first:border-t-0 hover:bg-surface"
+            >
+              <span className="text-parchment">{s.mainText}</span>
+              {s.secondaryText && (
+                <span className="text-dim text-xs ml-1">, {s.secondaryText}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }

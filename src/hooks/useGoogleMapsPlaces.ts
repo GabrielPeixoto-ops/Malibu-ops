@@ -1,20 +1,42 @@
+'use client'
+
 import { useEffect, useState } from 'react'
 
 type Status = 'idle' | 'loading' | 'ready' | 'failed'
 
-// Module-level singletons — script is only injected once.
+// Module-level singletons — script is only injected once per page load.
 let status: Status = 'idle'
 const listeners: Array<() => void> = []
+
+const CALLBACK_NAME = '__googleMapsPlacesReady__'
 
 function notifyAll() {
   listeners.forEach((fn) => fn())
   listeners.length = 0
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const gwin = () => (typeof window !== 'undefined' ? (window as any) : null)
+
+function isAlreadyLoaded() {
+  return !!gwin()?.google?.maps?.places
+}
+
 export function useGoogleMapsPlaces(): { ready: boolean; failed: boolean } {
-  const [st, setSt] = useState<Status>(status)
+  const [st, setSt] = useState<Status>(() => {
+    // If a previous render cycle already loaded the API, pick it up immediately.
+    if (isAlreadyLoaded()) status = 'ready'
+    return status
+  })
 
   useEffect(() => {
+    // Re-check after hydration in case the API was already present on the window.
+    if (isAlreadyLoaded()) {
+      status = 'ready'
+      setSt('ready')
+      return
+    }
+
     if (status === 'ready' || status === 'failed') {
       setSt(status)
       return
@@ -23,7 +45,7 @@ export function useGoogleMapsPlaces(): { ready: boolean; failed: boolean } {
     const onUpdate = () => setSt(status)
     listeners.push(onUpdate)
 
-    // Already loading — just wait for the listener to fire.
+    // Already loading — just wait for the callback to fire.
     if (status === 'loading') {
       return () => {
         const i = listeners.indexOf(onUpdate)
@@ -35,35 +57,38 @@ export function useGoogleMapsPlaces(): { ready: boolean; failed: boolean } {
     status = 'loading'
 
     const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+    console.log('[Maps] key:', key ? `${key.slice(0, 8)}… (present)` : 'MISSING')
+
     if (!key) {
-      console.warn('[AddressInput] NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is not set — address autocomplete disabled.')
+      console.warn('[Maps] NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is not set — autocomplete disabled.')
       status = 'failed'
       setSt('failed')
       return
     }
 
-    // Google calls this global when the key is invalid / API not enabled.
-    ;(window as Window & { gm_authFailure?: () => void }).gm_authFailure = () => {
-      console.warn('[AddressInput] Google Maps auth failure — check that Places API is enabled and the key has no domain restrictions blocking this origin.')
+    // Named callback: Google calls this ONLY after the full API + libraries are
+    // initialised. More reliable than script.onload for this purpose.
+    gwin()[CALLBACK_NAME] = () => {
+      console.info('[Maps] Places API ready ✓')
+      status = 'ready'
+      notifyAll()
+    }
+
+    gwin().gm_authFailure = () => {
+      console.warn('[Maps] gm_authFailure — verify Maps JavaScript API and Places API are enabled in Google Cloud, and the key has no restrictions blocking this origin.')
       status = 'failed'
       notifyAll()
     }
 
     const script = document.createElement('script')
-    script.id = 'google-maps-places-script'
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places`
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places&callback=${CALLBACK_NAME}`
     script.async = true
-    script.defer = true
-    script.onload = () => {
-      console.info('[AddressInput] Google Maps Places API loaded successfully.')
-      status = 'ready'
-      notifyAll()
-    }
     script.onerror = () => {
-      console.warn('[AddressInput] Google Maps script failed to load (network error or blocked).')
+      console.warn('[Maps] Script failed to load (network error or blocked URL).')
       status = 'failed'
       notifyAll()
     }
+    console.log('[Maps] Injecting Maps JS script…')
     document.head.appendChild(script)
 
     return () => {
