@@ -5,22 +5,22 @@ export const dynamic = 'force-dynamic'
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Plus, Pencil } from 'lucide-react'
+import { Plus, Pencil, Briefcase, AlertCircle, TrendingUp, CheckCircle2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { calculateJobRevenue, calculateClientRevenue } from '@/lib/billing'
 import type { JobSource, JobStatus, Subcontractor, SubcontractorConfig } from '@/types/database'
 import Button from '@/components/ui/Button'
 
 const STATUS_STYLE: Record<JobStatus, string> = {
-  draft:       'bg-wire/50 text-warm',
-  scheduled:   'bg-blue-500/10 text-blue-300',
-  confirmed:   'bg-indigo-500/10 text-indigo-300',
-  in_progress: 'bg-amber-500/10 text-amber-300',
-  completed:   'bg-green-500/10 text-green-300',
-  reviewed:    'bg-cyan-500/10 text-cyan-300',
-  invoiced:    'bg-purple-500/10 text-purple-300',
-  paid:        'bg-teal-500/10 text-teal-300',
-  cancelled:   'bg-red-500/10 text-red-400',
+  draft:       'bg-gray-100 text-gray-500',
+  scheduled:   'bg-amber-100 text-amber-700',
+  confirmed:   'bg-blue-100 text-blue-700',
+  in_progress: 'bg-green-100 text-green-700',
+  completed:   'bg-green-100 text-green-700',
+  reviewed:    'bg-sky-100 text-sky-700',
+  invoiced:    'bg-purple-100 text-purple-700',
+  paid:        'bg-gray-100 text-gray-500',
+  cancelled:   'bg-red-100 text-red-600',
 }
 
 interface JobRow {
@@ -39,6 +39,7 @@ interface JobRow {
   break_minutes: number
   discount: number
   override_revenue: number | null
+  malibu_revenue: number | null
   client_billing_config: Record<string, unknown> | null
   subcontractor: Subcontractor | null
   customer: { name: string; billing_type: string | null; billing_config: Record<string, unknown> | null } | null
@@ -59,7 +60,9 @@ function entityLabel(job: JobRow): string {
 function calcRevenue(job: JobRow): number | null {
   try {
     if (job.source === 'subcontract') {
-      return job.subcontractor ? calculateJobRevenue(job, job.subcontractor) : null
+      if (!job.subcontractor) return null
+      const effectiveOverride = job.malibu_revenue ?? job.override_revenue
+      return calculateJobRevenue({ ...job, override_revenue: effectiveOverride }, job.subcontractor)
     }
     const entity = job.source === 'private' ? job.customer : job.contract
     if (!entity?.billing_type || !entity?.billing_config) return null
@@ -75,8 +78,21 @@ function calcRevenue(job: JobRow): number | null {
 
 function SourceBadge({ source }: { source: JobSource }) {
   if (source === 'private') return <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gold/15 text-gold leading-none">Private</span>
-  if (source === 'contract') return <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-500/15 text-teal-300 leading-none">Contract</span>
+  if (source === 'contract') return <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-500/15 text-teal-600 leading-none">Contract</span>
   return null
+}
+
+function StatCard({ icon, label, value, sub, accent }: { icon: React.ReactNode; label: string; value: string; sub: string; accent?: boolean }) {
+  return (
+    <div className={`bg-surface rounded-xl border border-wire px-4 py-3.5 flex flex-col gap-1 ${accent ? 'border-l-2 border-l-gold-ring' : ''}`}>
+      <div className="flex items-center gap-1.5 text-dim">
+        {icon}
+        <span className="text-[10px] font-semibold uppercase tracking-widest">{label}</span>
+      </div>
+      <div className={`text-xl font-display font-bold tabular-nums ${accent ? 'text-gold' : 'text-parchment'}`}>{value}</div>
+      <div className="text-[11px] text-dim">{sub}</div>
+    </div>
+  )
 }
 
 const fmtAUD = (n: number) =>
@@ -102,7 +118,25 @@ const STATUS_OPTIONS: { value: JobStatus | 'all'; label: string }[] = [
   { value: 'cancelled', label: 'Cancelled' },
 ]
 
-const filterInput = 'px-3 py-1.5 text-sm border border-wire rounded-lg bg-panel text-parchment placeholder:text-dim focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring'
+const filterInput = 'px-3 py-1.5 text-sm border border-wire rounded-lg bg-surface text-parchment placeholder:text-dim focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring'
+
+function getWeekStart(): string {
+  const d = new Date()
+  const dow = d.getDay() === 0 ? -6 : 1 - d.getDay()
+  d.setDate(d.getDate() + dow)
+  d.setHours(0, 0, 0, 0)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function getMonthStart(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+}
+
+function getToday(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 export default function JobsPage() {
   const supabase = createClient()
@@ -122,7 +156,7 @@ export default function JobsPage() {
         .select(`
           id, job_number, date, status, source,
           cof, cof_final, additional_hours, additional_rate, rate_card_key, formula_vars,
-          extra_men_hours, break_minutes, discount, override_revenue, client_billing_config,
+          extra_men_hours, break_minutes, discount, override_revenue, malibu_revenue, client_billing_config,
           subcontractor:subcontractors(*),
           customer:customers(name, billing_type, billing_config),
           contract:contracts(name, billing_type, billing_config),
@@ -172,16 +206,63 @@ export default function JobsPage() {
     })
   }, [jobs, search, sourceFilter, statusFilter, dateFrom, dateTo])
 
+  const stats = useMemo(() => {
+    const weekStart = getWeekStart()
+    const monthStart = getMonthStart()
+    const today = getToday()
+    const thisWeek = jobs.filter(
+      (j) => j.date >= weekStart && j.date <= today && j.status !== 'cancelled'
+    ).length
+    const pendingReview = jobs.filter((j) => j.status === 'completed').length
+    const completedMonth = jobs.filter(
+      (j) => j.date >= monthStart && ['completed', 'reviewed', 'invoiced', 'paid'].includes(j.status)
+    ).length
+    const revenueMonth = jobs
+      .filter((j) => j.date >= monthStart && j.status !== 'cancelled' && j.status !== 'draft')
+      .reduce((sum, j) => sum + (calcRevenue(j) ?? 0), 0)
+    return { thisWeek, pendingReview, completedMonth, revenueMonth }
+  }, [jobs])
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      {/* Mobile header (hidden on desktop — topbar handles it) */}
+      <div className="flex items-center justify-between mb-5 lg:hidden">
         <h1 className="text-2xl font-display font-bold text-parchment">Jobs</h1>
         <Link href="/jobs/new">
-          <Button size="sm">
-            <Plus size={16} /> New Job
-          </Button>
+          <Button size="sm"><Plus size={16} /> New Job</Button>
         </Link>
       </div>
+
+      {/* Stats cards */}
+      {!loading && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+          <StatCard
+            icon={<Briefcase size={16} className="text-[#52504c]" />}
+            label="This week"
+            value={String(stats.thisWeek)}
+            sub="jobs"
+          />
+          <StatCard
+            icon={<AlertCircle size={16} className="text-amber-600" />}
+            label="Pending review"
+            value={String(stats.pendingReview)}
+            sub="completed"
+            accent
+          />
+          <StatCard
+            icon={<TrendingUp size={16} className="text-[#52504c]" />}
+            label="Revenue (month)"
+            value={fmtAUD(stats.revenueMonth)}
+            sub="this month"
+          />
+          <StatCard
+            icon={<CheckCircle2 size={16} className="text-[#52504c]" />}
+            label="Completed (month)"
+            value={String(stats.completedMonth)}
+            sub="this month"
+          />
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2 mb-4">
@@ -231,15 +312,14 @@ export default function JobsPage() {
             <tbody className="divide-y divide-wire">
               {filtered.map((job) => {
                 const rev = calcRevenue(job)
-                const isViewable = job.status === 'invoiced' || job.status === 'paid'
                 return (
                   <tr
                     key={job.id}
-                    className={`hover:bg-panel transition-colors ${isViewable ? 'cursor-pointer' : ''}`}
-                    onClick={isViewable ? () => router.push(`/jobs/${job.id}/edit`) : undefined}
+                    className="hover:bg-panel transition-colors cursor-pointer"
+                    onClick={() => router.push(`/jobs/${job.id}/edit`)}
                   >
                     <td className="px-4 py-3 font-mono font-semibold text-parchment">{job.job_number}</td>
-                    <td className="px-4 py-3 text-warm">{job.date}</td>
+                    <td className="px-4 py-3 text-warm tabular-nums">{job.date}</td>
                     <td className="px-4 py-3 hidden sm:table-cell">
                       <div className="flex items-center gap-1.5">
                         <span className="text-parchment">{entityLabel(job)}</span>

@@ -44,6 +44,7 @@ interface InvoiceJob {
   break_minutes: number
   discount: number
   override_revenue: number | null
+  malibu_revenue: number | null
   client_billing_config: Record<string, unknown> | null
   google_review: boolean
   google_review_employee_ids: string[]
@@ -66,7 +67,9 @@ function fmtMoney(n: number) {
 
 function calcRevenue(job: InvoiceJob): number | null {
   if (job.source === 'subcontract') {
-    return job.subcontractor ? calculateJobRevenue(job, job.subcontractor) : null
+    if (!job.subcontractor) return null
+    const effectiveOverride = job.malibu_revenue ?? job.override_revenue
+    return calculateJobRevenue({ ...job, override_revenue: effectiveOverride }, job.subcontractor)
   }
   const entity = job.source === 'private' ? job.customer : job.contract
   if (!entity?.billing_type || !entity?.billing_config) return null
@@ -138,7 +141,7 @@ export default function InvoicesPage() {
       .select(`
         id, job_number, date, status, source,
         cof, cof_final, additional_hours, additional_rate, rate_card_key, formula_vars,
-        extra_men_hours, extra_man_employee_id, break_minutes, discount, client_billing_config,
+        extra_men_hours, extra_man_employee_id, break_minutes, discount, override_revenue, malibu_revenue, client_billing_config,
         google_review, google_review_employee_ids,
         subcontractor:subcontractors(*),
         customer:customers(id, name, billing_type, billing_config),

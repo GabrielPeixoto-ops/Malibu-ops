@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Plus, Trash2, ChevronLeft, ImagePlus, CheckCircle, Lock,
-  X, Star, Banknote, FileText, XCircle,
+  X, Star, Banknote, FileText, XCircle, FilePlus,
 } from 'lucide-react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
@@ -721,7 +721,7 @@ const filteredCustomers = useMemo(
       client_billing_config: overrideOpen ? buildOverrideConfig(overrideBilling) as unknown as SubcontractorConfig : null,
       google_review: form.google_review,
       google_review_employee_ids: form.google_review_employee_ids,
-      override_revenue: null,
+      override_revenue: malibuRevenue ?? null,
     }
     const crewData = crew.filter((r) => r.employee_id).map((r) => ({
       employee_id: r.employee_id,
@@ -940,15 +940,22 @@ const filteredCustomers = useMemo(
       const publicUrl = urlData.publicUrl
       const caption = photoCaption.trim()
       if (isEdit && jobId) {
-        const { data } = await supabase
+        const { data, error: insertErr } = await supabase
           .from('job_photos')
           .insert({ job_id: jobId, url: publicUrl, caption: caption || null, category })
           .select()
           .single()
-        if (data) {
-          const p = data as { id: string; url: string; caption: string | null; category: string }
-          setPhotos((prev) => [...prev, { _id: p.id, dbId: p.id, url: p.url, caption: p.caption ?? '', storagePath: path, category: p.category }])
-        }
+        if (insertErr) throw insertErr
+        // Always update state regardless of whether data returned non-null
+        const p = data as { id: string; url: string; caption: string | null; category: string } | null
+        setPhotos((prev) => [...prev, {
+          _id: p?.id ?? crypto.randomUUID(),
+          dbId: p?.id,
+          url: publicUrl,
+          caption,
+          storagePath: path,
+          category,
+        }])
       } else {
         setPhotos((prev) => [...prev, { _id: crypto.randomUUID(), url: publicUrl, caption, storagePath: path, category }])
       }
@@ -1085,11 +1092,13 @@ const filteredCustomers = useMemo(
       malibu_revenue: computedMalibuRevenue || null,
     }
 
+    const cofFinalVal = form.cof_final.trim() ? (parseFloat(form.cof_final) || null) : null
+
     const crewRows = crew.filter((r) => r.employee_id).map((r) => ({
       employee_id: r.employee_id,
       hours: resolveCrewHours(r),
       cof_share: r.cof_share,
-      cof_hours: parseFloat(r.cof_hours) || 0.5,
+      cof_hours: r.cof_share && cofFinalVal ? cofFinalVal : (parseFloat(r.cof_hours) || 0.5),
       role: null,
       start_time: r.start_time || null,
       end_time: r.end_time || null,
@@ -1745,14 +1754,29 @@ const filteredCustomers = useMemo(
     )
   }
 
-  // ── SHARED: Photos card ────────────────────────────────────────────────────
+  // ── SHARED: Photos & Documents card ───────────────────────────────────────
   function renderPhotosCard(availableCategories: string[], locked = false) {
     const displayCategories = availableCategories.length === 1
       ? availableCategories
       : ['inventory', 'completion', 'damage', 'receipt', 'google_review'].filter((c) => availableCategories.includes(c))
 
+    function isPdf(url: string) {
+      return /\.pdf(\?|$)/i.test(url) || url.includes('/pdf')
+    }
+
+    function fileNameFromUrl(url: string) {
+      try {
+        const parts = new URL(url).pathname.split('/')
+        const last = parts[parts.length - 1]
+        // Strip leading timestamp prefix (e.g. "1719000000000-filename.pdf")
+        return decodeURIComponent(last.replace(/^\d+-/, ''))
+      } catch {
+        return 'document.pdf'
+      }
+    }
+
     return (
-      <Card title="Photos">
+      <Card title="Photos & Documents">
         {!locked && (
           <div className="flex gap-2 mb-3">
             {availableCategories.length > 1 && (
@@ -1774,11 +1798,11 @@ const filteredCustomers = useMemo(
               className="flex-1 px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
             />
             <label className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gold border border-gold-ring/50 rounded-lg hover:bg-gold/8 cursor-pointer shrink-0">
-              <ImagePlus size={16} />
+              <FilePlus size={16} />
               {uploadingPhoto ? 'Uploading…' : 'Add'}
               <input
                 type="file"
-                accept="image/*"
+                accept="image/*,application/pdf"
                 className="hidden"
                 disabled={uploadingPhoto}
                 onChange={(e) => {
@@ -1792,7 +1816,7 @@ const filteredCustomers = useMemo(
         )}
         {uploadError && <p className="text-xs text-danger mb-2">{uploadError}</p>}
         {photos.filter((p) => displayCategories.includes(p.category)).length === 0 && (
-          <p className="text-sm text-dim text-center py-2">No photos yet.</p>
+          <p className="text-sm text-dim text-center py-2">No photos or documents yet.</p>
         )}
         {displayCategories.map((cat) => {
           const catPhotos = photos.filter((p) => p.category === cat)
@@ -1804,23 +1828,59 @@ const filteredCustomers = useMemo(
               )}
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {catPhotos.map((p) => (
-                  <div key={p._id} className="relative group rounded-lg overflow-hidden bg-wire/30 aspect-video">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={p.url} alt={p.caption || 'Job photo'} className="w-full h-full object-cover" />
-                    {p.caption && (
-                      <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs px-2 py-1 truncate">{p.caption}</div>
-                    )}
-                    {!locked && (
-                      <button
-                        type="button"
-                        onClick={() => removePhoto(p._id)}
-                        className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                        aria-label="Remove photo"
-                      >
-                        <X size={12} />
-                      </button>
-                    )}
-                  </div>
+                  isPdf(p.url) ? (
+                    <div key={p._id} className="relative group rounded-lg overflow-hidden bg-wire/30 aspect-video flex flex-col items-center justify-center gap-1.5 px-2">
+                      {locked ? (
+                        <a
+                          href={p.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex flex-col items-center gap-1.5 text-center w-full"
+                        >
+                          <FileText size={28} className="text-gold shrink-0" />
+                          <span className="text-xs text-parchment truncate w-full text-center leading-tight">{p.caption || fileNameFromUrl(p.url)}</span>
+                        </a>
+                      ) : (
+                        <>
+                          <a
+                            href={p.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex flex-col items-center gap-1.5 text-center w-full"
+                          >
+                            <FileText size={28} className="text-gold shrink-0" />
+                            <span className="text-xs text-parchment truncate w-full text-center leading-tight">{p.caption || fileNameFromUrl(p.url)}</span>
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => removePhoto(p._id)}
+                            className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                            aria-label="Remove document"
+                          >
+                            <X size={12} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    <div key={p._id} className="relative group rounded-lg overflow-hidden bg-wire/30 aspect-video">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.url} alt={p.caption || 'Job photo'} className="w-full h-full object-cover" />
+                      {p.caption && (
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs px-2 py-1 truncate">{p.caption}</div>
+                      )}
+                      {!locked && (
+                        <button
+                          type="button"
+                          onClick={() => removePhoto(p._id)}
+                          className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                          aria-label="Remove photo"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+                  )
                 ))}
               </div>
             </div>
@@ -2542,7 +2602,7 @@ const filteredCustomers = useMemo(
             {/* Extra Men */}
             <div className="mb-3 pt-2 border-t border-wire">
               <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-medium text-white">Extra Men</label>
+                <label className="text-sm font-medium text-[#1a1a1a]">Extra Men</label>
                 {!isReviewed && (
                   <button type="button" onClick={addExtraMan} className="flex items-center gap-1 text-xs text-gold hover:text-gold-bright font-medium">
                     <Plus size={13} /> Add Extra Man
@@ -2583,7 +2643,7 @@ const filteredCustomers = useMemo(
             {/* Completion notes */}
             <div className="mb-3">
               <div className="flex items-center justify-between mb-1">
-                <label className="text-sm font-medium text-white">Completion Notes</label>
+                <label className="text-sm font-medium text-[#1a1a1a]">Completion Notes</label>
                 <label className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-dim border border-wire rounded-lg hover:bg-panel cursor-pointer">
                   <ImagePlus size={13} />
                   Photo
@@ -2604,11 +2664,32 @@ const filteredCustomers = useMemo(
                 placeholder="e.g. Job took longer due to access issues"
                 className="w-full px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface disabled:text-dim"
               />
+              {/* Inline preview of completion photos */}
+              {photos.filter((p) => p.category === 'completion').length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {photos.filter((p) => p.category === 'completion').map((p) => (
+                    <div key={p._id} className="relative group w-20 h-14 rounded-lg overflow-hidden bg-wire/30 shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={p.url} alt={p.caption || 'Completion photo'} className="w-full h-full object-cover" />
+                      {!isReviewed && (
+                        <button
+                          type="button"
+                          onClick={() => removePhoto(p._id)}
+                          className="absolute top-0.5 right-0.5 bg-black/60 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                          aria-label="Remove"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Google Review */}
             <div className="mb-3 pt-3 border-t border-wire">
-              <label className="flex items-center gap-2 text-sm font-medium text-white cursor-pointer mb-2">
+              <label className="flex items-center gap-2 text-sm font-medium text-[#1a1a1a] cursor-pointer mb-2">
                 <input
                   type="checkbox"
                   checked={form.google_review}
@@ -2625,7 +2706,7 @@ const filteredCustomers = useMemo(
               {form.google_review && (
                 <div className="space-y-2 pl-1">
                   <div>
-                    <p className="text-xs text-white mb-1.5">Who received the review <span className="text-gold">(+0.5h each)</span></p>
+                    <p className="text-xs text-[#1a1a1a] mb-1.5">Who received the review <span className="text-gold">(+0.5h each)</span></p>
                     <div className="flex flex-wrap gap-1.5">
                       {(() => {
                         const crewEmpIds = crew.filter((r) => r.employee_id).map((r) => r.employee_id)
@@ -2663,7 +2744,7 @@ const filteredCustomers = useMemo(
                     </div>
                   </div>
                   <div>
-                    <p className="text-xs text-white mb-1.5">Screenshot (optional)</p>
+                    <p className="text-xs text-[#1a1a1a] mb-1.5">Screenshot (optional)</p>
                     <label className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gold border border-gold-ring/50 rounded-lg hover:bg-gold/8 cursor-pointer w-fit">
                       <ImagePlus size={13} />
                       {uploadingPhoto ? 'Uploading…' : 'Upload screenshot'}
