@@ -193,12 +193,21 @@ export default function DashboardPage() {
   async function confirmModal() {
     if (!modal) return
     const { type, jobId, time } = modal
+    if (!time) return
     setModal(null)
     if (type === 'start') {
-      await supabase.from('jobs').update({ actual_start_time: time, status: 'in_progress' }).eq('id', jobId)
+      const { error } = await supabase
+        .from('jobs')
+        .update({ actual_start_time: time, status: 'in_progress' })
+        .eq('id', jobId)
+      if (error) { alert(`Failed to start job: ${error.message}`); return }
       setJobs((prev) => prev.map((j) => j.id === jobId ? { ...j, actual_start_time: time, status: 'in_progress' as JobStatus } : j))
     } else {
-      await supabase.from('jobs').update({ actual_finish_time: time, status: 'completed' }).eq('id', jobId)
+      const { error } = await supabase
+        .from('jobs')
+        .update({ actual_finish_time: time, status: 'completed' })
+        .eq('id', jobId)
+      if (error) { alert(`Failed to complete job: ${error.message}`); return }
       setJobs((prev) => prev.map((j) => j.id === jobId ? { ...j, actual_finish_time: time, status: 'completed' as JobStatus } : j))
     }
   }
@@ -349,7 +358,7 @@ export default function DashboardPage() {
               <button
                 key={v}
                 onClick={() => setView(v)}
-                className={`px-3 py-1.5 capitalize transition-colors ${view === v ? 'bg-gold text-void font-semibold' : 'bg-surface text-warm hover:bg-panel hover:text-parchment'}`}
+                className={`px-3 py-1.5 capitalize transition-colors ${view === v ? 'bg-gold text-[#0d0d0d] font-semibold' : 'bg-surface text-warm hover:bg-panel hover:text-parchment'}`}
               >
                 {v}
               </button>
@@ -417,26 +426,26 @@ export default function DashboardPage() {
       {/* ── Quick-action modal ───────────────────────────────────────────── */}
       {modal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-          <div className="bg-panel border border-wire rounded-xl shadow-2xl p-6 w-full max-w-xs">
-            <h2 className="text-base font-display font-semibold text-parchment mb-4">
+          <div className="bg-white border border-[#e5e4e0] rounded-xl shadow-2xl p-6 w-full max-w-xs">
+            <h2 className="text-base font-display font-semibold text-[#18181a] mb-4">
               {modal.type === 'start' ? 'What time did the job start?' : 'What time did the job finish?'}
             </h2>
             <input
               type="time"
               value={modal.time}
               onChange={(e) => setModal((m) => m ? { ...m, time: e.target.value } : m)}
-              className="w-full px-3 py-2 border border-wire rounded-lg text-sm bg-surface text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring mb-4"
+              className="w-full px-3 py-2 border border-[#e5e4e0] rounded-lg text-sm bg-white text-[#18181a] focus:outline-none focus:border-[#C9A227] focus:ring-1 focus:ring-[#C9A227] mb-4"
             />
             <div className="flex gap-2">
               <button
                 onClick={() => setModal(null)}
-                className="flex-1 px-4 py-2 text-sm border border-wire rounded-lg text-warm hover:bg-surface hover:text-parchment transition-colors"
+                className="flex-1 px-4 py-2 text-sm border border-[#e5e4e0] rounded-lg text-[#52504c] hover:bg-[#f8f7f3] transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmModal}
-                className={`flex-1 px-4 py-2 text-sm font-semibold rounded-lg text-void transition-colors ${modal.type === 'start' ? 'bg-amber-500 hover:bg-amber-400' : 'bg-green-600 hover:bg-green-500'}`}
+                className={`flex-1 px-4 py-2 text-sm font-semibold rounded-lg text-white transition-colors ${modal.type === 'start' ? 'bg-amber-500 hover:bg-amber-400' : 'bg-green-600 hover:bg-green-500'}`}
               >
                 Confirm
               </button>
@@ -448,10 +457,23 @@ export default function DashboardPage() {
   )
 }
 
+// Status badge styles (light-theme-safe) used outside calendar job cards
+const LIGHT_STATUS_BADGE: Record<JobStatus, string> = {
+  draft:       'bg-gray-100 text-gray-500',
+  scheduled:   'bg-amber-100 text-amber-700',
+  confirmed:   'bg-blue-100 text-blue-700',
+  in_progress: 'bg-green-100 text-green-700',
+  completed:   'bg-green-100 text-green-700',
+  reviewed:    'bg-sky-100 text-sky-700',
+  invoiced:    'bg-purple-100 text-purple-700',
+  paid:        'bg-gray-100 text-gray-500',
+  cancelled:   'bg-red-100 text-red-600',
+}
+
 // ─── Source badge ─────────────────────────────────────────────────────────────
 function SourceBadge({ source }: { source: JobSource }) {
   if (source === 'private') return <span className="inline-flex px-1 py-0.5 rounded text-[9px] font-semibold bg-gold/15 text-gold leading-none">Private</span>
-  if (source === 'contract') return <span className="inline-flex px-1 py-0.5 rounded text-[9px] font-semibold bg-teal-500/15 text-teal-300 leading-none">Contract</span>
+  if (source === 'contract') return <span className="inline-flex px-1 py-0.5 rounded text-[9px] font-semibold bg-teal-500/15 text-teal-600 leading-none">Contract</span>
   return null
 }
 
@@ -722,7 +744,7 @@ function JobCard({
 // ─── Summary card ─────────────────────────────────────────────────────────────
 function SummaryCard({ label, value, valueClass = 'text-parchment' }: { label: string; value: string; valueClass?: string }) {
   return (
-    <div className="bg-surface rounded-xl border-l-[3px] border-gold-ring border border-wire px-4 py-3">
+    <div className="bg-surface rounded-xl border border-wire border-l-[3px] border-l-[#C9A227] px-4 py-3.5">
       <div className="text-[10px] font-display font-semibold text-dim uppercase tracking-widest mb-1">{label}</div>
       <div className={`text-lg font-display font-bold font-mono ${valueClass}`}>{value}</div>
     </div>
@@ -754,7 +776,7 @@ function DayView({
   }
 
   return (
-    <div className="bg-surface rounded-xl border border-wire divide-y divide-wire">
+    <div className="bg-surface rounded-xl border border-wire overflow-hidden divide-y divide-wire">
       {jobs.map((job) => {
         const s = STATUS_CARD[job.status]
         const ec = getEntityColor(job, privateColor)
@@ -778,7 +800,7 @@ function DayView({
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-mono font-bold text-parchment">#{job.job_number}</span>
                     <SourceBadge source={job.source} />
-                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${s.bg} ${s.text}`}>
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${LIGHT_STATUS_BADGE[job.status]}`}>
                       <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
                       {job.status.replace('_', ' ')}
                     </span>

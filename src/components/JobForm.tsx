@@ -356,6 +356,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
   const [editAnyway, setEditAnyway] = useState(false)
   const [cancelModalOpen, setCancelModalOpen] = useState(false)
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
+  const [dbMalibuRevenue, setDbMalibuRevenue] = useState<number | null>(null)
 
   const [customerSearch, setCustomerSearch] = useState('')
   const [showCustomerDrop, setShowCustomerDrop] = useState(false)
@@ -435,6 +436,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             contract_rate_id: string | null
             contractor_job_id: string | null
             gross_job_value: number | null
+            malibu_revenue: number | null
             job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; start_time: string | null; end_time: string | null }>
             job_materials: Array<{ material_name: string; quantity: number; cost_price: number; sale_price: number }>
           }
@@ -510,6 +512,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             contractor_job_id: j.contractor_job_id ?? '',
             gross_job_value: j.gross_job_value != null ? j.gross_job_value.toString() : '',
           })
+          setDbMalibuRevenue(j.malibu_revenue)
 
           if (j.client_billing_config) {
             setOverrideBilling(overrideBillingFromConfig(j.client_billing_config))
@@ -617,9 +620,11 @@ export default function JobForm({ jobId }: { jobId?: string }) {
   const malibuRevenue = useMemo<number | null>(() => {
     if (form.source !== 'subcontract' || selectedSub?.billing_type !== 'percent') return null
     const gross = parseFloat(form.gross_job_value)
-    if (!gross || isNaN(gross)) return null
-    return gross * (selectedSub.config as PercentConfig).percent
-  }, [form.source, form.gross_job_value, selectedSub])
+    if (!isNaN(gross) && gross > 0) {
+      return gross * (selectedSub.config as PercentConfig).percent
+    }
+    return dbMalibuRevenue && dbMalibuRevenue > 0 ? dbMalibuRevenue : null
+  }, [form.source, form.gross_job_value, selectedSub, dbMalibuRevenue])
 
   const isBooking = ['draft', 'scheduled', 'confirmed'].includes(form.status)
   const isInProgress = form.status === 'in_progress'
@@ -723,9 +728,11 @@ const filteredCustomers = useMemo(
       google_review_employee_ids: form.google_review_employee_ids,
       override_revenue: malibuRevenue ?? null,
     }
+    const cofFinalHrs = form.cof_final.trim() ? (parseFloat(form.cof_final) || null) : null
     const crewData = crew.filter((r) => r.employee_id).map((r) => ({
       employee_id: r.employee_id,
-      hours: resolveCrewHours(r),
+      hours: crewHasTime(r) ? calcCrewHours(r.start_time, r.end_time)
+             : (cofFinalHrs ?? (parseFloat(r.hours) || 0)),
       cof_share: r.cof_share,
       cof_hours: r.cof_share ? (parseFloat(r.cof_hours) || 0.5) : 0,
     }))
@@ -1096,9 +1103,10 @@ const filteredCustomers = useMemo(
 
     const crewRows = crew.filter((r) => r.employee_id).map((r) => ({
       employee_id: r.employee_id,
-      hours: resolveCrewHours(r),
+      hours: crewHasTime(r) ? calcCrewHours(r.start_time, r.end_time)
+             : (cofFinalVal ?? (parseFloat(r.hours) || 0)),
       cof_share: r.cof_share,
-      cof_hours: r.cof_share && cofFinalVal ? cofFinalVal : (parseFloat(r.cof_hours) || 0.5),
+      cof_hours: parseFloat(r.cof_hours) || 0.5,
       role: null,
       start_time: r.start_time || null,
       end_time: r.end_time || null,
