@@ -30,6 +30,7 @@ import type {
 } from '@/types/database'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
+import AddressInput from '@/components/ui/AddressInput'
 import Select from '@/components/ui/Select'
 import Modal from '@/components/ui/Modal'
 
@@ -2829,8 +2830,8 @@ const filteredCustomers = useMemo(
             </div>
           )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Input label="Pickup Address" value={form.pickup_address ?? ''} onChange={(e) => setField('pickup_address', e.target.value)} placeholder="123 Main St, Sydney" disabled={isReviewed} />
-            <Input label="Delivery Address" value={form.delivery_address ?? ''} onChange={(e) => setField('delivery_address', e.target.value)} placeholder="45 Park Ave, Sydney" disabled={isReviewed} />
+            <AddressInput label="Pickup Address" value={form.pickup_address ?? ''} onValueChange={(v) => setField('pickup_address', v)} placeholder="123 Main St, Sydney" disabled={isReviewed} />
+            <AddressInput label="Delivery Address" value={form.delivery_address ?? ''} onValueChange={(v) => setField('delivery_address', v)} placeholder="45 Park Ave, Sydney" disabled={isReviewed} />
           </div>
         </Card>
 

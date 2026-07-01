@@ -46,3 +46,36 @@ input, select, textarea {
 ::-webkit-scrollbar-track { background: #161616; }
 ::-webkit-scrollbar-thumb { background: #2A2A2A; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #C9A227; }
+
+/* ── Google Places autocomplete dropdown ─────────────────────────────────── */
+.pac-container {
+  background-color: #1F1F1F;
+  border: 1px solid #363330;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  margin-top: 4px;
+  font-family: var(--font-body);
+  padding: 4px 0;
+}
+.pac-container::after { display: none; } /* hide Google logo */
+
+.pac-item {
+  background: transparent;
+  border-top: 1px solid #363330;
+  color: #A8A29A;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.pac-item:first-child { border-top: none; }
+.pac-item:hover,
+.pac-item-selected { background: #161616; }
+
+.pac-item-query {
+  color: #F5F2EA;
+  font-size: 13px;
+}
+.pac-matched { color: #D4AF37; font-weight: 600; }
+
+.pac-icon { display: none; }
