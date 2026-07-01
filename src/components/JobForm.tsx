@@ -92,6 +92,7 @@ interface CasualCrewRow {
   rate_per_hour: string
   start_time: string
   finish_time: string
+  cof_share: boolean
 }
 
 interface CommissionRow {
@@ -545,13 +546,14 @@ export default function JobForm({ jobId }: { jobId?: string }) {
 
           try {
             const { data: ccData } = await supabase.from('job_casual_crew').select('*').eq('job_id', jobId).order('created_at')
-            setCasualCrew((ccData ?? []).map((r: { id: string; name: string; rate_per_hour: number; start_time: string | null; finish_time: string | null }) => ({
+            setCasualCrew((ccData ?? []).map((r: { id: string; name: string; rate_per_hour: number; start_time: string | null; finish_time: string | null; cof_share: boolean }) => ({
               _id: r.id,
               dbId: r.id,
               name: r.name,
               rate_per_hour: r.rate_per_hour.toString(),
               start_time: r.start_time ?? '',
               finish_time: r.finish_time ?? '',
+              cof_share: r.cof_share ?? false,
             })))
           } catch { /* migration not yet applied */ }
 
@@ -750,13 +752,13 @@ const filteredCustomers = useMemo(
 
     const casualCrewForBilling = casualCrew
       .filter((r) => r.name.trim())
-      .map((r) => ({
-        name: r.name,
-        rate_per_hour: parseFloat(r.rate_per_hour) || 0,
-        hours: (r.start_time.length === 5 && r.finish_time.length === 5)
+      .map((r) => {
+        const hasTime = r.start_time.length === 5 && r.finish_time.length === 5
+        const hours = hasTime
           ? Math.max(0, calcCrewHours(r.start_time, r.finish_time))
-          : 0,
-      }))
+          : (r.cof_share ? (cofFinalHrs ?? 0) : 0)
+        return { name: r.name, rate_per_hour: parseFloat(r.rate_per_hour) || 0, hours }
+      })
       .filter((r) => r.hours > 0 && r.rate_per_hour > 0)
 
     const commissionsForBilling = commissions
@@ -908,9 +910,9 @@ const filteredCustomers = useMemo(
 
   // ── Casual crew helpers ────────────────────────────────────────────────────
   function addCasualCrew() {
-    setCasualCrew((c) => [...c, { _id: crypto.randomUUID(), name: '', rate_per_hour: '0', start_time: '', finish_time: '' }])
+    setCasualCrew((c) => [...c, { _id: crypto.randomUUID(), name: '', rate_per_hour: '0', start_time: '', finish_time: '', cof_share: false }])
   }
-  function updateCasualCrew(_id: string, field: keyof Omit<CasualCrewRow, '_id' | 'dbId'>, value: string) {
+  function updateCasualCrew(_id: string, field: keyof Omit<CasualCrewRow, '_id' | 'dbId'>, value: string | boolean) {
     setCasualCrew((c) => c.map((r) => r._id === _id ? { ...r, [field]: value } : r))
   }
   function removeCasualCrew(_id: string) { setCasualCrew((c) => c.filter((r) => r._id !== _id)) }
@@ -1146,13 +1148,21 @@ const filteredCustomers = useMemo(
         await supabase.from('job_casual_crew').delete().eq('job_id', jobId)
         const ccRows = casualCrew.filter((r) => r.name.trim())
         if (ccRows.length) {
-          await supabase.from('job_casual_crew').insert(ccRows.map((r) => ({
-            job_id: jobId,
-            name: r.name.trim(),
-            rate_per_hour: parseFloat(r.rate_per_hour) || 0,
-            start_time: r.start_time || null,
-            finish_time: r.finish_time || null,
-          })))
+          await supabase.from('job_casual_crew').insert(ccRows.map((r) => {
+            const hasTime = r.start_time.length === 5 && r.finish_time.length === 5
+            const hours = hasTime
+              ? Math.max(0, calcCrewHours(r.start_time, r.finish_time))
+              : (r.cof_share ? (cofFinalVal ?? 0) : 0)
+            return {
+              job_id: jobId,
+              name: r.name.trim(),
+              rate_per_hour: parseFloat(r.rate_per_hour) || 0,
+              start_time: r.start_time || null,
+              finish_time: r.finish_time || null,
+              cof_share: r.cof_share,
+              hours,
+            }
+          }))
         }
       } catch { /* migration not yet applied */ }
       try {
@@ -1189,13 +1199,21 @@ const filteredCustomers = useMemo(
       try {
         const ccRows = casualCrew.filter((r) => r.name.trim())
         if (ccRows.length) {
-          await supabase.from('job_casual_crew').insert(ccRows.map((r) => ({
-            job_id: newId,
-            name: r.name.trim(),
-            rate_per_hour: parseFloat(r.rate_per_hour) || 0,
-            start_time: r.start_time || null,
-            finish_time: r.finish_time || null,
-          })))
+          await supabase.from('job_casual_crew').insert(ccRows.map((r) => {
+            const hasTime = r.start_time.length === 5 && r.finish_time.length === 5
+            const hours = hasTime
+              ? Math.max(0, calcCrewHours(r.start_time, r.finish_time))
+              : (r.cof_share ? (cofFinalVal ?? 0) : 0)
+            return {
+              job_id: newId,
+              name: r.name.trim(),
+              rate_per_hour: parseFloat(r.rate_per_hour) || 0,
+              start_time: r.start_time || null,
+              finish_time: r.finish_time || null,
+              cof_share: r.cof_share,
+              hours,
+            }
+          }))
         }
       } catch { /* migration not yet applied */ }
       try {
@@ -1913,7 +1931,10 @@ const filteredCustomers = useMemo(
         <div className="space-y-2">
           {casualCrew.map((row) => {
             const hasTime = row.start_time.length === 5 && row.finish_time.length === 5
-            const computed = hasTime ? Math.max(0, calcCrewHours(row.start_time, row.finish_time)) : null
+            const cofFinalHrsUI = form.cof_final.trim() ? (parseFloat(form.cof_final) || null) : null
+            const computed = hasTime
+              ? Math.max(0, calcCrewHours(row.start_time, row.finish_time))
+              : (row.cof_share ? (cofFinalHrsUI ?? null) : null)
             const pay = computed !== null ? computed * (parseFloat(row.rate_per_hour) || 0) : null
             return (
               <div key={row._id} className="flex items-center gap-2 flex-wrap">
@@ -1954,6 +1975,16 @@ const filteredCustomers = useMemo(
                   />
                   <span className="text-xs text-dim">/hr</span>
                 </div>
+                <label className="flex items-center gap-1.5 text-sm text-warm whitespace-nowrap cursor-pointer select-none shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={row.cof_share}
+                    onChange={(e) => updateCasualCrew(row._id, 'cof_share', e.target.checked)}
+                    disabled={locked}
+                    className="rounded"
+                  />
+                  COF
+                </label>
                 {computed !== null && (
                   <span className="text-xs text-dim tabular-nums w-10">{computed}h</span>
                 )}
