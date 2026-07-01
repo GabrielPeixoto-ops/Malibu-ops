@@ -734,7 +734,8 @@ const filteredCustomers = useMemo(
     const crewData = crew.filter((r) => r.employee_id).map((r) => ({
       employee_id: r.employee_id,
       hours: crewHasTime(r) ? calcCrewHours(r.start_time, r.end_time)
-             : (cofFinalHrs ?? (parseFloat(r.hours) || 0)),
+             : r.cof_share ? (cofFinalHrs ?? (parseFloat(r.hours) || 0))
+             : (parseFloat(r.hours) || 0),
       cof_share: r.cof_share,
       cof_hours: r.cof_share ? (parseFloat(r.cof_hours) || 0.5) : 0,
     }))
@@ -1106,7 +1107,8 @@ const filteredCustomers = useMemo(
     const crewRows = crew.filter((r) => r.employee_id).map((r) => ({
       employee_id: r.employee_id,
       hours: crewHasTime(r) ? calcCrewHours(r.start_time, r.end_time)
-             : (cofFinalVal ?? (parseFloat(r.hours) || 0)),
+             : r.cof_share ? (cofFinalVal ?? (parseFloat(r.hours) || 0))
+             : (parseFloat(r.hours) || 0),
       cof_share: r.cof_share,
       cof_hours: parseFloat(r.cof_hours) || 0.5,
       role: null,
