@@ -22,6 +22,7 @@ export interface RateCardConfig {
   rates: Record<string, number>
   extra_note?: string
   extra_men_rate?: number
+  rateList?: Array<{ id: string; name: string; rate_per_hour: number }>
 }
 
 export interface FormulaConfig {
@@ -209,6 +210,7 @@ export interface Job {
   google_review: boolean
   google_review_employee_ids: string[]
   payment_date: string | null
+  paid_at: string | null
   payment_methods: string[]
   payment_cash_amount: number
   payment_transfer_amount: number

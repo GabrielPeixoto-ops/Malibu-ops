@@ -126,6 +126,9 @@ export default function SubcontractorsPage() {
   const [newRateName, setNewRateName] = useState('')
   const [newRatePH, setNewRatePH] = useState('')
   const [addingRate, setAddingRate] = useState(false)
+  const [editingRateId, setEditingRateId] = useState<string | null>(null)
+  const [editRateName, setEditRateName] = useState('')
+  const [editRatePH, setEditRatePH] = useState('')
 
   async function fetchSubs() {
     const { data } = await supabase.from('subcontractors').select('*').order('name')
@@ -135,9 +138,24 @@ export default function SubcontractorsPage() {
 
   useEffect(() => { fetchSubs() }, [])
 
-  async function fetchRates(subId: string) {
-    const { data } = await supabase.from('subcontractor_rates').select('*').eq('subcontractor_id', subId).order('sort_order')
-    setSubRates((data ?? []) as SubcontractorRate[])
+  function ratesFromSub(sub: Subcontractor): SubcontractorRate[] {
+    if (sub.billing_type !== 'ratecard') return []
+    const cfg = sub.config as RateCardConfig
+    return (cfg.rateList ?? []).map((r, i) => ({
+      id: r.id,
+      subcontractor_id: sub.id,
+      name: r.name,
+      rate_per_hour: r.rate_per_hour,
+      is_active: true,
+      sort_order: i,
+    }))
+  }
+
+  function applyRateList(newList: Array<{ id: string; name: string; rate_per_hour: number }>) {
+    if (!editing) return
+    const updatedSub = { ...editing, config: { ...(editing.config as RateCardConfig), rateList: newList } } as Subcontractor
+    setEditing(updatedSub)
+    setSubRates(ratesFromSub(updatedSub))
   }
 
   function openCreate() {
@@ -153,34 +171,37 @@ export default function SubcontractorsPage() {
   function openEdit(sub: Subcontractor) {
     setEditing(sub)
     setForm(formFromSub(sub))
-    setSubRates([])
+    setSubRates(ratesFromSub(sub))
     setNewRateName('')
     setNewRatePH('')
+    setEditingRateId(null)
     setError('')
     setModalOpen(true)
-    fetchRates(sub.id)
   }
 
-  async function handleAddRate() {
+  function handleAddRate() {
     if (!newRateName.trim() || !newRatePH || !editing) return
-    setAddingRate(true)
-    await supabase.from('subcontractor_rates').insert({
-      subcontractor_id: editing.id,
-      name: newRateName.trim(),
-      rate_per_hour: parseFloat(newRatePH),
-      is_active: true,
-      sort_order: subRates.length,
-    })
+    const cfg = editing.config as RateCardConfig
+    const newRate = { id: crypto.randomUUID(), name: newRateName.trim(), rate_per_hour: parseFloat(newRatePH) || 0 }
+    applyRateList([...(cfg.rateList ?? []), newRate])
     setNewRateName('')
     setNewRatePH('')
-    setAddingRate(false)
-    fetchRates(editing.id)
   }
 
-  async function handleDeleteRate(rateId: string) {
+  function handleDeleteRate(rateId: string) {
     if (!editing) return
-    await supabase.from('subcontractor_rates').delete().eq('id', rateId)
-    fetchRates(editing.id)
+    if (!confirm('Delete this rate?')) return
+    const cfg = editing.config as RateCardConfig
+    applyRateList((cfg.rateList ?? []).filter((r) => r.id !== rateId))
+  }
+
+  function handleUpdateRate(rateId: string) {
+    if (!editRateName.trim() || !editRatePH || !editing) return
+    const cfg = editing.config as RateCardConfig
+    applyRateList((cfg.rateList ?? []).map((r) =>
+      r.id === rateId ? { ...r, name: editRateName.trim(), rate_per_hour: parseFloat(editRatePH) || 0 } : r
+    ))
+    setEditingRateId(null)
   }
 
   function setField<K extends keyof ReturnType<typeof emptyForm>>(key: K, val: ReturnType<typeof emptyForm>[K]) {
@@ -207,10 +228,14 @@ export default function SubcontractorsPage() {
   async function handleSave() {
     if (!form.name.trim()) { setError('Name is required'); return }
     setSaving(true)
+    const baseConfig = buildConfig(form)
+    const config = form.billing_type === 'ratecard'
+      ? { ...baseConfig, rateList: subRates.map((r) => ({ id: r.id, name: r.name, rate_per_hour: r.rate_per_hour })) }
+      : baseConfig
     const payload = {
       name: form.name.trim(),
       billing_type: form.billing_type,
-      config: buildConfig(form),
+      config,
       google_review_bonus: form.google_review_bonus,
       color_hex: form.color_hex || '#6B6660',
     }
@@ -440,20 +465,52 @@ export default function SubcontractorsPage() {
             </Button>
           </div>
 
-          {editing && (
+          {editing && form.billing_type === 'ratecard' && (
             <div className="border-t border-wire pt-4 mt-2">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-semibold text-parchment">Rates</h3>
-                <span className="text-xs text-dim">rate × COF hours = revenue</span>
+                <span className="text-xs text-dim">rate × worked hours = revenue</span>
               </div>
               <div className="space-y-1 mb-3">
                 {subRates.map((r) => (
-                  <div key={r.id} className="flex items-center justify-between px-3 py-1.5 bg-panel rounded-lg">
-                    <div>
-                      <span className="text-sm text-parchment">{r.name}</span>
-                      <span className="ml-2 text-xs font-mono text-dim">${r.rate_per_hour}/hr</span>
-                    </div>
-                    <button onClick={() => handleDeleteRate(r.id)} className="text-dim hover:text-danger transition-colors"><X size={14} /></button>
+                  <div key={r.id} className="flex items-center gap-2 px-3 py-1.5 bg-panel rounded-lg">
+                    {editingRateId === r.id ? (
+                      <>
+                        <input
+                          type="text"
+                          value={editRateName}
+                          onChange={(e) => setEditRateName(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleUpdateRate(r.id)}
+                          className={`${inlineInput} flex-1`}
+                          autoFocus
+                        />
+                        <input
+                          type="number"
+                          value={editRatePH}
+                          onChange={(e) => setEditRatePH(e.target.value)}
+                          className="w-20 px-2 py-1 text-sm border border-wire rounded-lg bg-surface text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
+                        />
+                        <Button size="sm" onClick={() => handleUpdateRate(r.id)}>Save</Button>
+                        <button onClick={() => setEditingRateId(null)} className="text-dim hover:text-warm transition-colors"><X size={14} /></button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex-1">
+                          <span className="text-sm text-parchment">{r.name}</span>
+                          <span className="ml-2 text-xs font-mono text-dim">${r.rate_per_hour}/hr</span>
+                        </div>
+                        <button
+                          onClick={() => { setEditingRateId(r.id); setEditRateName(r.name); setEditRatePH(String(r.rate_per_hour)) }}
+                          className="text-dim hover:text-gold transition-colors"
+                          aria-label="Edit rate"
+                        >
+                          <Pencil size={13} />
+                        </button>
+                        <button onClick={() => handleDeleteRate(r.id)} className="text-dim hover:text-danger transition-colors" aria-label="Delete rate">
+                          <X size={14} />
+                        </button>
+                      </>
+                    )}
                   </div>
                 ))}
                 {subRates.length === 0 && <p className="text-xs text-dim">No rates yet.</p>}

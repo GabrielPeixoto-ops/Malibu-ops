@@ -90,6 +90,7 @@ interface CalendarJob {
   break_minutes: number
   discount: number
   override_revenue: number | null
+  malibu_revenue: number | null
   scheduled_time: string | null
   client_billing_config: Record<string, unknown> | null
   actual_start_time: string | null
@@ -145,15 +146,24 @@ function entityLabel(job: CalendarJob): string {
 
 function calcJobRevenue(job: CalendarJob): number | null {
   if (job.source === 'subcontract') {
-    return job.subcontractor ? calculateJobRevenue(job, job.subcontractor, job.subcontractor_rate_ph) : null
+    if (!job.subcontractor) return null
+    if (job.subcontractor.billing_type === 'percent') {
+      return job.malibu_revenue != null && job.malibu_revenue > 0 ? job.malibu_revenue : null
+    }
+    const effectiveOverride = job.malibu_revenue ?? job.override_revenue
+    return calculateJobRevenue({ ...job, override_revenue: effectiveOverride }, job.subcontractor, job.subcontractor_rate_ph)
   }
-  const entity = job.source === 'private' ? job.customer : job.contract
+  if (job.source === 'private') {
+    return job.malibu_revenue != null && job.malibu_revenue > 0 ? job.malibu_revenue : null
+  }
+  // Contract
+  const entity = job.contract
   if (!entity?.billing_type || !entity?.billing_config) return null
   return calculateClientRevenue(
     { ...job, client_billing_config: job.client_billing_config as SubcontractorConfig | null },
     entity.billing_type,
     entity.billing_config as unknown as SubcontractorConfig,
-    job.source === 'contract' ? job.contract_rate_ph : null
+    job.contract_rate_ph
   )
 }
 
@@ -233,7 +243,7 @@ export default function DashboardPage() {
         .select(`
           id, job_number, date, status, source, notes, cof, cof_final, additional_hours,
           additional_rate, rate_card_key, formula_vars, extra_men_hours, break_minutes, discount,
-          actual_start_time, actual_finish_time, scheduled_time, override_revenue, client_billing_config,
+          actual_start_time, actual_finish_time, scheduled_time, override_revenue, malibu_revenue, client_billing_config,
           subcontractor_rate_id, contract_rate_id,
           subcontractor:subcontractors(*),
           customer:customers(name, billing_type, billing_config),
@@ -301,7 +311,8 @@ export default function DashboardPage() {
       const emps: Employee[] = crew.map((c) => c.employee!).filter(Boolean) as unknown as Employee[]
       payroll += calculatePayroll(crew, emps, Number(job.cof_final ?? job.cof ?? 0)).total
     }
-    return { revenue, payroll, profit: revenue - payroll, count: jobs.length }
+    const netRevenue = revenue > 0 ? revenue / 1.1 : 0
+    return { revenue, payroll, profit: netRevenue - payroll, count: jobs.length }
   }, [jobs])
 
   const jobsByDate = useMemo(() => {
@@ -666,6 +677,15 @@ function JobCard({
   const s = STATUS_CARD[job.status]
   const revenue = calcJobRevenue(job)
   const entityColor = getEntityColor(job, privateColor)
+  const jobProfit = (() => {
+    if (revenue === null) return null
+    const crew = job.job_crew.filter((c) => c.employee)
+    if (!crew.length) return null
+    const emps = crew.map((c) => c.employee!).filter(Boolean) as unknown as Employee[]
+    const cofHours = Number(job.cof_final ?? job.cof ?? 0)
+    const payroll = calculatePayroll(crew, emps, cofHours).total
+    return revenue / 1.1 - payroll
+  })()
 
   const _now = new Date()
   const _currentTime = `${String(_now.getHours()).padStart(2,'0')}:${String(_now.getMinutes()).padStart(2,'0')}`
@@ -704,6 +724,11 @@ function JobCard({
           <SourceBadge source={job.source} />
         </div>
         {revenue !== null && <div className="font-mono font-medium mt-0.5">{fmt(revenue)}</div>}
+        {jobProfit !== null && (
+          <div className={`font-mono text-[10px] mt-0.5 ${jobProfit >= 0 ? 'text-success' : 'text-danger'}`}>
+            Profit: {fmt(jobProfit)}
+          </div>
+        )}
         <div className="flex items-center gap-1 mt-0.5">
           <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
           <span className="opacity-70 capitalize">{job.status.replace('_', ' ')}</span>

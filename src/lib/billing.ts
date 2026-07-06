@@ -224,6 +224,8 @@ export interface JobSummary {
   materialsCost: number
   discount: number
   totalRevenue: number
+  gstAmount: number
+  netRevenue: number
   payrollTotal: number
   payrollEntries: PayrollEntry[]
   casualEntries: CasualCrewEntry[]
@@ -286,7 +288,9 @@ export function calculateJobSummary(
   const googleReviewBonuses = payrollEntries
     .filter((e) => e.google_review_bonus)
     .map((e) => ({ employee_id: e.employee_id, employee_name: e.employee_name }))
-  const profit = totalRevenue - payrollTotal - materialsCost
-  const margin = totalRevenue !== 0 ? profit / totalRevenue : null
-  return { subRevenue, materialsRevenue, materialsCost, discount, totalRevenue, payrollTotal, payrollEntries, casualEntries, googleReviewBonuses, profit, margin }
+  const gstAmount = totalRevenue > 0 ? totalRevenue / 11 : 0
+  const netRevenue = totalRevenue - gstAmount
+  const profit = netRevenue - payrollTotal - materialsCost
+  const margin = netRevenue !== 0 ? profit / netRevenue : null
+  return { subRevenue, materialsRevenue, materialsCost, discount, totalRevenue, gstAmount, netRevenue, payrollTotal, payrollEntries, casualEntries, googleReviewBonuses, profit, margin }
 }

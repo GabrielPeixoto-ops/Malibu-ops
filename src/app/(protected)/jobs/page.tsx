@@ -7,8 +7,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Plus, Pencil, Briefcase, AlertCircle, TrendingUp, CheckCircle2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { calculateJobRevenue, calculateClientRevenue } from '@/lib/billing'
-import type { JobSource, JobStatus, Subcontractor, SubcontractorConfig } from '@/types/database'
+import { calculateJobRevenue, calculateClientRevenue, calculatePayroll } from '@/lib/billing'
+import type { Employee, JobSource, JobStatus, Subcontractor, SubcontractorConfig } from '@/types/database'
 import Button from '@/components/ui/Button'
 
 const STATUS_STYLE: Record<JobStatus, string> = {
@@ -46,6 +46,7 @@ interface JobRow {
   contract: { name: string; billing_type: string; billing_config: Record<string, unknown> } | null
   contract_client: { name: string } | null
   job_trucks: Array<{ fleet: { name: string; registration: string | null } | null }>
+  job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; employee: { id: string; hourly_rate: number } | null }>
 }
 
 function entityLabel(job: JobRow): string {
@@ -61,10 +62,19 @@ function calcRevenue(job: JobRow): number | null {
   try {
     if (job.source === 'subcontract') {
       if (!job.subcontractor) return null
+      // Percent subs: revenue = malibu_revenue (gross × percent). Formula can't derive it without gross_job_value.
+      if (job.subcontractor.billing_type === 'percent') {
+        return job.malibu_revenue != null && job.malibu_revenue > 0 ? job.malibu_revenue : null
+      }
       const effectiveOverride = job.malibu_revenue ?? job.override_revenue
       return calculateJobRevenue({ ...job, override_revenue: effectiveOverride }, job.subcontractor)
     }
-    const entity = job.source === 'private' ? job.customer : job.contract
+    // Private: revenue = rate × worked hours, stored in malibu_revenue at completion
+    if (job.source === 'private') {
+      return job.malibu_revenue != null && job.malibu_revenue > 0 ? job.malibu_revenue : null
+    }
+    // Contract: formula-based
+    const entity = job.contract
     if (!entity?.billing_type || !entity?.billing_config) return null
     return calculateClientRevenue(
       { ...job, client_billing_config: job.client_billing_config as SubcontractorConfig | null },
@@ -74,6 +84,17 @@ function calcRevenue(job: JobRow): number | null {
   } catch {
     return null
   }
+}
+
+function calcProfit(job: JobRow): number | null {
+  const rev = calcRevenue(job)
+  if (rev === null) return null
+  const crew = (job.job_crew ?? []).filter((c) => c.employee)
+  if (!crew.length) return null
+  const emps = crew.map((c) => c.employee!).filter(Boolean) as unknown as Employee[]
+  const cofHours = Number(job.cof_final ?? job.cof ?? 0)
+  const payroll = calculatePayroll(crew, emps, cofHours).total
+  return rev / 1.1 - payroll
 }
 
 function SourceBadge({ source }: { source: JobSource }) {
@@ -160,7 +181,8 @@ export default function JobsPage() {
           subcontractor:subcontractors(*),
           customer:customers(name, billing_type, billing_config),
           contract:contracts(name, billing_type, billing_config),
-          contract_client:contract_clients(name)
+          contract_client:contract_clients(name),
+          job_crew(employee_id, hours, cof_share, cof_hours, employee:employees(id, hourly_rate))
         `)
         .order('date', { ascending: false })
         .order('created_at', { ascending: false })
@@ -305,13 +327,15 @@ export default function JobsPage() {
                 <th className="text-left px-4 py-3 text-[10px] font-semibold text-dim uppercase tracking-widest">Date</th>
                 <th className="text-left px-4 py-3 text-[10px] font-semibold text-dim uppercase tracking-widest hidden sm:table-cell">Entity</th>
                 <th className="text-left px-4 py-3 text-[10px] font-semibold text-dim uppercase tracking-widest">Status</th>
-                <th className="text-right px-4 py-3 text-[10px] font-semibold text-dim uppercase tracking-widest hidden md:table-cell">Revenue</th>
+                <th className="text-right px-4 py-3 text-[10px] font-semibold text-dim uppercase tracking-widest hidden md:table-cell">Revenue (inc. GST)</th>
+                <th className="text-right px-4 py-3 text-[10px] font-semibold text-dim uppercase tracking-widest hidden lg:table-cell">Profit (ex. GST)</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-wire">
               {filtered.map((job) => {
                 const rev = calcRevenue(job)
+                const profit = calcProfit(job)
                 return (
                   <tr
                     key={job.id}
@@ -339,6 +363,12 @@ export default function JobsPage() {
                     <td className="px-4 py-3 text-right hidden md:table-cell">
                       {rev !== null
                         ? <span className="font-mono font-semibold text-gold">{fmtAUD(rev)}</span>
+                        : <span className="text-dim">—</span>
+                      }
+                    </td>
+                    <td className="px-4 py-3 text-right hidden lg:table-cell">
+                      {profit !== null
+                        ? <span className={`font-mono font-semibold ${profit >= 0 ? 'text-success' : 'text-danger'}`}>{fmtAUD(profit)}</span>
                         : <span className="text-dim">—</span>
                       }
                     </td>

@@ -145,7 +145,7 @@ export default function PayrollPage() {
         for (const job of jobs) {
           const row = job.job_crew.find((c) => c.employee_id === emp.id)
           if (row) {
-            const cofHours = row.cof_share ? (row.cof_hours > 0 ? row.cof_hours : Number(job.cof_final ?? job.cof ?? 0)) : 0
+            const cofHours = row.cof_share ? (row.cof_hours || 0) : 0
             const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
             const paidHours = Math.max(row.hours, MIN_CALL) + cofHours + reviewBonus
             const workedTime = (row.start_time && row.end_time)
@@ -240,7 +240,7 @@ export default function PayrollPage() {
                         <th className="text-left px-4 py-2 text-[10px] font-semibold text-dim uppercase tracking-widest">Date</th>
                         <th className="text-left px-4 py-2 text-[10px] font-semibold text-dim uppercase tracking-widest">Job</th>
                         <th className="text-right px-4 py-2 text-[10px] font-semibold text-dim uppercase tracking-widest">Worked</th>
-                        <th className="text-right px-4 py-2 text-[10px] font-semibold text-dim uppercase tracking-widest">COF</th>
+                        <th className="text-right px-4 py-2 text-[10px] font-semibold text-dim uppercase tracking-widest">Call Out Fee</th>
                         <th className="text-right px-4 py-2 text-[10px] font-semibold text-dim uppercase tracking-widest">Paid hrs</th>
                         <th className="text-right px-4 py-2 text-[10px] font-semibold text-dim uppercase tracking-widest">Amount</th>
                       </tr>
