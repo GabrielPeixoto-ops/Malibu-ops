@@ -223,6 +223,8 @@ export interface JobSummary {
   materialsRevenue: number
   materialsCost: number
   discount: number
+  clientExpensesTotal: number
+  companyExpensesTotal: number
   totalRevenue: number
   gstAmount: number
   netRevenue: number
@@ -252,7 +254,8 @@ export function calculateJobSummary(
   rateOptions?: { subcontractorRatePerHour?: number | null; contractRatePerHour?: number | null },
   extraMen?: Array<{ employee_id: string; hours: number }>,
   casualCrew?: Array<{ name: string; rate_per_hour: number; hours: number }>,
-  commissions?: Array<{ employee_id: string | null; rate_per_hour: number; hours: number; label?: string }>
+  commissions?: Array<{ employee_id: string | null; rate_per_hour: number; hours: number; label?: string }>,
+  expenses?: Array<{ amount: number; is_client_expense: boolean }>
 ): JobSummary {
   const source = job.source ?? 'subcontract'
 
@@ -270,10 +273,12 @@ export function calculateJobSummary(
     )
   }
 
+  const clientExpensesTotal = (expenses ?? []).filter((e) => e.is_client_expense).reduce((s, e) => s + e.amount, 0)
+  const companyExpensesTotal = (expenses ?? []).filter((e) => !e.is_client_expense).reduce((s, e) => s + e.amount, 0)
   const materialsRevenue = materials.reduce((s, m) => s + Number(m.quantity) * Number(m.sale_price), 0)
   const materialsCost = materials.reduce((s, m) => s + Number(m.quantity) * Number(m.cost_price), 0)
   const discount = Number(job.discount) || 0
-  const totalRevenue = subRevenue + materialsRevenue - discount
+  const totalRevenue = subRevenue + materialsRevenue + clientExpensesTotal - discount
   const cofHours = Number(job.cof_final ?? job.cof) || 0
   const reviewIds = job.google_review ? (job.google_review_employee_ids ?? []) : []
   const { total: payrollTotal, entries: payrollEntries, casualEntries } = calculatePayroll(
@@ -290,7 +295,7 @@ export function calculateJobSummary(
     .map((e) => ({ employee_id: e.employee_id, employee_name: e.employee_name }))
   const gstAmount = totalRevenue > 0 ? totalRevenue / 11 : 0
   const netRevenue = totalRevenue - gstAmount
-  const profit = netRevenue - payrollTotal - materialsCost
+  const profit = netRevenue - payrollTotal - materialsCost - companyExpensesTotal
   const margin = netRevenue !== 0 ? profit / netRevenue : null
-  return { subRevenue, materialsRevenue, materialsCost, discount, totalRevenue, gstAmount, netRevenue, payrollTotal, payrollEntries, casualEntries, googleReviewBonuses, profit, margin }
+  return { subRevenue, materialsRevenue, materialsCost, discount, clientExpensesTotal, companyExpensesTotal, totalRevenue, gstAmount, netRevenue, payrollTotal, payrollEntries, casualEntries, googleReviewBonuses, profit, margin }
 }

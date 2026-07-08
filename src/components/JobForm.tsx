@@ -104,6 +104,14 @@ interface CommissionRow {
   hours: string
 }
 
+interface ExpenseRow {
+  _id: string
+  dbId: string | null
+  description: string
+  amount: string
+  is_client_expense: boolean
+}
+
 interface FormState {
   job_number: string
   date: string
@@ -340,6 +348,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
   const [casualCrew, setCasualCrew] = useState<CasualCrewRow[]>([])
   const [commissions, setCommissions] = useState<CommissionRow[]>([])
   const [commissionTypes, setCommissionTypes] = useState<CommissionType[]>([])
+  const [expenses, setExpenses] = useState<ExpenseRow[]>([])
   const [materials, setMaterials] = useState<MaterialRow[]>([])
   const [photos, setPhotos] = useState<PhotoLocal[]>([])
   const [photoCaption, setPhotoCaption] = useState('')
@@ -347,14 +356,14 @@ export default function JobForm({ jobId }: { jobId?: string }) {
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const pendingJobId = useRef(crypto.randomUUID())
-  const [loading, setLoading] = useState(isEdit)
+  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [markingReviewed, setMarkingReviewed] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState('')
   const [overrideBilling, setOverrideBilling] = useState<OverrideBilling>(emptyOverrideBilling())
   const [overrideOpen, setOverrideOpen] = useState(false)
-  const [editAnyway, setEditAnyway] = useState(false)
+  const [isViewMode, setIsViewMode] = useState(isEdit)
   const [cancelModalOpen, setCancelModalOpen] = useState(false)
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
   const [dbMalibuRevenue, setDbMalibuRevenue] = useState<number | null>(null)
@@ -568,6 +577,16 @@ export default function JobForm({ jobId }: { jobId?: string }) {
               hours: r.hours.toString(),
             })))
           } catch { /* migration not yet applied */ }
+          try {
+            const { data: expData } = await supabase.from('job_expenses').select('*').eq('job_id', jobId).order('created_at')
+            setExpenses((expData ?? []).map((r: { id: string; description: string; amount: number; is_client_expense: boolean }) => ({
+              _id: r.id,
+              dbId: r.id,
+              description: r.description,
+              amount: r.amount.toString(),
+              is_client_expense: r.is_client_expense,
+            })))
+          } catch { /* migration not yet applied */ }
 
           setMaterials(j.job_materials.map((m) => ({
             _id: crypto.randomUUID(),
@@ -631,8 +650,9 @@ export default function JobForm({ jobId }: { jobId?: string }) {
   const isBooking = ['draft', 'scheduled', 'confirmed'].includes(form.status)
   const isInProgress = form.status === 'in_progress'
   const isCompletionMode = form.status === 'completed' || form.status === 'reviewed'
-  const isReviewed = form.status === 'reviewed' && !editAnyway
-  const isInvoiced = form.status === 'invoiced' || form.status === 'paid'
+  const isReviewed = isViewMode
+  // TODO(prod): re-enable when Xero reconciliation lock is implemented — paid jobs conciled in Xero should lock editing
+  const isInvoiced = false
   const isPaid = form.status === 'paid'
   const isCancelled = form.status === 'cancelled'
   const showCOF = isInProgress || isCompletionMode
@@ -692,7 +712,20 @@ const filteredCustomers = useMemo(
   // ── Real-time summary ──────────────────────────────────────────────────────
   const selectedPrivateRateInput = useMemo<PrivateRateInput | null>(() => {
     if (form.source !== 'private') return null
-    const cofHours = parseFloat(form.cof_final || form.cof) || 0
+    // Net worked hours from actual times (15-min rounding, same as _billingWorkedHrs)
+    const workedHrs = (() => {
+      if (!form.actual_start_time || !form.actual_finish_time) return null
+      const [sh, sm] = form.actual_start_time.split(':').map(Number)
+      const [eh, em] = form.actual_finish_time.split(':').map(Number)
+      const rawMins = (eh * 60 + em) - (sh * 60 + sm) - (parseFloat(form.break_minutes) || 0)
+      if (rawMins <= 0) return null
+      return Math.round(rawMins / 15) * 15 / 60
+    })()
+    const cofFinal = parseFloat(form.cof_final) || 0
+    // Total billed = max(2, worked) + COF surcharge — matches the Final Review display formula
+    const cofHours = workedHrs !== null
+      ? Math.max(2, workedHrs) + cofFinal
+      : (parseFloat(form.cof_final || form.cof) || 0)
     if (form.private_rate_custom) {
       const price = parseFloat(form.private_rate_custom_price)
       if (!price) return null
@@ -701,7 +734,7 @@ const filteredCustomers = useMemo(
     const rate = privateRates.find((r) => r.id === form.private_rate_id)
     if (!rate) return null
     return { rate_per_hour: rate.rate_per_hour, cofHours }
-  }, [form.source, form.private_rate_custom, form.private_rate_custom_price, form.private_rate_id, form.cof_final, form.cof, privateRates])
+  }, [form.source, form.private_rate_custom, form.private_rate_custom_price, form.private_rate_id, form.cof_final, form.cof, form.actual_start_time, form.actual_finish_time, form.break_minutes, privateRates])
 
   const summary = useMemo<JobSummary | null>(() => {
     if (form.source === 'subcontract' && !selectedSub) return null
@@ -714,8 +747,25 @@ const filteredCustomers = useMemo(
       .filter((r) => r.hours > 0)
     const extraMenTotalHours = extraMenForBilling.reduce((s, r) => s + r.hours, 0)
 
+    const _billingWorkedHrs = (() => {
+      if (!form.actual_start_time || !form.actual_finish_time) return null
+      const [sh, sm] = form.actual_start_time.split(':').map(Number)
+      const [eh, em] = form.actual_finish_time.split(':').map(Number)
+      const rawMins = (eh * 60 + em) - (sh * 60 + sm) - (parseFloat(form.break_minutes) || 0)
+      if (rawMins <= 0) return null
+      return Math.round(rawMins / 15) * 15 / 60
+    })()
     const jobData = {
-      cof: parseFloat(form.cof) || null,
+      cof: (() => {
+        const explicit = parseFloat(form.cof) || null
+        if (explicit) return explicit
+        // For ratecard subs: fall back to actual worked hours when cof not explicitly set.
+        // Revenue formula does (cofHours - breakHours), so pass gross (net + break) to avoid double-subtracting.
+        if (form.source === 'subcontract' && selectedSub?.billing_type === 'ratecard' && _billingWorkedHrs !== null) {
+          return _billingWorkedHrs + (parseFloat(form.break_minutes) || 0) / 60
+        }
+        return null
+      })(),
       cof_final: form.cof_final.trim() ? parseFloat(form.cof_final) : null,
       additional_hours: parseFloat(form.additional_hours) || null,
       additional_rate: parseFloat(form.additional_rate) || null,
@@ -731,14 +781,6 @@ const filteredCustomers = useMemo(
       override_revenue: malibuRevenue ?? null,
     }
     const cofFinalHrs = form.cof_final.trim() ? (parseFloat(form.cof_final) || null) : null
-    const _billingWorkedHrs = (() => {
-      if (!form.actual_start_time || !form.actual_finish_time) return null
-      const [sh, sm] = form.actual_start_time.split(':').map(Number)
-      const [eh, em] = form.actual_finish_time.split(':').map(Number)
-      const rawMins = (eh * 60 + em) - (sh * 60 + sm) - (parseFloat(form.break_minutes) || 0)
-      if (rawMins <= 0) return null
-      return Math.round(rawMins / 15) * 15 / 60
-    })()
     const crewData = crew.filter((r) => r.employee_id).map((r) => ({
       employee_id: r.employee_id,
       hours: crewHasTime(r) ? calcCrewHours(r.start_time, r.end_time)
@@ -752,8 +794,8 @@ const filteredCustomers = useMemo(
       cost_price: parseFloat(m.cost_price) || 0,
       sale_price: parseFloat(m.sale_price) || 0,
     }))
-    const selectedSubRatePH = form.source === 'subcontract'
-      ? (subRates.find((r) => r.id === form.subcontractor_rate_id)?.rate_per_hour ?? null)
+    const selectedSubRatePH = form.source === 'subcontract' && selectedSub?.billing_type === 'ratecard'
+      ? ((selectedSub.config as RateCardConfig).rateList?.find((r) => r.id === form.subcontractor_rate_id)?.rate_per_hour ?? null)
       : null
     const selectedContractRatePH = form.source === 'contract'
       ? (contractRates.find((r) => r.id === form.contract_rate_id)?.rate_per_hour ?? null)
@@ -787,6 +829,11 @@ const filteredCustomers = useMemo(
         }
       })
 
+    const expensesForBilling = expenses.map((e) => ({
+      amount: parseFloat(e.amount) || 0,
+      is_client_expense: e.is_client_expense,
+    }))
+
     return calculateJobSummary(
       jobData,
       form.source === 'subcontract' ? selectedSub : null,
@@ -798,9 +845,10 @@ const filteredCustomers = useMemo(
       { subcontractorRatePerHour: selectedSubRatePH, contractRatePerHour: selectedContractRatePH },
       extraMenForBilling,
       casualCrewForBilling,
-      commissionsForBilling
+      commissionsForBilling,
+      expensesForBilling
     )
-  }, [form, crew, extraMen, casualCrew, commissions, commissionTypes, materials, selectedSub, selectedEntity, selectedPrivateRateInput, employees, overrideOpen, overrideBilling, subRates, contractRates])
+  }, [form, crew, extraMen, casualCrew, commissions, commissionTypes, materials, expenses, selectedSub, selectedEntity, selectedPrivateRateInput, employees, overrideOpen, overrideBilling, subRates, contractRates])
 
   // ── Worked hours from actual times (rounded to nearest 15 min) ──────────
   const workedHoursCalc = useMemo<number | null>(() => {
@@ -937,6 +985,15 @@ const filteredCustomers = useMemo(
   }
   function removeCommission(_id: string) { setCommissions((c) => c.filter((r) => r._id !== _id)) }
 
+  // ── Expense helpers ────────────────────────────────────────────────────────
+  function addExpense() {
+    setExpenses((e) => [...e, { _id: crypto.randomUUID(), dbId: null, description: '', amount: '', is_client_expense: true }])
+  }
+  function updateExpense(_id: string, field: 'description' | 'amount' | 'is_client_expense', value: string | boolean) {
+    setExpenses((e) => e.map((r) => r._id === _id ? { ...r, [field]: value } : r))
+  }
+  function removeExpense(_id: string) { setExpenses((e) => e.filter((r) => r._id !== _id)) }
+
   // ── Photo helpers ──────────────────────────────────────────────────────────
   async function uploadPhoto(file: File, category = photoCategory) {
     setUploadingPhoto(true)
@@ -1043,10 +1100,36 @@ const filteredCustomers = useMemo(
       return s + (h > 0 ? h : 0)
     }, 0)
 
+    const cofFinalVal = form.cof_final.trim() ? (parseFloat(form.cof_final) || null) : null
+
+    const workedHrsForSave = (() => {
+      if (!form.actual_start_time || !form.actual_finish_time) return null
+      const [sh, sm] = form.actual_start_time.split(':').map(Number)
+      const [eh, em] = form.actual_finish_time.split(':').map(Number)
+      const rawMins = (eh * 60 + em) - (sh * 60 + sm) - (parseFloat(form.break_minutes) || 0)
+      if (rawMins <= 0) return null
+      return Math.round(rawMins / 15) * 15 / 60
+    })()
+
     const isPercentSub = form.source === 'subcontract' && selectedSub?.billing_type === 'percent'
     const computedMalibuRevenue = isPercentSub && form.gross_job_value
       ? (parseFloat(form.gross_job_value) || 0) * (selectedSub!.config as PercentConfig).percent
       : null
+
+    // Revenue for private jobs: rate × (max(2, workedHrs) + cof_final)
+    const computedPrivateRevenue = (() => {
+      if (form.source !== 'private') return null
+      const ratePerHour = form.private_rate_custom
+        ? (parseFloat(form.private_rate_custom_price) || null)
+        : (privateRates.find((r) => r.id === form.private_rate_id)?.rate_per_hour ?? null)
+      if (!ratePerHour) return null
+      const cofFinal = parseFloat(form.cof_final) || 0
+      const totalHours = workedHrsForSave !== null
+        ? Math.max(2, workedHrsForSave) + cofFinal
+        : (parseFloat(form.cof_final || form.cof) || 0)
+      if (!totalHours) return null
+      return ratePerHour * totalHours
+    })()
 
     const payload = {
       job_number: form.job_number.trim(),
@@ -1054,7 +1137,7 @@ const filteredCustomers = useMemo(
       status: statusOverride ?? form.status,
       source: form.source,
       subcontractor_id: form.source === 'subcontract' ? (form.subcontractor_id || null) : null,
-      customer_id: form.source === 'private' ? (resolvedCustomerId || null) : null,
+      customer_id: form.source === 'private' ? (resolvedCustomerId || null) : (form.customer_id || null),
       contract_id: form.source === 'contract' ? (form.contract_id || null) : null,
       contract_client_id: form.source === 'contract' ? (form.contract_client_id || null) : null,
       client_billing_config: clientBillingConfig,
@@ -1101,19 +1184,8 @@ const filteredCustomers = useMemo(
       contract_rate_id: form.source === 'contract' ? (form.contract_rate_id || null) : null,
       contractor_job_id: form.source === 'subcontract' ? (form.contractor_job_id.trim() || null) : null,
       gross_job_value: isPercentSub ? (parseFloat(form.gross_job_value) || null) : null,
-      malibu_revenue: computedMalibuRevenue || null,
+      malibu_revenue: computedMalibuRevenue ?? computedPrivateRevenue ?? null,
     }
-
-    const cofFinalVal = form.cof_final.trim() ? (parseFloat(form.cof_final) || null) : null
-
-    const workedHrsForSave = (() => {
-      if (!form.actual_start_time || !form.actual_finish_time) return null
-      const [sh, sm] = form.actual_start_time.split(':').map(Number)
-      const [eh, em] = form.actual_finish_time.split(':').map(Number)
-      const rawMins = (eh * 60 + em) - (sh * 60 + sm) - (parseFloat(form.break_minutes) || 0)
-      if (rawMins <= 0) return null
-      return Math.round(rawMins / 15) * 15 / 60
-    })()
 
     const crewRows = crew.filter((r) => r.employee_id).map((r) => {
       let hours: number
@@ -1204,6 +1276,18 @@ const filteredCustomers = useMemo(
           })))
         }
       } catch { /* migration not yet applied */ }
+      try {
+        await supabase.from('job_expenses').delete().eq('job_id', jobId)
+        const expRows = expenses.filter((r) => r.description.trim())
+        if (expRows.length) {
+          await supabase.from('job_expenses').insert(expRows.map((r) => ({
+            job_id: jobId,
+            description: r.description.trim(),
+            amount: parseFloat(r.amount) || 0,
+            is_client_expense: r.is_client_expense,
+          })))
+        }
+      } catch { /* migration not yet applied */ }
     } else {
       const { data: job, error: insErr } = await supabase.from('jobs').insert(payload).select().single()
       if (insErr || !job) throw insErr ?? new Error('Insert failed')
@@ -1259,6 +1343,17 @@ const filteredCustomers = useMemo(
           })))
         }
       } catch { /* migration not yet applied */ }
+      try {
+        const expRows = expenses.filter((r) => r.description.trim())
+        if (expRows.length) {
+          await supabase.from('job_expenses').insert(expRows.map((r) => ({
+            job_id: newId,
+            description: r.description.trim(),
+            amount: parseFloat(r.amount) || 0,
+            is_client_expense: r.is_client_expense,
+          })))
+        }
+      } catch { /* migration not yet applied */ }
     }
 
     if (!isEdit) {
@@ -1277,7 +1372,7 @@ const filteredCustomers = useMemo(
   async function handleSave() {
     setSaving(true)
     setError('')
-    try { await performSave() }
+    try { await performSave(); setIsViewMode(true) }
     catch (e) { setError(extractMsg(e, 'Failed to save job.')) }
     finally { setSaving(false) }
   }
@@ -1285,7 +1380,7 @@ const filteredCustomers = useMemo(
   async function handleSaveWithStatus(s: JobStatus) {
     setSaving(true)
     setError('')
-    try { await performSave(s) }
+    try { await performSave(s); setIsViewMode(true) }
     catch (e) { setError(extractMsg(e, 'Failed to save job.')) }
     finally { setSaving(false) }
   }
@@ -1293,7 +1388,7 @@ const filteredCustomers = useMemo(
   async function handleMarkReviewed() {
     setMarkingReviewed(true)
     setError('')
-    try { await performSave('reviewed') }
+    try { await performSave('reviewed'); setIsViewMode(true) }
     catch (e) { setError(extractMsg(e, 'Failed to mark as reviewed.')) }
     finally { setMarkingReviewed(false) }
   }
@@ -1367,7 +1462,9 @@ const filteredCustomers = useMemo(
           locked ? (
             <div className="space-y-1">
               <p className="text-sm font-medium text-parchment">{selectedSub?.name ?? '—'}</p>
-              {form.subcontractor_rate_id && <p className="text-xs text-dim">Rate: {subRates.find((r) => r.id === form.subcontractor_rate_id)?.name ?? '—'}</p>}
+              {form.subcontractor_rate_id && selectedSub?.billing_type === 'ratecard' && (
+                <p className="text-xs text-dim">Rate: {(selectedSub.config as RateCardConfig).rateList?.find((r) => r.id === form.subcontractor_rate_id)?.name ?? '—'}</p>
+              )}
               {form.subcontractor_trucks && <p className="text-xs text-dim">Trucks: {form.subcontractor_trucks}</p>}
               {form.subcontractor_crew_size && <p className="text-xs text-dim">Crew: {form.subcontractor_crew_size}</p>}
               {form.contractor_job_id && <p className="text-xs text-dim">Contractor Job ID: {form.contractor_job_id}</p>}
@@ -1381,9 +1478,9 @@ const filteredCustomers = useMemo(
                 value={form.subcontractor_id ?? ''}
                 onChange={(e) => handleSubChange(e.target.value)}
               />
-              {form.subcontractor_id && (() => {
-                const filteredRates = subRates.filter((r) => r.subcontractor_id === form.subcontractor_id)
-                if (filteredRates.length === 0) return (
+              {form.subcontractor_id && selectedSub?.billing_type === 'ratecard' && (() => {
+                const rateList = (selectedSub.config as RateCardConfig).rateList ?? []
+                if (rateList.length === 0) return (
                   <p className="text-xs text-dim">No rates configured — <Link href="/settings/subcontractors" className="text-gold hover:underline">add rates in Settings</Link></p>
                 )
                 return (
@@ -1395,19 +1492,13 @@ const filteredCustomers = useMemo(
                       className="w-full px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring bg-panel"
                     >
                       <option value="">Select rate…</option>
-                      {filteredRates.map((r) => (
+                      {rateList.map((r) => (
                         <option key={r.id} value={r.id}>{r.name} — ${r.rate_per_hour}/hr</option>
                       ))}
                     </select>
                   </div>
                 )
               })()}
-              <Input
-                label="Subcontractor Truck(s)"
-                value={form.subcontractor_trucks ?? ''}
-                onChange={(e) => setField('subcontractor_trucks', e.target.value)}
-                placeholder="e.g. 1x 4.5T truck, Truck A + Truck B"
-              />
               <Input
                 label="Crew Size"
                 type="number"
@@ -2300,13 +2391,33 @@ const filteredCustomers = useMemo(
                   </div>
                 )}
                 <div className="flex justify-between">
-                  <span className="text-dim">Revenue</span>
+                  <span className="text-dim">Revenue (inc. GST)</span>
                   <span className="font-semibold text-parchment">{fmt(summary.totalRevenue)}</span>
+                </div>
+                {summary.clientExpensesTotal > 0 && (
+                  <div className="flex justify-between text-xs pl-2">
+                    <span className="text-dim">incl. Client Expenses</span>
+                    <span className="text-success">+{fmt(summary.clientExpensesTotal)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-dim">GST (10%)</span>
+                  <span className="text-danger font-medium">−{fmt(summary.gstAmount)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-dim">Net Revenue</span>
+                  <span className="font-medium text-warm">{fmt(summary.netRevenue)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-dim">Payroll</span>
                   <span className="text-orange-600 font-medium">−{fmt(summary.payrollTotal)}</span>
                 </div>
+                {summary.companyExpensesTotal > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-dim">Company Expenses</span>
+                    <span className="text-danger font-medium">−{fmt(summary.companyExpensesTotal)}</span>
+                  </div>
+                )}
                 {summary.materialsRevenue !== 0 && (
                   <div className="flex justify-between">
                     <span className="text-dim">Materials</span>
@@ -2562,12 +2673,12 @@ const filteredCustomers = useMemo(
       <div className="space-y-4">
 
         {/* ── Reviewed lock banner ──────────────────────────────────────── */}
-        {form.status === 'reviewed' && !editAnyway && (
+        {form.status === 'reviewed' && isViewMode && (
           <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
             <span className="text-sm font-medium text-amber-300">This job has been reviewed and is locked.</span>
             <button
               type="button"
-              onClick={() => setEditAnyway(true)}
+              onClick={() => setIsViewMode(false)}
               className="text-sm font-semibold text-gold hover:text-gold-bright underline whitespace-nowrap"
             >
               Edit anyway
@@ -2834,6 +2945,76 @@ const filteredCustomers = useMemo(
               )}
             </div>
 
+            {/* Expenses */}
+            <div className="mb-3 pt-2 border-t border-wire">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium text-warm">Expenses</label>
+                {!isReviewed && (
+                  <button type="button" onClick={addExpense} className="flex items-center gap-1 text-xs text-gold hover:text-gold-bright font-medium">
+                    <Plus size={13} /> Add Expense
+                  </button>
+                )}
+              </div>
+              {expenses.length === 0 && <p className="text-xs text-dim">No expenses added.</p>}
+              <div className="space-y-2">
+                {expenses.map((row) => (
+                  <div key={row._id} className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Description"
+                      value={row.description}
+                      onChange={(e) => updateExpense(row._id, 'description', e.target.value)}
+                      disabled={isReviewed}
+                      className="flex-1 min-w-0 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface disabled:text-dim"
+                    />
+                    <div className="relative w-24 shrink-0">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-dim pointer-events-none">$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={row.amount}
+                        onChange={(e) => updateExpense(row._id, 'amount', e.target.value)}
+                        disabled={isReviewed}
+                        className="w-full pl-5 pr-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface disabled:text-dim"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => !isReviewed && updateExpense(row._id, 'is_client_expense', !row.is_client_expense)}
+                      disabled={isReviewed}
+                      title={row.is_client_expense ? 'Charged to client — click to make internal' : 'Internal cost — click to charge to client'}
+                      className={`shrink-0 text-xs px-2 py-1.5 rounded-lg font-medium border transition-colors whitespace-nowrap ${row.is_client_expense ? 'border-gold/60 text-gold bg-gold/10' : 'border-wire text-dim'} disabled:cursor-default`}
+                    >
+                      {row.is_client_expense ? 'Client' : 'Internal'}
+                    </button>
+                    {!isReviewed && (
+                      <button type="button" onClick={() => removeExpense(row._id)} className="shrink-0 p-1 text-dim hover:text-danger transition-colors">
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {expenses.length > 0 && (
+                <div className="mt-2 pt-2 border-t border-wire/50 space-y-1">
+                  {expenses.some((e) => e.is_client_expense && parseFloat(e.amount) > 0) && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-dim">Client expenses (added to revenue)</span>
+                      <span className="text-success font-medium">+{fmt(expenses.filter((e) => e.is_client_expense).reduce((s, e) => s + (parseFloat(e.amount) || 0), 0))}</span>
+                    </div>
+                  )}
+                  {expenses.some((e) => !e.is_client_expense && parseFloat(e.amount) > 0) && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-dim">Company expenses (reduces profit)</span>
+                      <span className="text-danger font-medium">−{fmt(expenses.filter((e) => !e.is_client_expense).reduce((s, e) => s + (parseFloat(e.amount) || 0), 0))}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             {!isReviewed && (
               <button
                 onClick={handleMarkReviewed}
@@ -2851,13 +3032,33 @@ const filteredCustomers = useMemo(
           <Card title="Job Summary">
             <div className="space-y-1.5 text-sm">
               <div className="flex justify-between">
-                <span className="text-dim">Revenue</span>
+                <span className="text-dim">Revenue (inc. GST)</span>
                 <span className="font-semibold text-parchment">{fmt(summary.totalRevenue)}</span>
+              </div>
+              {summary.clientExpensesTotal > 0 && (
+                <div className="flex justify-between text-xs pl-2">
+                  <span className="text-dim">incl. Client Expenses</span>
+                  <span className="text-success">+{fmt(summary.clientExpensesTotal)}</span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span className="text-dim">GST (10%)</span>
+                <span className="text-danger">−{fmt(summary.gstAmount)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-dim">Net Revenue</span>
+                <span className="text-warm">{fmt(summary.netRevenue)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-dim">Payroll</span>
                 <span className="text-orange-600">−{fmt(summary.payrollTotal)}</span>
               </div>
+              {summary.companyExpensesTotal > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-dim">Company Expenses</span>
+                  <span className="text-danger">−{fmt(summary.companyExpensesTotal)}</span>
+                </div>
+              )}
               {summary.discount > 0 && (
                 <div className="flex justify-between">
                   <span className="text-dim">Discount</span>
@@ -3075,7 +3276,7 @@ const filteredCustomers = useMemo(
 
           {/* Action buttons */}
           <div className="flex gap-2 shrink-0">
-            {/* New job (draft) */}
+            {/* New job — always in edit mode */}
             {!isEdit && (
               <>
                 <Button onClick={() => handleSaveWithStatus('draft')} disabled={saving} size="md" variant="ghost">
@@ -3090,9 +3291,17 @@ const filteredCustomers = useMemo(
               </>
             )}
 
-            {/* Editing draft */}
-            {isEdit && form.status === 'draft' && (
+            {/* Existing job — view mode: just Edit */}
+            {isEdit && isViewMode && (
+              <Button onClick={() => setIsViewMode(false)} size="md" variant="secondary">
+                Edit
+              </Button>
+            )}
+
+            {/* Existing job — edit mode: Cancel + status-specific saves */}
+            {isEdit && !isViewMode && form.status === 'draft' && (
               <>
+                <Button onClick={() => setIsViewMode(true)} disabled={saving} size="md" variant="ghost">Cancel</Button>
                 <Button onClick={() => handleSaveWithStatus('draft')} disabled={saving} size="md" variant="ghost">
                   Save Draft
                 </Button>
@@ -3105,9 +3314,9 @@ const filteredCustomers = useMemo(
               </>
             )}
 
-            {/* Editing scheduled */}
-            {isEdit && form.status === 'scheduled' && (
+            {isEdit && !isViewMode && form.status === 'scheduled' && (
               <>
+                <Button onClick={() => setIsViewMode(true)} disabled={saving} size="md" variant="ghost">Cancel</Button>
                 <Button onClick={handleSave} disabled={saving} size="md" variant="secondary">
                   {saving ? 'Saving…' : 'Update'}
                 </Button>
@@ -3120,9 +3329,9 @@ const filteredCustomers = useMemo(
               </>
             )}
 
-            {/* Editing confirmed */}
-            {isEdit && form.status === 'confirmed' && (
+            {isEdit && !isViewMode && form.status === 'confirmed' && (
               <>
+                <Button onClick={() => setIsViewMode(true)} disabled={saving} size="md" variant="ghost">Cancel</Button>
                 <Button onClick={handleSave} disabled={saving} size="md" variant="secondary">
                   {saving ? 'Saving…' : 'Update'}
                 </Button>
@@ -3132,9 +3341,9 @@ const filteredCustomers = useMemo(
               </>
             )}
 
-            {/* In progress */}
-            {isEdit && form.status === 'in_progress' && (
+            {isEdit && !isViewMode && form.status === 'in_progress' && (
               <>
+                <Button onClick={() => setIsViewMode(true)} disabled={saving} size="md" variant="ghost">Cancel</Button>
                 <Button onClick={handleSave} disabled={saving} size="md" variant="secondary">
                   {saving ? 'Saving…' : 'Save'}
                 </Button>
@@ -3144,31 +3353,35 @@ const filteredCustomers = useMemo(
               </>
             )}
 
-            {/* Completed */}
-            {isEdit && form.status === 'completed' && (
-              <Button onClick={handleSave} disabled={saving} size="md" variant="secondary">
-                {saving ? 'Saving…' : 'Save Changes'}
-              </Button>
-            )}
-
-            {/* Reviewed — locked */}
-            {isEdit && form.status === 'reviewed' && !editAnyway && (
+            {isEdit && !isViewMode && form.status === 'completed' && (
               <>
-                <Button onClick={() => setEditAnyway(true)} disabled={saving} size="md" variant="secondary">
-                  Edit Job
-                </Button>
-                <Button onClick={() => handleSaveWithStatus('invoiced')} disabled={saving} size="md" className="bg-purple-600 hover:bg-purple-700 border-purple-600">
-                  <FileText size={15} />
-                  {saving ? 'Saving…' : 'Send Invoice'}
+                <Button onClick={() => setIsViewMode(true)} disabled={saving} size="md" variant="ghost">Cancel</Button>
+                <Button onClick={handleSave} disabled={saving} size="md" variant="secondary">
+                  {saving ? 'Saving…' : 'Save Changes'}
                 </Button>
               </>
             )}
 
-            {/* Reviewed — editing */}
-            {isEdit && form.status === 'reviewed' && editAnyway && (
-              <Button onClick={handleSave} disabled={saving} size="md">
-                {saving ? 'Saving…' : 'Save Changes'}
-              </Button>
+            {isEdit && !isViewMode && form.status === 'reviewed' && (
+              <>
+                <Button onClick={() => setIsViewMode(true)} disabled={saving} size="md" variant="ghost">Cancel</Button>
+                <Button onClick={() => handleSaveWithStatus('invoiced')} disabled={saving} size="md" className="bg-purple-600 hover:bg-purple-700 border-purple-600">
+                  <FileText size={15} />
+                  {saving ? 'Saving…' : 'Send Invoice'}
+                </Button>
+                <Button onClick={handleSave} disabled={saving} size="md">
+                  {saving ? 'Saving…' : 'Save Changes'}
+                </Button>
+              </>
+            )}
+
+            {isEdit && !isViewMode && (form.status === 'invoiced' || form.status === 'paid') && (
+              <>
+                <Button onClick={() => setIsViewMode(true)} disabled={saving} size="md" variant="ghost">Cancel</Button>
+                <Button onClick={handleSave} disabled={saving} size="md">
+                  {saving ? 'Saving…' : 'Save Changes'}
+                </Button>
+              </>
             )}
           </div>
         </div>
