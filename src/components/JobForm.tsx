@@ -791,9 +791,9 @@ const filteredCustomers = useMemo(
       cof: (() => {
         // For ratecard subs: billing.ts formula is ratePerHour × (cofHours - breakHours).
         // cof_final is set to null below so billing uses `cof` as the fallback.
-        // We set cof = gross(workedHrs + break + clientCof) so cofHours - break = workedHrs + clientCof.
+        // We set cof = gross(max(2, workedHrs) + break + clientCof) so cofHours - break = max(2, workedHrs) + clientCof.
         if (form.source === 'subcontract' && selectedSub?.billing_type === 'ratecard' && _billingWorkedHrs !== null) {
-          return _billingWorkedHrs + (parseFloat(form.break_minutes) || 0) / 60 + effectiveClientCof
+          return Math.max(2, _billingWorkedHrs) + (parseFloat(form.break_minutes) || 0) / 60 + effectiveClientCof
         }
         return parseFloat(form.cof) || null
       })(),
@@ -1184,7 +1184,7 @@ const filteredCustomers = useMemo(
       if (!ratePerHour) return null
       const additionalHrs = parseFloat(form.additional_hours) || 0
       const extraMenRevenue = computedExtraMenHours * (parseFloat(form.additional_rate) || 0)
-      return ratePerHour * (workedHrsForSave + saveEffectiveClientCof + additionalHrs) + extraMenRevenue
+      return ratePerHour * (Math.max(2, workedHrsForSave) + saveEffectiveClientCof + additionalHrs) + extraMenRevenue
     })()
 
     const payload = {
