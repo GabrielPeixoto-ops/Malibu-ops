@@ -223,6 +223,7 @@ export interface JobSummary {
   materialsRevenue: number
   materialsCost: number
   discount: number
+  deposit: number
   clientExpensesTotal: number
   companyExpensesTotal: number
   totalRevenue: number
@@ -236,7 +237,7 @@ export interface JobSummary {
   margin: number | null
 }
 
-type JobSummaryInput = Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'additional_rate' | 'rate_card_key' | 'formula_vars' | 'discount' | 'extra_men_hours' | 'break_minutes' | 'override_revenue'> & {
+type JobSummaryInput = Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'additional_rate' | 'rate_card_key' | 'formula_vars' | 'discount' | 'deposit' | 'extra_men_hours' | 'break_minutes' | 'override_revenue'> & {
   source?: JobSource
   client_billing_config?: SubcontractorConfig | null
   google_review?: boolean
@@ -278,6 +279,7 @@ export function calculateJobSummary(
   const materialsRevenue = materials.reduce((s, m) => s + Number(m.quantity) * Number(m.sale_price), 0)
   const materialsCost = materials.reduce((s, m) => s + Number(m.quantity) * Number(m.cost_price), 0)
   const discount = Number(job.discount) || 0
+  const deposit = Number(job.deposit) || 0
   const totalRevenue = subRevenue + materialsRevenue + clientExpensesTotal - discount
   const cofHours = Number(job.cof_final ?? job.cof) || 0
   const reviewIds = job.google_review ? (job.google_review_employee_ids ?? []) : []
@@ -297,5 +299,5 @@ export function calculateJobSummary(
   const netRevenue = totalRevenue - gstAmount
   const profit = netRevenue - payrollTotal - materialsCost - companyExpensesTotal
   const margin = netRevenue !== 0 ? profit / netRevenue : null
-  return { subRevenue, materialsRevenue, materialsCost, discount, clientExpensesTotal, companyExpensesTotal, totalRevenue, gstAmount, netRevenue, payrollTotal, payrollEntries, casualEntries, googleReviewBonuses, profit, margin }
+  return { subRevenue, materialsRevenue, materialsCost, discount, deposit, clientExpensesTotal, companyExpensesTotal, totalRevenue, gstAmount, netRevenue, payrollTotal, payrollEntries, casualEntries, googleReviewBonuses, profit, margin }
 }

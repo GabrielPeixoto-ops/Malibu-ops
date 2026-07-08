@@ -168,6 +168,7 @@ interface FormState {
   gross_job_value: string
   client_cof_override: boolean
   client_cof_hours: string
+  deposit: string
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -274,6 +275,7 @@ function defaultForm(): FormState {
     gross_job_value: '',
     client_cof_override: false,
     client_cof_hours: '',
+    deposit: '',
   }
 }
 
@@ -453,6 +455,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             malibu_revenue: number | null
             client_cof_override: boolean
             client_cof_hours: number | null
+            deposit: number | null
             job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; start_time: string | null; end_time: string | null }>
             job_materials: Array<{ material_name: string; quantity: number; cost_price: number; sale_price: number }>
           }
@@ -529,6 +532,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             gross_job_value: j.gross_job_value != null ? j.gross_job_value.toString() : '',
             client_cof_override: j.client_cof_override ?? false,
             client_cof_hours: j.client_cof_hours != null ? j.client_cof_hours.toString() : '',
+            deposit: j.deposit != null ? j.deposit.toString() : '',
           })
           setDbMalibuRevenue(j.malibu_revenue)
 
@@ -793,6 +797,7 @@ const filteredCustomers = useMemo(
       extra_men_hours: extraMenTotalHours > 0 ? extraMenTotalHours : (parseFloat(form.extra_men_hours) || 0),
       break_minutes: parseFloat(form.break_minutes) || 0,
       discount: parseFloat(form.discount) || 0,
+      deposit: parseFloat(form.deposit) || 0,
       source: form.source,
       client_billing_config: overrideOpen ? buildOverrideConfig(overrideBilling) as unknown as SubcontractorConfig : null,
       google_review: form.google_review,
@@ -1176,6 +1181,7 @@ const filteredCustomers = useMemo(
       extra_man_employee_id: form.extra_man_employee_id || null,
       break_minutes: parseFloat(form.break_minutes) || 0,
       discount: parseFloat(form.discount) || 0,
+      deposit: parseFloat(form.deposit) || null,
       notes: form.notes.trim() || null,
       completion_notes: form.completion_notes.trim() || null,
       actual_start_time: form.actual_start_time || null,
@@ -1556,6 +1562,9 @@ const filteredCustomers = useMemo(
                     : privateRates.find((r) => r.id === form.private_rate_id)?.name ?? '—'}
                 </p>
               )}
+              {(parseFloat(form.deposit) || 0) > 0 && (
+                <p className="text-xs text-dim">Deposit: ${form.deposit}</p>
+              )}
             </div>
           ) : (
             <div className="space-y-3">
@@ -1651,6 +1660,17 @@ const filteredCustomers = useMemo(
                   />
                 </>
               )}
+
+              <Input
+                id="main-deposit"
+                label="Deposit ($)"
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.deposit}
+                onChange={(e) => setField('deposit', e.target.value)}
+                placeholder="0.00"
+              />
 
             </div>
           )
@@ -2804,6 +2824,67 @@ const filteredCustomers = useMemo(
               </div>
             )}
 
+            {/* Individual Crew Hours */}
+            {(crew.some((r) => r.employee_id) || casualCrew.some((r) => r.name.trim())) && (
+              <div className="mb-3 pt-2 border-t border-wire">
+                <p className="text-xs font-medium text-warm mb-2">Individual Crew Hours</p>
+                <div className="space-y-2">
+                  {crew.filter((r) => r.employee_id).map((r) => {
+                    const emp = employees.find((e) => e.id === r.employee_id)
+                    const computed = crewHasTime(r) ? calcCrewHours(r.start_time, r.end_time) : null
+                    return (
+                      <div key={r._id} className="flex items-center gap-2">
+                        <span className="text-xs text-dim w-24 truncate shrink-0">{emp?.name ?? '—'}</span>
+                        <input
+                          type="time"
+                          value={r.start_time}
+                          disabled={isReviewed}
+                          onChange={(e) => setCrew((prev) => prev.map((c) => c._id === r._id ? { ...c, start_time: e.target.value } : c))}
+                          className="text-xs bg-surface border border-wire rounded-lg px-2 py-1 text-parchment focus:border-gold-ring focus:outline-none disabled:opacity-50"
+                        />
+                        <input
+                          type="time"
+                          value={r.end_time}
+                          disabled={isReviewed}
+                          onChange={(e) => setCrew((prev) => prev.map((c) => c._id === r._id ? { ...c, end_time: e.target.value } : c))}
+                          className="text-xs bg-surface border border-wire rounded-lg px-2 py-1 text-parchment focus:border-gold-ring focus:outline-none disabled:opacity-50"
+                        />
+                        {computed !== null && (
+                          <span className="text-xs text-dim font-mono">{computed.toFixed(2)}h</span>
+                        )}
+                      </div>
+                    )
+                  })}
+                  {casualCrew.filter((r) => r.name.trim()).map((r) => {
+                    const hasTime = r.start_time.length === 5 && r.finish_time.length === 5
+                    const computed = hasTime ? calcCrewHours(r.start_time, r.finish_time) : null
+                    return (
+                      <div key={r._id} className="flex items-center gap-2">
+                        <span className="text-xs text-dim w-24 truncate shrink-0">{r.name}</span>
+                        <input
+                          type="time"
+                          value={r.start_time}
+                          disabled={isReviewed}
+                          onChange={(e) => setCasualCrew((prev) => prev.map((c) => c._id === r._id ? { ...c, start_time: e.target.value } : c))}
+                          className="text-xs bg-surface border border-wire rounded-lg px-2 py-1 text-parchment focus:border-gold-ring focus:outline-none disabled:opacity-50"
+                        />
+                        <input
+                          type="time"
+                          value={r.finish_time}
+                          disabled={isReviewed}
+                          onChange={(e) => setCasualCrew((prev) => prev.map((c) => c._id === r._id ? { ...c, finish_time: e.target.value } : c))}
+                          className="text-xs bg-surface border border-wire rounded-lg px-2 py-1 text-parchment focus:border-gold-ring focus:outline-none disabled:opacity-50"
+                        />
+                        {computed !== null && (
+                          <span className="text-xs text-dim font-mono">{computed.toFixed(2)}h</span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Gross Job Value (percent subs only) */}
             {form.source === 'subcontract' && selectedSub?.billing_type === 'percent' && (
               <div className="mb-3 pt-2 border-t border-wire">
@@ -3075,6 +3156,23 @@ const filteredCustomers = useMemo(
               )}
             </div>
 
+            {/* Deposit (private jobs only) */}
+            {form.source === 'private' && (
+              <div className="mb-3 pt-2 border-t border-wire">
+                <Input
+                  id="rfv-deposit"
+                  label="Deposit ($)"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.deposit}
+                  onChange={(e) => setField('deposit', e.target.value)}
+                  disabled={isReviewed}
+                  placeholder="0.00"
+                />
+              </div>
+            )}
+
             {!isReviewed && (
               <button
                 onClick={handleMarkReviewed}
@@ -3129,6 +3227,18 @@ const filteredCustomers = useMemo(
                 <span>Profit</span>
                 <span>{fmt(summary.profit)}{summary.margin !== null ? ` (${(summary.margin * 100).toFixed(1)}%)` : ''}</span>
               </div>
+              {summary.deposit > 0 && (
+                <div className="mt-3 pt-3 border-t border-wire space-y-1.5">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-dim">Deposit Paid</span>
+                    <span className="text-success font-medium">{fmt(summary.deposit)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm font-semibold">
+                    <span className="text-parchment">Balance Due</span>
+                    <span className="text-warm">{fmt(Math.max(0, summary.totalRevenue - summary.deposit))}</span>
+                  </div>
+                </div>
+              )}
             </div>
           </Card>
         )}

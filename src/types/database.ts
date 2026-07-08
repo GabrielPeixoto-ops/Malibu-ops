@@ -227,6 +227,7 @@ export interface Job {
   contract_rate_id: string | null
   contractor_job_id: string | null
   gross_job_value: number | null
+  deposit: number | null
   malibu_revenue: number | null
   created_at?: string
   subcontractor?: Subcontractor
