@@ -140,7 +140,7 @@ export function calculatePayroll(
   googleReviewEmployeeIds: string[] = [],
   extraMen: Array<{ employee_id: string; hours: number }> = [],
   casualCrew: Array<{ name: string; rate_per_hour: number; hours: number }> = [],
-  commissions: Array<{ employee_id: string | null; rate_per_hour: number; hours: number; label?: string }> = []
+  commissions: Array<{ employee_id: string | null; casual_worker_id?: string | null; casual_worker_name?: string; rate_per_hour: number; hours: number; label?: string }> = []
 ): PayrollResult {
   const MIN_CALL = 2
   const REVIEW_BONUS = 0.5
@@ -183,18 +183,30 @@ export function calculatePayroll(
   }
 
   for (const com of commissions) {
-    if (!com.employee_id || com.hours <= 0 || com.rate_per_hour <= 0) continue
-    const emp = empMap.get(com.employee_id)
-    if (!emp) continue
-    entries.push({
-      employee_id: emp.id,
-      employee_name: emp.name,
-      hours: com.hours,
-      paid_hours: com.hours,
-      hourly_rate: com.rate_per_hour,
-      pay: com.hours * com.rate_per_hour,
-      label: com.label,
-    })
+    if (com.hours <= 0 || com.rate_per_hour <= 0) continue
+    if (com.employee_id) {
+      const emp = empMap.get(com.employee_id)
+      if (!emp) continue
+      entries.push({
+        employee_id: emp.id,
+        employee_name: emp.name,
+        hours: com.hours,
+        paid_hours: com.hours,
+        hourly_rate: com.rate_per_hour,
+        pay: com.hours * com.rate_per_hour,
+        label: com.label,
+      })
+    } else if (com.casual_worker_id && com.casual_worker_name) {
+      entries.push({
+        employee_id: com.casual_worker_id,
+        employee_name: com.casual_worker_name,
+        hours: com.hours,
+        paid_hours: com.hours,
+        hourly_rate: com.rate_per_hour,
+        pay: com.hours * com.rate_per_hour,
+        label: com.label,
+      })
+    }
   }
 
   const casualEntries: CasualCrewEntry[] = casualCrew

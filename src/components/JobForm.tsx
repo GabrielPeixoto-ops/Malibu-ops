@@ -10,6 +10,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { calculateJobSummary, extractFormulaVars, type JobSummary, type PrivateRateInput } from '@/lib/billing'
 import type {
+  CasualWorker,
   CommissionType,
   Contract,
   ContractClient,
@@ -100,6 +101,7 @@ interface CommissionRow {
   dbId?: string
   commission_type_id: string
   employee_id: string
+  casual_worker_id: string
   rate_per_hour: string
   hours: string
 }
@@ -338,6 +340,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
 
   const [subs, setSubs] = useState<Subcontractor[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
+  const [casualWorkers, setCasualWorkers] = useState<CasualWorker[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [contracts, setContracts] = useState<(Contract & { contract_clients: ContractClient[] })[]>([])
   const [privateRates, setPrivateRates] = useState<PrivateRate[]>([])
@@ -372,6 +375,10 @@ export default function JobForm({ jobId }: { jobId?: string }) {
   const [isViewMode, setIsViewMode] = useState(isEdit)
   const [cancelModalOpen, setCancelModalOpen] = useState(false)
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
+  const [pendingNewCasualWorker, setPendingNewCasualWorker] = useState<{
+    rowId: string; name: string; rate: number; thenSave?: boolean
+  } | null>(null)
+  const declinedCasualWorkerNamesRef = useRef<Set<string>>(new Set())
   const [dbMalibuRevenue, setDbMalibuRevenue] = useState<number | null>(null)
 
   const [customerSearch, setCustomerSearch] = useState('')
@@ -403,6 +410,10 @@ export default function JobForm({ jobId }: { jobId?: string }) {
       try {
         const { data: ctData } = await supabase.from('commission_types').select('*').eq('is_active', true).order('sort_order')
         setCommissionTypes((ctData ?? []) as CommissionType[])
+      } catch { /* migration not yet applied */ }
+      try {
+        const { data: cwData } = await supabase.from('casual_workers').select('*').order('name')
+        setCasualWorkers((cwData ?? []) as CasualWorker[])
       } catch { /* migration not yet applied */ }
 
       try {
@@ -580,11 +591,12 @@ export default function JobForm({ jobId }: { jobId?: string }) {
 
           try {
             const { data: comData } = await supabase.from('job_commissions').select('*').eq('job_id', jobId).order('created_at')
-            setCommissions((comData ?? []).map((r: { id: string; commission_type_id: string | null; employee_id: string | null; rate_per_hour: number; hours: number }) => ({
+            setCommissions((comData ?? []).map((r: { id: string; commission_type_id: string | null; employee_id: string | null; casual_worker_id: string | null; rate_per_hour: number; hours: number }) => ({
               _id: r.id,
               dbId: r.id,
               commission_type_id: r.commission_type_id ?? '',
               employee_id: r.employee_id ?? '',
+              casual_worker_id: r.casual_worker_id ?? '',
               rate_per_hour: r.rate_per_hour.toString(),
               hours: r.hours.toString(),
             })))
@@ -842,11 +854,14 @@ const filteredCustomers = useMemo(
       .filter((r) => r.hours > 0 && r.rate_per_hour > 0)
 
     const commissionsForBilling = commissions
-      .filter((r) => r.employee_id && (parseFloat(r.hours) || 0) > 0 && (parseFloat(r.rate_per_hour) || 0) > 0)
+      .filter((r) => (r.employee_id || r.casual_worker_id) && (parseFloat(r.hours) || 0) > 0 && (parseFloat(r.rate_per_hour) || 0) > 0)
       .map((r) => {
         const type = commissionTypes.find((t) => t.id === r.commission_type_id)
+        const casualWorker = r.casual_worker_id ? casualWorkers.find((cw) => cw.id === r.casual_worker_id) : null
         return {
-          employee_id: r.employee_id,
+          employee_id: r.employee_id || null,
+          casual_worker_id: r.casual_worker_id || null,
+          casual_worker_name: casualWorker?.name,
           rate_per_hour: parseFloat(r.rate_per_hour) || 0,
           hours: parseFloat(r.hours) || 0,
           label: type ? `Commission: ${type.name}` : 'Commission',
@@ -872,7 +887,7 @@ const filteredCustomers = useMemo(
       commissionsForBilling,
       expensesForBilling
     )
-  }, [form, crew, extraMen, casualCrew, commissions, commissionTypes, materials, expenses, selectedSub, selectedEntity, selectedPrivateRateInput, employees, overrideOpen, overrideBilling, subRates, contractRates])
+  }, [form, crew, extraMen, casualCrew, commissions, commissionTypes, materials, expenses, selectedSub, selectedEntity, selectedPrivateRateInput, employees, casualWorkers, overrideOpen, overrideBilling, subRates, contractRates])
 
   // ── Worked hours from actual times (rounded to nearest 15 min) ──────────
   const workedHoursCalc = useMemo<number | null>(() => {
@@ -994,7 +1009,7 @@ const filteredCustomers = useMemo(
 
   // ── Commission helpers ─────────────────────────────────────────────────────
   function addCommission() {
-    setCommissions((c) => [...c, { _id: crypto.randomUUID(), commission_type_id: '', employee_id: '', rate_per_hour: '', hours: '' }])
+    setCommissions((c) => [...c, { _id: crypto.randomUUID(), commission_type_id: '', employee_id: '', casual_worker_id: '', rate_per_hour: '', hours: '' }])
   }
   function updateCommission(_id: string, field: keyof Omit<CommissionRow, '_id' | 'dbId'>, value: string) {
     setCommissions((c) => c.map((r) => {
@@ -1136,6 +1151,7 @@ const filteredCustomers = useMemo(
     })()
 
     const isPercentSub = form.source === 'subcontract' && selectedSub?.billing_type === 'percent'
+    const isRatecardSub = form.source === 'subcontract' && selectedSub?.billing_type === 'ratecard'
     const computedMalibuRevenue = isPercentSub && form.gross_job_value
       ? (parseFloat(form.gross_job_value) || 0) * (selectedSub!.config as PercentConfig).percent
       : null
@@ -1155,6 +1171,20 @@ const filteredCustomers = useMemo(
         : saveEffectiveClientCof
       if (!totalHours) return null
       return ratePerHour * totalHours
+    })()
+
+    // Revenue for ratecard subs with rateList (rate_per_hour × hours).
+    // Flat-rate jobs (rates[key]) are correctly calculated on-the-fly by the dashboard
+    // via applyBillingConfig, so only rateList jobs need to be persisted here.
+    const computedRatecardRevenue = (() => {
+      if (!isRatecardSub || !selectedSub || workedHrsForSave === null) return null
+      const ratePerHour = (selectedSub.config as RateCardConfig).rateList?.find(
+        (r) => r.id === form.subcontractor_rate_id
+      )?.rate_per_hour ?? null
+      if (!ratePerHour) return null
+      const additionalHrs = parseFloat(form.additional_hours) || 0
+      const extraMenRevenue = computedExtraMenHours * (parseFloat(form.additional_rate) || 0)
+      return ratePerHour * (workedHrsForSave + saveEffectiveClientCof + additionalHrs) + extraMenRevenue
     })()
 
     const payload = {
@@ -1211,7 +1241,7 @@ const filteredCustomers = useMemo(
       contract_rate_id: form.source === 'contract' ? (form.contract_rate_id || null) : null,
       contractor_job_id: form.source === 'subcontract' ? (form.contractor_job_id.trim() || null) : null,
       gross_job_value: isPercentSub ? (parseFloat(form.gross_job_value) || null) : null,
-      malibu_revenue: computedMalibuRevenue ?? computedPrivateRevenue ?? null,
+      malibu_revenue: computedMalibuRevenue ?? computedPrivateRevenue ?? computedRatecardRevenue ?? null,
       client_cof_override: form.client_cof_override,
       client_cof_hours: form.client_cof_override ? (parseFloat(form.client_cof_hours) || null) : null,
     }
@@ -1294,12 +1324,13 @@ const filteredCustomers = useMemo(
       } catch { /* migration not yet applied */ }
       try {
         await supabase.from('job_commissions').delete().eq('job_id', jobId)
-        const comRows = commissions.filter((r) => r.employee_id)
+        const comRows = commissions.filter((r) => r.employee_id || r.casual_worker_id)
         if (comRows.length) {
           await supabase.from('job_commissions').insert(comRows.map((r) => ({
             job_id: jobId,
             commission_type_id: r.commission_type_id || null,
             employee_id: r.employee_id || null,
+            casual_worker_id: r.casual_worker_id || null,
             rate_per_hour: parseFloat(r.rate_per_hour) || 0,
             hours: parseFloat(r.hours) || 0,
           })))
@@ -1361,12 +1392,13 @@ const filteredCustomers = useMemo(
         }
       } catch { /* migration not yet applied */ }
       try {
-        const comRows = commissions.filter((r) => r.employee_id)
+        const comRows = commissions.filter((r) => r.employee_id || r.casual_worker_id)
         if (comRows.length) {
           await supabase.from('job_commissions').insert(comRows.map((r) => ({
             job_id: newId,
             commission_type_id: r.commission_type_id || null,
             employee_id: r.employee_id || null,
+            casual_worker_id: r.casual_worker_id || null,
             rate_per_hour: parseFloat(r.rate_per_hour) || 0,
             hours: parseFloat(r.hours) || 0,
           })))
@@ -1398,7 +1430,43 @@ const filteredCustomers = useMemo(
     return fallback
   }
 
+  async function confirmNewCasualWorker() {
+    if (!pendingNewCasualWorker) return
+    const { name, rate, thenSave } = pendingNewCasualWorker
+    setPendingNewCasualWorker(null)
+    const { data } = await supabase.from('casual_workers').insert({ name, rate_per_hour: rate }).select().single()
+    if (data) {
+      setCasualWorkers((prev) =>
+        [...prev, data as CasualWorker].sort((a, b) => a.name.localeCompare(b.name))
+      )
+    }
+    if (thenSave) handleSave()
+  }
+
+  function declineNewCasualWorker() {
+    if (!pendingNewCasualWorker) return
+    declinedCasualWorkerNamesRef.current.add(pendingNewCasualWorker.name.toLowerCase())
+    const thenSave = pendingNewCasualWorker.thenSave
+    setPendingNewCasualWorker(null)
+    if (thenSave) handleSave()
+  }
+
   async function handleSave() {
+    const unregistered = casualCrew.find((r) => {
+      const name = r.name.trim()
+      return name &&
+        !casualWorkers.some((cw) => cw.name.toLowerCase() === name.toLowerCase()) &&
+        !declinedCasualWorkerNamesRef.current.has(name.toLowerCase())
+    })
+    if (unregistered) {
+      setPendingNewCasualWorker({
+        rowId: unregistered._id,
+        name: unregistered.name.trim(),
+        rate: parseFloat(unregistered.rate_per_hour) || 0,
+        thenSave: true,
+      })
+      return
+    }
     setSaving(true)
     setError('')
     try { await performSave(); setIsViewMode(true) }
@@ -1893,7 +1961,7 @@ const filteredCustomers = useMemo(
         {summary && summary.payrollEntries.length > 0 && (
           <div className="mt-3 pt-3 border-t border-wire space-y-1">
             {summary.payrollEntries.map((e) => (
-              <div key={e.employee_id} className="flex justify-between text-xs text-dim">
+              <div key={`${e.employee_id}-${e.label ?? 'crew'}`} className="flex justify-between text-xs text-dim">
                 <span>
                   {e.employee_name} — {e.paid_hours}h × ${e.hourly_rate}
                   {e.google_review_bonus && <span className="ml-1 text-gold">(+0.5h ★)</span>}
@@ -2060,6 +2128,9 @@ const filteredCustomers = useMemo(
         ) : undefined}
       >
         {casualCrew.length === 0 && <p className="text-sm text-dim text-center py-2">No casual crew added.</p>}
+        <datalist id="casual-worker-list">
+          {casualWorkers.map((cw) => <option key={cw.id} value={cw.name} />)}
+        </datalist>
         <div className="space-y-2">
           {casualCrew.map((row) => {
             const hasTime = row.start_time.length === 5 && row.finish_time.length === 5
@@ -2072,8 +2143,22 @@ const filteredCustomers = useMemo(
               <div key={row._id} className="flex items-center gap-2 flex-wrap">
                 <input
                   type="text"
+                  list="casual-worker-list"
                   value={row.name}
-                  onChange={(e) => updateCasualCrew(row._id, 'name', e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    updateCasualCrew(row._id, 'name', val)
+                    const match = casualWorkers.find((cw) => cw.name.toLowerCase() === val.toLowerCase())
+                    if (match) updateCasualCrew(row._id, 'rate_per_hour', match.rate_per_hour.toString())
+                  }}
+                  onBlur={() => {
+                    const name = row.name.trim()
+                    if (!name || locked) return
+                    const known = casualWorkers.some((cw) => cw.name.toLowerCase() === name.toLowerCase())
+                    if (!known && !declinedCasualWorkerNamesRef.current.has(name.toLowerCase())) {
+                      setPendingNewCasualWorker({ rowId: row._id, name, rate: parseFloat(row.rate_per_hour) || 0 })
+                    }
+                  }}
                   disabled={locked}
                   placeholder="Person name…"
                   className="flex-1 min-w-[120px] px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel disabled:text-dim"
@@ -2179,15 +2264,32 @@ const filteredCustomers = useMemo(
                   ))}
                 </select>
                 <select
-                  value={row.employee_id}
-                  onChange={(e) => updateCommission(row._id, 'employee_id', e.target.value)}
+                  value={row.casual_worker_id ? `casual:${row.casual_worker_id}` : row.employee_id ? `staff:${row.employee_id}` : ''}
+                  onChange={(e) => {
+                    const val = e.target.value
+                    const [type, id] = val.split(':')
+                    setCommissions((cs) => cs.map((r) => r._id === row._id ? {
+                      ...r,
+                      employee_id: type === 'staff' ? id : '',
+                      casual_worker_id: type === 'casual' ? id : '',
+                    } : r))
+                  }}
                   disabled={locked}
                   className="flex-1 min-w-[120px] px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel disabled:text-dim"
                 >
-                  <option value="">Employee…</option>
-                  {employees.map((e) => (
-                    <option key={e.id} value={e.id}>{e.name}</option>
-                  ))}
+                  <option value="">Person…</option>
+                  <optgroup label="Staff">
+                    {employees.map((e) => (
+                      <option key={e.id} value={`staff:${e.id}`}>{e.name}</option>
+                    ))}
+                  </optgroup>
+                  {casualWorkers.length > 0 && (
+                    <optgroup label="Casual Workers">
+                      {casualWorkers.map((cw) => (
+                        <option key={cw.id} value={`casual:${cw.id}`}>{cw.name}</option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
                 <div className="flex items-center gap-1">
                   <span className="text-xs text-dim">$</span>
@@ -3600,6 +3702,27 @@ const filteredCustomers = useMemo(
             </Button>
             <Button variant="secondary" onClick={() => setCancelModalOpen(false)} className="flex-1">Keep Job</Button>
           </div>
+        </div>
+      </Modal>
+
+      {/* New casual worker registration prompt */}
+      <Modal
+        open={pendingNewCasualWorker !== null}
+        onClose={declineNewCasualWorker}
+        title="New Casual Worker?"
+      >
+        <p className="text-sm text-parchment mb-4">
+          <strong>{pendingNewCasualWorker?.name}</strong> is not in the Casual Workers list.
+          Would you like to add them now with a rate of{' '}
+          <strong>${pendingNewCasualWorker?.rate ?? 0}/hr</strong>?
+        </p>
+        <div className="flex gap-3 justify-end">
+          <Button variant="ghost" type="button" onClick={declineNewCasualWorker}>
+            No, just for this job
+          </Button>
+          <Button type="button" onClick={confirmNewCasualWorker}>
+            Yes, add them
+          </Button>
         </div>
       </Modal>
     </div>

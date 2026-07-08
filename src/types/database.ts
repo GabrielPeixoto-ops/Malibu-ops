@@ -296,6 +296,17 @@ export interface CommissionType {
   created_at?: string
 }
 
+export interface CasualWorker {
+  id: string
+  name: string
+  rate_per_hour: number
+  phone: string | null
+  notes: string | null
+  referrer_id: string | null
+  referrer_commission_per_hour: number
+  created_at?: string
+}
+
 export interface JobCommission {
   id: string
   job_id: string
