@@ -166,6 +166,8 @@ interface FormState {
   contract_rate_id: string
   contractor_job_id: string
   gross_job_value: string
+  client_cof_override: boolean
+  client_cof_hours: string
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -270,6 +272,8 @@ function defaultForm(): FormState {
     contract_rate_id: '',
     contractor_job_id: '',
     gross_job_value: '',
+    client_cof_override: false,
+    client_cof_hours: '',
   }
 }
 
@@ -447,6 +451,8 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             contractor_job_id: string | null
             gross_job_value: number | null
             malibu_revenue: number | null
+            client_cof_override: boolean
+            client_cof_hours: number | null
             job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; start_time: string | null; end_time: string | null }>
             job_materials: Array<{ material_name: string; quantity: number; cost_price: number; sale_price: number }>
           }
@@ -521,6 +527,8 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             contract_rate_id: j.contract_rate_id ?? '',
             contractor_job_id: j.contractor_job_id ?? '',
             gross_job_value: j.gross_job_value != null ? j.gross_job_value.toString() : '',
+            client_cof_override: j.client_cof_override ?? false,
+            client_cof_hours: j.client_cof_hours != null ? j.client_cof_hours.toString() : '',
           })
           setDbMalibuRevenue(j.malibu_revenue)
 
@@ -721,11 +729,14 @@ const filteredCustomers = useMemo(
       if (rawMins <= 0) return null
       return Math.round(rawMins / 15) * 15 / 60
     })()
-    const cofFinal = parseFloat(form.cof_final) || 0
-    // Total billed = max(2, worked) + COF surcharge — matches the Final Review display formula
+    // Client COF: either same as crew (checkbox off) or custom value (checkbox on)
+    const effectiveClientCof = form.client_cof_override
+      ? (parseFloat(form.client_cof_hours) || 0)
+      : (parseFloat(form.cof_final) || 0)
+    // Total billed = max(2, worked) + client COF surcharge
     const cofHours = workedHrs !== null
-      ? Math.max(2, workedHrs) + cofFinal
-      : (parseFloat(form.cof_final || form.cof) || 0)
+      ? Math.max(2, workedHrs) + effectiveClientCof
+      : effectiveClientCof
     if (form.private_rate_custom) {
       const price = parseFloat(form.private_rate_custom_price)
       if (!price) return null
@@ -734,7 +745,7 @@ const filteredCustomers = useMemo(
     const rate = privateRates.find((r) => r.id === form.private_rate_id)
     if (!rate) return null
     return { rate_per_hour: rate.rate_per_hour, cofHours }
-  }, [form.source, form.private_rate_custom, form.private_rate_custom_price, form.private_rate_id, form.cof_final, form.cof, form.actual_start_time, form.actual_finish_time, form.break_minutes, privateRates])
+  }, [form.source, form.private_rate_custom, form.private_rate_custom_price, form.private_rate_id, form.cof_final, form.cof, form.client_cof_override, form.client_cof_hours, form.actual_start_time, form.actual_finish_time, form.break_minutes, privateRates])
 
   const summary = useMemo<JobSummary | null>(() => {
     if (form.source === 'subcontract' && !selectedSub) return null
@@ -755,18 +766,26 @@ const filteredCustomers = useMemo(
       if (rawMins <= 0) return null
       return Math.round(rawMins / 15) * 15 / 60
     })()
+    // Client COF: what gets billed to the client for the Call Out Fee portion
+    const effectiveClientCof = form.client_cof_override
+      ? (parseFloat(form.client_cof_hours) || 0)
+      : (parseFloat(form.cof_final) || 0)
+
     const jobData = {
       cof: (() => {
-        const explicit = parseFloat(form.cof) || null
-        if (explicit) return explicit
-        // For ratecard subs: fall back to actual worked hours when cof not explicitly set.
-        // Revenue formula does (cofHours - breakHours), so pass gross (net + break) to avoid double-subtracting.
+        // For ratecard subs: billing.ts formula is ratePerHour × (cofHours - breakHours).
+        // cof_final is set to null below so billing uses `cof` as the fallback.
+        // We set cof = gross(workedHrs + break + clientCof) so cofHours - break = workedHrs + clientCof.
         if (form.source === 'subcontract' && selectedSub?.billing_type === 'ratecard' && _billingWorkedHrs !== null) {
-          return _billingWorkedHrs + (parseFloat(form.break_minutes) || 0) / 60
+          return _billingWorkedHrs + (parseFloat(form.break_minutes) || 0) / 60 + effectiveClientCof
         }
-        return null
+        return parseFloat(form.cof) || null
       })(),
-      cof_final: form.cof_final.trim() ? parseFloat(form.cof_final) : null,
+      // For ratecard subs: null forces billing.ts to fall back to `cof` (set above), preventing
+      // cof_final (crew-only surcharge) from overriding the revenue calculation.
+      cof_final: (form.source === 'subcontract' && selectedSub?.billing_type === 'ratecard')
+        ? null
+        : (form.cof_final.trim() ? parseFloat(form.cof_final) : null),
       additional_hours: parseFloat(form.additional_hours) || null,
       additional_rate: parseFloat(form.additional_rate) || null,
       rate_card_key: form.rate_card_key || null,
@@ -1116,17 +1135,19 @@ const filteredCustomers = useMemo(
       ? (parseFloat(form.gross_job_value) || 0) * (selectedSub!.config as PercentConfig).percent
       : null
 
-    // Revenue for private jobs: rate × (max(2, workedHrs) + cof_final)
+    // Revenue for private jobs: rate × (max(2, workedHrs) + effectiveClientCof)
+    const saveEffectiveClientCof = form.client_cof_override
+      ? (parseFloat(form.client_cof_hours) || 0)
+      : (parseFloat(form.cof_final) || 0)
     const computedPrivateRevenue = (() => {
       if (form.source !== 'private') return null
       const ratePerHour = form.private_rate_custom
         ? (parseFloat(form.private_rate_custom_price) || null)
         : (privateRates.find((r) => r.id === form.private_rate_id)?.rate_per_hour ?? null)
       if (!ratePerHour) return null
-      const cofFinal = parseFloat(form.cof_final) || 0
       const totalHours = workedHrsForSave !== null
-        ? Math.max(2, workedHrsForSave) + cofFinal
-        : (parseFloat(form.cof_final || form.cof) || 0)
+        ? Math.max(2, workedHrsForSave) + saveEffectiveClientCof
+        : saveEffectiveClientCof
       if (!totalHours) return null
       return ratePerHour * totalHours
     })()
@@ -1185,6 +1206,8 @@ const filteredCustomers = useMemo(
       contractor_job_id: form.source === 'subcontract' ? (form.contractor_job_id.trim() || null) : null,
       gross_job_value: isPercentSub ? (parseFloat(form.gross_job_value) || null) : null,
       malibu_revenue: computedMalibuRevenue ?? computedPrivateRevenue ?? null,
+      client_cof_override: form.client_cof_override,
+      client_cof_hours: form.client_cof_override ? (parseFloat(form.client_cof_hours) || null) : null,
     }
 
     const crewRows = crew.filter((r) => r.employee_id).map((r) => {
@@ -2713,8 +2736,45 @@ const filteredCustomers = useMemo(
             {/* Break + Call Out Fee */}
             <div className="grid grid-cols-2 gap-3 mb-3">
               <Input id="rfv-break" label="Break (min)" type="number" step="1" value={form.break_minutes ?? ''} onChange={(e) => setField('break_minutes', e.target.value)} placeholder="0" disabled={isReviewed} />
-              <Input id="rfv-cof-final" label="Call Out Fee (hrs)" type="number" min="0" step="0.25" value={form.cof_final ?? ''} onChange={(e) => setField('cof_final', e.target.value)} placeholder="0" disabled={isReviewed} />
+              <Input id="rfv-cof-final" label="Call Out Fee — crew (hrs)" type="number" min="0" step="0.25" value={form.cof_final ?? ''} onChange={(e) => setField('cof_final', e.target.value)} placeholder="0" disabled={isReviewed} />
             </div>
+
+            {/* Client COF override — only relevant when there's a COF */}
+            {((parseFloat(form.cof_final) || 0) > 0 || form.client_cof_override) && (
+              <div className="mb-3 space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={form.client_cof_override}
+                    onChange={(e) => {
+                      setField('client_cof_override', e.target.checked)
+                      if (!e.target.checked) setField('client_cof_hours', '')
+                    }}
+                    disabled={isReviewed}
+                    className="w-3.5 h-3.5 rounded accent-gold"
+                  />
+                  <span className="text-xs text-dim">Charge different Call Out amount to client</span>
+                </label>
+                {form.client_cof_override && (
+                  <div className="flex items-center gap-2 pl-5">
+                    <label className="text-xs text-dim whitespace-nowrap">Client Call Out (hrs)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.25"
+                      placeholder={form.cof_final || '0'}
+                      value={form.client_cof_hours}
+                      onChange={(e) => setField('client_cof_hours', e.target.value)}
+                      disabled={isReviewed}
+                      className="w-24 px-2 py-1 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface"
+                    />
+                    <span className="text-xs text-dim">
+                      vs crew {form.cof_final || '0'}h
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Hours worked breakdown */}
             {workedHoursCalc !== null && (
