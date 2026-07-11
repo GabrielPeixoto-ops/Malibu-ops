@@ -254,6 +254,7 @@ export default function DashboardPage() {
         `)
         .gte('date', start)
         .lte('date', end)
+        .neq('status', 'cancelled')
         .order('date')
 
       if (error) console.error('dashboard jobs query error:', error.message)

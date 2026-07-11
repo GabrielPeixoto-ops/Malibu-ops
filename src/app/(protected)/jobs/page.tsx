@@ -216,6 +216,8 @@ export default function JobsPage() {
   const filtered = useMemo(() => {
     return jobs.filter((j) => {
       if (sourceFilter !== 'all' && j.source !== sourceFilter) return false
+      if (statusFilter === 'cancelled') return j.status === 'cancelled'
+      if (j.status === 'cancelled') return false
       if (statusFilter !== 'all' && j.status !== statusFilter) return false
       if (dateFrom && j.date < dateFrom) return false
       if (dateTo && j.date > dateTo) return false
