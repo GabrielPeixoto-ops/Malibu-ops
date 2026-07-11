@@ -166,6 +166,9 @@ interface FormState {
   subcontractor_crew_size: string
   subcontractor_rate_id: string
   contract_rate_id: string
+  contract_rate_custom: boolean
+  contract_rate_custom_price: string
+  contract_client_name: string
   contractor_job_id: string
   gross_job_value: string
   client_cof_override: boolean
@@ -273,6 +276,9 @@ function defaultForm(): FormState {
     subcontractor_crew_size: '',
     subcontractor_rate_id: '',
     contract_rate_id: '',
+    contract_rate_custom: false,
+    contract_rate_custom_price: '',
+    contract_client_name: '',
     contractor_job_id: '',
     gross_job_value: '',
     client_cof_override: false,
@@ -461,6 +467,8 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             subcontractor_crew_size: number | null
             subcontractor_rate_id: string | null
             contract_rate_id: string | null
+            contract_rate_custom_price: number | null
+            contract_client_name: string | null
             contractor_job_id: string | null
             gross_job_value: number | null
             malibu_revenue: number | null
@@ -539,6 +547,12 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             subcontractor_crew_size: j.subcontractor_crew_size != null ? j.subcontractor_crew_size.toString() : '',
             subcontractor_rate_id: j.subcontractor_rate_id ?? '',
             contract_rate_id: j.contract_rate_id ?? '',
+            contract_rate_custom: j.contract_rate_id == null && j.contract_rate_custom_price != null,
+            contract_rate_custom_price: j.contract_rate_custom_price != null ? j.contract_rate_custom_price.toString() : '',
+            contract_client_name: j.contract_client_name
+              ?? (j.contract_client_id
+                ? loadedContracts.find((c) => c.id === j.contract_id)?.contract_clients?.find((cc) => cc.id === j.contract_client_id)?.name ?? ''
+                : ''),
             contractor_job_id: j.contractor_job_id ?? '',
             gross_job_value: j.gross_job_value != null ? j.gross_job_value.toString() : '',
             client_cof_override: j.client_cof_override ?? false,
@@ -727,11 +741,12 @@ const filteredCustomers = useMemo(
     if (form.source === 'private') return selectedCustomer?.name ?? (customerSearch || '—')
     if (form.source === 'contract') {
       const base = selectedContract?.name ?? '—'
-      const client = availableContractClients.find((c) => c.id === form.contract_client_id)
-      return client ? `${base} → ${client.name}` : base
+      const clientName = form.contract_client_name.trim()
+        || availableContractClients.find((c) => c.id === form.contract_client_id)?.name
+      return clientName ? `${base} → ${clientName}` : base
     }
     return selectedSub?.name ?? '—'
-  }, [form.source, selectedCustomer, customerSearch, selectedContract, availableContractClients, form.contract_client_id, selectedSub])
+  }, [form.source, selectedCustomer, customerSearch, selectedContract, availableContractClients, form.contract_client_id, form.contract_client_name, selectedSub])
 
   // ── Real-time summary ──────────────────────────────────────────────────────
   const selectedPrivateRateInput = useMemo<PrivateRateInput | null>(() => {
@@ -787,19 +802,34 @@ const filteredCustomers = useMemo(
       ? (parseFloat(form.client_cof_hours) || 0)
       : (parseFloat(form.cof_final) || 0)
 
+    const selectedSubRatePH = form.source === 'subcontract' && selectedSub?.billing_type === 'ratecard'
+      ? ((selectedSub.config as RateCardConfig).rateList?.find((r) => r.id === form.subcontractor_rate_id)?.rate_per_hour ?? null)
+      : null
+    const selectedContractRatePH = form.source === 'contract'
+      ? (form.contract_rate_custom && parseFloat(form.contract_rate_custom_price) > 0
+          ? parseFloat(form.contract_rate_custom_price)
+          : (contractRates.find((r) => r.id === form.contract_rate_id)?.rate_per_hour ?? null))
+      : null
+
     const jobData = {
       cof: (() => {
-        // For ratecard subs: billing.ts formula is ratePerHour × (cofHours - breakHours).
+        // For ratecard subs and contract+rate jobs: billing.ts formula is ratePerHour × (cofHours - breakHours).
         // cof_final is set to null below so billing uses `cof` as the fallback.
         // We set cof = gross(max(2, workedHrs) + break + clientCof) so cofHours - break = max(2, workedHrs) + clientCof.
         if (form.source === 'subcontract' && selectedSub?.billing_type === 'ratecard' && _billingWorkedHrs !== null) {
           return Math.max(2, _billingWorkedHrs) + (parseFloat(form.break_minutes) || 0) / 60 + effectiveClientCof
         }
+        if (form.source === 'contract' && selectedContractRatePH !== null && _billingWorkedHrs !== null) {
+          return Math.max(2, _billingWorkedHrs) + (parseFloat(form.break_minutes) || 0) / 60 + effectiveClientCof
+        }
         return parseFloat(form.cof) || null
       })(),
-      // For ratecard subs: null forces billing.ts to fall back to `cof` (set above), preventing
-      // cof_final (crew-only surcharge) from overriding the revenue calculation.
-      cof_final: (form.source === 'subcontract' && selectedSub?.billing_type === 'ratecard')
+      // For ratecard subs and contract+rate jobs: null forces billing.ts to fall back to `cof` (set above),
+      // preventing cof_final (crew-only surcharge) from overriding the revenue calculation.
+      cof_final: (
+          (form.source === 'subcontract' && selectedSub?.billing_type === 'ratecard') ||
+          (form.source === 'contract' && selectedContractRatePH !== null && _billingWorkedHrs !== null)
+        )
         ? null
         : (form.cof_final.trim() ? parseFloat(form.cof_final) : null),
       additional_hours: parseFloat(form.additional_hours) || null,
@@ -830,13 +860,6 @@ const filteredCustomers = useMemo(
       cost_price: parseFloat(m.cost_price) || 0,
       sale_price: parseFloat(m.sale_price) || 0,
     }))
-    const selectedSubRatePH = form.source === 'subcontract' && selectedSub?.billing_type === 'ratecard'
-      ? ((selectedSub.config as RateCardConfig).rateList?.find((r) => r.id === form.subcontractor_rate_id)?.rate_per_hour ?? null)
-      : null
-    const selectedContractRatePH = form.source === 'contract'
-      ? (contractRates.find((r) => r.id === form.contract_rate_id)?.rate_per_hour ?? null)
-      : null
-
     const casualCrewForBilling = casualCrew
       .filter((r) => r.name.trim())
       .map((r) => {
@@ -915,10 +938,13 @@ const filteredCustomers = useMemo(
       customer_id: src === 'private' ? f.customer_id : '',
       contract_id: src === 'contract' ? f.contract_id : '',
       contract_client_id: src === 'contract' ? f.contract_client_id : '',
+      contract_rate_id: '',
+      contract_rate_custom: false,
+      contract_rate_custom_price: '',
+      contract_client_name: '',
       formula_vars: {},
       rate_card_key: '',
       subcontractor_rate_id: '',
-      contract_rate_id: '',
       ...(src !== 'private' ? {
         private_rate_id: '',
         private_rate_custom: false,
@@ -951,7 +977,7 @@ const filteredCustomers = useMemo(
       const keys = extractFormulaVars(expression)
       fvars = Object.fromEntries(keys.map((k) => [k, String(defaults[k] ?? '')]))
     }
-    setForm((f) => ({ ...f, contract_id: contractId, contract_client_id: '', formula_vars: fvars, rate_card_key: '', contract_rate_id: '' }))
+    setForm((f) => ({ ...f, contract_id: contractId, contract_client_id: '', contract_rate_id: '', contract_rate_custom: false, contract_rate_custom_price: '', contract_client_name: '', formula_vars: fvars, rate_card_key: '' }))
   }
 
   // ── Crew helpers ───────────────────────────────────────────────────────────
@@ -1187,6 +1213,18 @@ const filteredCustomers = useMemo(
       return ratePerHour * (Math.max(2, workedHrsForSave) + saveEffectiveClientCof + additionalHrs) + extraMenRevenue
     })()
 
+    // Revenue for contract jobs with a rate selected: rate_per_hour × (max(2, workedHrs) + clientCof)
+    const computedContractRevenue = (() => {
+      if (form.source !== 'contract' || workedHrsForSave === null) return null
+      const ratePerHour = form.contract_rate_custom && parseFloat(form.contract_rate_custom_price) > 0
+        ? parseFloat(form.contract_rate_custom_price)
+        : (contractRates.find((r) => r.id === form.contract_rate_id)?.rate_per_hour ?? null)
+      if (!ratePerHour) return null
+      const additionalHrs = parseFloat(form.additional_hours) || 0
+      const extraMenRevenue = computedExtraMenHours * (parseFloat(form.additional_rate) || 0)
+      return ratePerHour * (Math.max(2, workedHrsForSave) + saveEffectiveClientCof + additionalHrs) + extraMenRevenue
+    })()
+
     const payload = {
       job_number: form.job_number.trim(),
       date: form.date,
@@ -1195,7 +1233,8 @@ const filteredCustomers = useMemo(
       subcontractor_id: form.source === 'subcontract' ? (form.subcontractor_id || null) : null,
       customer_id: form.source === 'private' ? (resolvedCustomerId || null) : (form.customer_id || null),
       contract_id: form.source === 'contract' ? (form.contract_id || null) : null,
-      contract_client_id: form.source === 'contract' ? (form.contract_client_id || null) : null,
+      contract_client_id: null,
+      contract_client_name: form.source === 'contract' ? (form.contract_client_name.trim() || null) : null,
       client_billing_config: clientBillingConfig,
       pickup_address: form.pickup_address.trim() || null,
       delivery_address: form.delivery_address.trim() || null,
@@ -1238,10 +1277,11 @@ const filteredCustomers = useMemo(
       subcontractor_trucks: form.source === 'subcontract' ? (form.subcontractor_trucks.trim() || null) : null,
       subcontractor_crew_size: form.source === 'subcontract' ? (parseInt(form.subcontractor_crew_size) || null) : null,
       subcontractor_rate_id: form.source === 'subcontract' ? (form.subcontractor_rate_id || null) : null,
-      contract_rate_id: form.source === 'contract' ? (form.contract_rate_id || null) : null,
+      contract_rate_id: form.source === 'contract' && !form.contract_rate_custom ? (form.contract_rate_id || null) : null,
+      contract_rate_custom_price: form.source === 'contract' && form.contract_rate_custom ? (parseFloat(form.contract_rate_custom_price) || null) : null,
       contractor_job_id: form.source === 'subcontract' ? (form.contractor_job_id.trim() || null) : null,
       gross_job_value: isPercentSub ? (parseFloat(form.gross_job_value) || null) : null,
-      malibu_revenue: computedMalibuRevenue ?? computedPrivateRevenue ?? computedRatecardRevenue ?? null,
+      malibu_revenue: computedMalibuRevenue ?? computedPrivateRevenue ?? computedRatecardRevenue ?? computedContractRevenue ?? null,
       client_cof_override: form.client_cof_override,
       client_cof_hours: form.client_cof_override ? (parseFloat(form.client_cof_hours) || null) : null,
     }
@@ -1749,8 +1789,14 @@ const filteredCustomers = useMemo(
           locked ? (
             <div className="space-y-1">
               <p className="text-sm font-medium text-parchment">{entityDisplayName}</p>
-              {form.contract_rate_id && <p className="text-xs text-dim">Rate: {contractRates.find((r) => r.id === form.contract_rate_id)?.name ?? '—'}</p>}
-              {!form.contract_rate_id && form.rate_card_key && <p className="text-xs text-dim">Rate: {form.rate_card_key}</p>}
+              {form.contract_rate_custom && form.contract_rate_custom_price
+                ? <p className="text-xs text-dim">Rate: Custom — ${form.contract_rate_custom_price}/hr</p>
+                : form.contract_rate_id
+                  ? <p className="text-xs text-dim">Rate: {contractRates.find((r) => r.id === form.contract_rate_id)?.name ?? '—'}</p>
+                  : form.rate_card_key
+                    ? <p className="text-xs text-dim">Rate: {form.rate_card_key}</p>
+                    : null
+              }
               {form.reference_number && <p className="text-xs text-dim">Job ID: {form.reference_number}</p>}
             </div>
           ) : (
@@ -1763,34 +1809,49 @@ const filteredCustomers = useMemo(
                 onChange={(e) => handleContractChange(e.target.value)}
               />
               {form.contract_id && (
-                <Select
+                <Input
                   label="Client"
-                  placeholder="Select client…"
-                  options={availableContractClients.map((c) => ({ value: c.id, label: c.name }))}
-                  value={form.contract_client_id ?? ''}
-                  onChange={(e) => setField('contract_client_id', e.target.value)}
+                  placeholder="Client name…"
+                  value={form.contract_client_name}
+                  onChange={(e) => setField('contract_client_name', e.target.value)}
                 />
               )}
-              {/* Rate selector from contract_rates */}
-              {form.contract_id && (() => {
-                const filteredRates = contractRates.filter((r) => r.contract_id === form.contract_id)
-                if (filteredRates.length === 0) return null
-                return (
-                  <div>
-                    <label className="block text-sm font-medium text-warm mb-1">Rate</label>
-                    <select
-                      value={form.contract_rate_id ?? ''}
-                      onChange={(e) => setField('contract_rate_id', e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring bg-panel"
-                    >
-                      <option value="">Select rate…</option>
-                      {filteredRates.map((r) => (
-                        <option key={r.id} value={r.id}>{r.name} — ${r.rate_per_hour}/hr</option>
-                      ))}
-                    </select>
-                  </div>
-                )
-              })()}
+              {/* Rate dropdown + custom option (mirrors Private pattern) */}
+              {form.contract_id && (
+                <div>
+                  <label className="block text-sm font-medium text-warm mb-1">Rate</label>
+                  <select
+                    value={form.contract_rate_custom ? 'custom' : (form.contract_rate_id ?? '')}
+                    onChange={(e) => {
+                      if (e.target.value === 'custom') {
+                        setForm((f) => ({ ...f, contract_rate_custom: true, contract_rate_id: '', contract_rate_custom_price: '' }))
+                      } else {
+                        setForm((f) => ({ ...f, contract_rate_custom: false, contract_rate_id: e.target.value, contract_rate_custom_price: '' }))
+                      }
+                    }}
+                    className="w-full px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring bg-panel"
+                  >
+                    <option value="">Select rate…</option>
+                    {contractRates.filter((r) => r.contract_id === form.contract_id).map((r) => (
+                      <option key={r.id} value={r.id}>{r.name} — ${r.rate_per_hour}/hr</option>
+                    ))}
+                    <optgroup label="— Custom —">
+                      <option value="custom">Custom price…</option>
+                    </optgroup>
+                  </select>
+                </div>
+              )}
+              {form.contract_rate_custom && (
+                <Input
+                  label="Rate ($/hr)"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.contract_rate_custom_price}
+                  onChange={(e) => setField('contract_rate_custom_price', e.target.value)}
+                  placeholder="0.00"
+                />
+              )}
               {/* Additional hours/rate when contract_rate selected */}
               {form.contract_id && form.contract_rate_id && (
                 <div className="grid grid-cols-2 gap-3">
