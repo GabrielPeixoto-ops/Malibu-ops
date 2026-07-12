@@ -230,6 +230,7 @@ export interface Job {
   deposit: number | null
   contract_rate_custom_price: number | null
   contract_client_name: string | null
+  heavy_item_charge: number | null
   malibu_revenue: number | null
   created_at?: string
   subcontractor?: Subcontractor
@@ -246,6 +247,7 @@ export interface JobCrew {
   hours: number
   cof_share: boolean
   cof_hours: number
+  heavy_item: boolean
   role: string | null
   start_time: string | null
   end_time: string | null
@@ -284,6 +286,7 @@ export interface JobCasualCrew {
   job_id: string
   name: string
   rate_per_hour: number
+  heavy_item: boolean
   start_time: string | null
   finish_time: string | null
   created_at?: string

@@ -134,16 +134,17 @@ export interface PayrollResult {
 }
 
 export function calculatePayroll(
-  crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours?: number }>,
+  crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours?: number; heavy_item?: boolean }>,
   employees: Employee[],
   cofHours = 0,
   googleReviewEmployeeIds: string[] = [],
-  extraMen: Array<{ employee_id: string; hours: number }> = [],
-  casualCrew: Array<{ name: string; rate_per_hour: number; hours: number }> = [],
+  extraMen: Array<{ employee_id: string; hours: number; hourly_rate?: number; employee_name?: string }> = [],
+  casualCrew: Array<{ name: string; rate_per_hour: number; hours: number; heavy_item?: boolean; casual_worker_id?: string }> = [],
   commissions: Array<{ employee_id: string | null; casual_worker_id?: string | null; casual_worker_name?: string; rate_per_hour: number; hours: number; label?: string }> = []
 ): PayrollResult {
   const MIN_CALL = 2
   const REVIEW_BONUS = 0.5
+  const HEAVY_ITEM_BONUS = 0.5
   const empMap = new Map(employees.map((e) => [e.id, e]))
   const reviewSet = new Set(googleReviewEmployeeIds)
   const entries: PayrollEntry[] = []
@@ -156,7 +157,8 @@ export function calculatePayroll(
     const paid_hours =
       Math.max(row.hours, MIN_CALL) +
       rowCof +
-      (hasReviewBonus ? REVIEW_BONUS : 0)
+      (hasReviewBonus ? REVIEW_BONUS : 0) +
+      (row.heavy_item ? HEAVY_ITEM_BONUS : 0)
     entries.push({
       employee_id: emp.id,
       employee_name: emp.name,
@@ -169,16 +171,18 @@ export function calculatePayroll(
   }
 
   for (const em of extraMen) {
-    const emp = empMap.get(em.employee_id)
-    if (!emp || em.hours <= 0) continue
+    const staffEmp = empMap.get(em.employee_id)
+    const hourlyRate = em.hourly_rate ?? staffEmp?.hourly_rate
+    const name = em.employee_name ?? staffEmp?.name ?? em.employee_id
+    if (!hourlyRate || em.hours <= 0) continue
     const paid_hours = Math.max(em.hours, MIN_CALL)
     entries.push({
-      employee_id: emp.id,
-      employee_name: emp.name,
+      employee_id: em.employee_id,
+      employee_name: name,
       hours: em.hours,
       paid_hours,
-      hourly_rate: emp.hourly_rate,
-      pay: paid_hours * emp.hourly_rate,
+      hourly_rate: hourlyRate,
+      pay: paid_hours * hourlyRate,
     })
   }
 
@@ -211,12 +215,16 @@ export function calculatePayroll(
 
   const casualEntries: CasualCrewEntry[] = casualCrew
     .filter((c) => c.hours > 0 && c.rate_per_hour > 0 && c.name.trim())
-    .map((c) => ({
-      name: c.name,
-      hours: c.hours,
-      rate_per_hour: c.rate_per_hour,
-      pay: c.hours * c.rate_per_hour,
-    }))
+    .map((c) => {
+      const hasReviewBonus = c.casual_worker_id ? reviewSet.has(c.casual_worker_id) : false
+      const paidHours = c.hours + (c.heavy_item ? HEAVY_ITEM_BONUS : 0) + (hasReviewBonus ? REVIEW_BONUS : 0)
+      return {
+        name: c.name,
+        hours: paidHours,
+        rate_per_hour: c.rate_per_hour,
+        pay: paidHours * c.rate_per_hour,
+      }
+    })
 
   const total =
     entries.reduce((s, e) => s + e.pay, 0) +
@@ -236,6 +244,7 @@ export interface JobSummary {
   materialsCost: number
   discount: number
   deposit: number
+  heavyItemCharge: number
   clientExpensesTotal: number
   companyExpensesTotal: number
   totalRevenue: number
@@ -249,7 +258,7 @@ export interface JobSummary {
   margin: number | null
 }
 
-type JobSummaryInput = Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'additional_rate' | 'rate_card_key' | 'formula_vars' | 'discount' | 'deposit' | 'extra_men_hours' | 'break_minutes' | 'override_revenue'> & {
+type JobSummaryInput = Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'additional_rate' | 'rate_card_key' | 'formula_vars' | 'discount' | 'deposit' | 'heavy_item_charge' | 'extra_men_hours' | 'break_minutes' | 'override_revenue'> & {
   source?: JobSource
   client_billing_config?: SubcontractorConfig | null
   google_review?: boolean
@@ -259,14 +268,14 @@ type JobSummaryInput = Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'add
 export function calculateJobSummary(
   job: JobSummaryInput,
   sub: Subcontractor | null,
-  crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours?: number }>,
+  crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours?: number; heavy_item?: boolean }>,
   materials: Array<{ quantity: number; cost_price: number; sale_price: number }>,
   employees: Employee[],
   clientEntity?: { billing_type: string; billing_config: SubcontractorConfig } | null,
   privateRate?: PrivateRateInput | null,
   rateOptions?: { subcontractorRatePerHour?: number | null; contractRatePerHour?: number | null },
-  extraMen?: Array<{ employee_id: string; hours: number }>,
-  casualCrew?: Array<{ name: string; rate_per_hour: number; hours: number }>,
+  extraMen?: Array<{ employee_id: string; hours: number; hourly_rate?: number; employee_name?: string }>,
+  casualCrew?: Array<{ name: string; rate_per_hour: number; hours: number; heavy_item?: boolean; casual_worker_id?: string }>,
   commissions?: Array<{ employee_id: string | null; rate_per_hour: number; hours: number; label?: string }>,
   expenses?: Array<{ amount: number; is_client_expense: boolean }>
 ): JobSummary {
@@ -292,7 +301,8 @@ export function calculateJobSummary(
   const materialsCost = materials.reduce((s, m) => s + Number(m.quantity) * Number(m.cost_price), 0)
   const discount = Number(job.discount) || 0
   const deposit = Number(job.deposit) || 0
-  const totalRevenue = subRevenue + materialsRevenue + clientExpensesTotal - discount
+  const heavyItemCharge = Number(job.heavy_item_charge) || 0
+  const totalRevenue = subRevenue + materialsRevenue + clientExpensesTotal + heavyItemCharge - discount
   const cofHours = Number(job.cof_final ?? job.cof) || 0
   const reviewIds = job.google_review ? (job.google_review_employee_ids ?? []) : []
   const { total: payrollTotal, entries: payrollEntries, casualEntries } = calculatePayroll(
@@ -311,5 +321,5 @@ export function calculateJobSummary(
   const netRevenue = totalRevenue - gstAmount
   const profit = netRevenue - payrollTotal - materialsCost - companyExpensesTotal
   const margin = netRevenue !== 0 ? profit / netRevenue : null
-  return { subRevenue, materialsRevenue, materialsCost, discount, deposit, clientExpensesTotal, companyExpensesTotal, totalRevenue, gstAmount, netRevenue, payrollTotal, payrollEntries, casualEntries, googleReviewBonuses, profit, margin }
+  return { subRevenue, materialsRevenue, materialsCost, discount, deposit, heavyItemCharge, clientExpensesTotal, companyExpensesTotal, totalRevenue, gstAmount, netRevenue, payrollTotal, payrollEntries, casualEntries, googleReviewBonuses, profit, margin }
 }

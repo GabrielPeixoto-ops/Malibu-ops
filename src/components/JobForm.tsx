@@ -44,6 +44,7 @@ interface CrewRow {
   end_time: string
   cof_share: boolean
   cof_hours: string
+  heavy_item: boolean
 }
 
 function calcCrewHours(start: string, end: string): number {
@@ -94,6 +95,7 @@ interface CasualCrewRow {
   start_time: string
   finish_time: string
   cof_share: boolean
+  heavy_item: boolean
 }
 
 interface CommissionRow {
@@ -174,6 +176,7 @@ interface FormState {
   client_cof_override: boolean
   client_cof_hours: string
   deposit: string
+  heavy_item_charge: string
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -284,6 +287,7 @@ function defaultForm(): FormState {
     client_cof_override: false,
     client_cof_hours: '',
     deposit: '',
+    heavy_item_charge: '',
   }
 }
 
@@ -475,7 +479,8 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             client_cof_override: boolean
             client_cof_hours: number | null
             deposit: number | null
-            job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; start_time: string | null; end_time: string | null }>
+            heavy_item_charge: number | null
+            job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; heavy_item: boolean; start_time: string | null; end_time: string | null }>
             job_materials: Array<{ material_name: string; quantity: number; cost_price: number; sale_price: number }>
           }
 
@@ -558,6 +563,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             client_cof_override: j.client_cof_override ?? false,
             client_cof_hours: j.client_cof_hours != null ? j.client_cof_hours.toString() : '',
             deposit: j.deposit != null ? j.deposit.toString() : '',
+            heavy_item_charge: j.heavy_item_charge != null ? j.heavy_item_charge.toString() : '',
           })
           setDbMalibuRevenue(j.malibu_revenue)
 
@@ -577,6 +583,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             end_time: c.end_time ?? '',
             cof_share: c.cof_share,
             cof_hours: c.cof_hours > 0 ? c.cof_hours.toString() : '0.5',
+            heavy_item: c.heavy_item ?? false,
           })))
 
           try {
@@ -592,7 +599,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
 
           try {
             const { data: ccData } = await supabase.from('job_casual_crew').select('*').eq('job_id', jobId).order('created_at')
-            setCasualCrew((ccData ?? []).map((r: { id: string; name: string; rate_per_hour: number; start_time: string | null; finish_time: string | null; cof_share: boolean }) => ({
+            setCasualCrew((ccData ?? []).map((r: { id: string; name: string; rate_per_hour: number; start_time: string | null; finish_time: string | null; cof_share: boolean; heavy_item: boolean }) => ({
               _id: r.id,
               dbId: r.id,
               name: r.name,
@@ -600,6 +607,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
               start_time: r.start_time ?? '',
               finish_time: r.finish_time ?? '',
               cof_share: r.cof_share ?? false,
+              heavy_item: r.heavy_item ?? false,
             })))
           } catch { /* migration not yet applied */ }
 
@@ -785,7 +793,15 @@ const filteredCustomers = useMemo(
 
     const extraMenForBilling = extraMen
       .filter((r) => r.employee_id && r.start_time.length === 5 && r.finish_time.length === 5)
-      .map((r) => ({ employee_id: r.employee_id, hours: Math.max(0, calcCrewHours(r.start_time, r.finish_time)) }))
+      .map((r) => {
+        const cw = casualWorkers.find((c) => c.id === r.employee_id)
+        return {
+          employee_id: r.employee_id,
+          hours: Math.max(0, calcCrewHours(r.start_time, r.finish_time)),
+          hourly_rate: cw?.rate_per_hour,
+          employee_name: cw?.name,
+        }
+      })
       .filter((r) => r.hours > 0)
     const extraMenTotalHours = extraMenForBilling.reduce((s, r) => s + r.hours, 0)
 
@@ -840,6 +856,7 @@ const filteredCustomers = useMemo(
       break_minutes: parseFloat(form.break_minutes) || 0,
       discount: parseFloat(form.discount) || 0,
       deposit: parseFloat(form.deposit) || 0,
+      heavy_item_charge: parseFloat(form.heavy_item_charge) || 0,
       source: form.source,
       client_billing_config: overrideOpen ? buildOverrideConfig(overrideBilling) as unknown as SubcontractorConfig : null,
       google_review: form.google_review,
@@ -847,14 +864,24 @@ const filteredCustomers = useMemo(
       override_revenue: malibuRevenue ?? null,
     }
     const cofFinalHrs = form.cof_final.trim() ? (parseFloat(form.cof_final) || null) : null
-    const crewData = crew.filter((r) => r.employee_id).map((r) => ({
-      employee_id: r.employee_id,
-      hours: crewHasTime(r) ? calcCrewHours(r.start_time, r.end_time)
-             : _billingWorkedHrs !== null ? _billingWorkedHrs
-             : (parseFloat(r.hours) || 0),
-      cof_share: r.cof_share,
-      cof_hours: r.cof_share ? (cofFinalHrs ?? 0) : 0,
-    }))
+    const crewData = crew.filter((r) => r.employee_id).map((r) => {
+      let hours: number
+      if (crewHasTime(r)) {
+        const raw = Math.max(0, calcCrewHours(r.start_time, r.end_time))
+        hours = raw > 0 ? Math.max(2, raw) : 0
+      } else if (_billingWorkedHrs !== null) {
+        hours = _billingWorkedHrs
+      } else {
+        hours = parseFloat(r.hours) || 0
+      }
+      return {
+        employee_id: r.employee_id,
+        hours,
+        cof_share: r.cof_share,
+        cof_hours: r.cof_share ? (cofFinalHrs ?? 0) : 0,
+        heavy_item: r.heavy_item,
+      }
+    })
     const matsData = materials.map((m) => ({
       quantity: parseFloat(m.quantity) || 0,
       cost_price: parseFloat(m.cost_price) || 0,
@@ -866,13 +893,15 @@ const filteredCustomers = useMemo(
         const hasTime = r.start_time.length === 5 && r.finish_time.length === 5
         let hours: number
         if (hasTime) {
-          hours = Math.max(0, calcCrewHours(r.start_time, r.finish_time))
+          const rawHours = Math.max(0, calcCrewHours(r.start_time, r.finish_time))
+          hours = (rawHours > 0 ? Math.max(2, rawHours) : 0) + (r.cof_share ? (cofFinalHrs ?? 0) : 0)
         } else if (_billingWorkedHrs !== null) {
           hours = Math.max(2, _billingWorkedHrs) + (r.cof_share ? (cofFinalHrs ?? 0) : 0)
         } else {
           hours = r.cof_share ? (cofFinalHrs ?? 0) : 0
         }
-        return { name: r.name, rate_per_hour: parseFloat(r.rate_per_hour) || 0, hours }
+        const cw = casualWorkers.find((c) => c.name.toLowerCase() === r.name.trim().toLowerCase())
+        return { name: r.name, rate_per_hour: parseFloat(r.rate_per_hour) || 0, hours, heavy_item: r.heavy_item, casual_worker_id: cw?.id }
       })
       .filter((r) => r.hours > 0 && r.rate_per_hour > 0)
 
@@ -981,7 +1010,7 @@ const filteredCustomers = useMemo(
   }
 
   // ── Crew helpers ───────────────────────────────────────────────────────────
-  function addCrew() { setCrew((c) => [...c, { _id: crypto.randomUUID(), employee_id: '', hours: '', start_time: '', end_time: '', cof_share: false, cof_hours: '0.5' }]) }
+  function addCrew() { setCrew((c) => [...c, { _id: crypto.randomUUID(), employee_id: '', hours: '', start_time: '', end_time: '', cof_share: false, cof_hours: '0.5', heavy_item: false }]) }
   function updateCrew(_id: string, field: keyof Omit<CrewRow, '_id'>, value: string | boolean) {
     setCrew((c) => c.map((r) => {
       if (r._id !== _id) return r
@@ -1026,7 +1055,7 @@ const filteredCustomers = useMemo(
 
   // ── Casual crew helpers ────────────────────────────────────────────────────
   function addCasualCrew() {
-    setCasualCrew((c) => [...c, { _id: crypto.randomUUID(), name: '', rate_per_hour: '0', start_time: '', finish_time: '', cof_share: false }])
+    setCasualCrew((c) => [...c, { _id: crypto.randomUUID(), name: '', rate_per_hour: '0', start_time: '', finish_time: '', cof_share: false, heavy_item: false }])
   }
   function updateCasualCrew(_id: string, field: keyof Omit<CasualCrewRow, '_id' | 'dbId'>, value: string | boolean) {
     setCasualCrew((c) => c.map((r) => r._id === _id ? { ...r, [field]: value } : r))
@@ -1251,6 +1280,7 @@ const filteredCustomers = useMemo(
       break_minutes: parseFloat(form.break_minutes) || 0,
       discount: parseFloat(form.discount) || 0,
       deposit: parseFloat(form.deposit) || null,
+      heavy_item_charge: parseFloat(form.heavy_item_charge) || null,
       notes: form.notes.trim() || null,
       completion_notes: form.completion_notes.trim() || null,
       actual_start_time: form.actual_start_time || null,
@@ -1300,6 +1330,7 @@ const filteredCustomers = useMemo(
         hours,
         cof_share: r.cof_share,
         cof_hours: 0,
+        heavy_item: r.heavy_item,
         role: null,
         start_time: r.start_time || null,
         end_time: r.end_time || null,
@@ -1357,6 +1388,7 @@ const filteredCustomers = useMemo(
               start_time: r.start_time || null,
               finish_time: r.finish_time || null,
               cof_share: r.cof_share,
+              heavy_item: r.heavy_item,
               hours,
             }
           }))
@@ -1426,6 +1458,7 @@ const filteredCustomers = useMemo(
               start_time: r.start_time || null,
               finish_time: r.finish_time || null,
               cof_share: r.cof_share,
+              heavy_item: r.heavy_item,
               hours,
             }
           }))
@@ -1961,7 +1994,8 @@ const filteredCustomers = useMemo(
 
             // In Progress / Completion view: full row with time inputs
             const hasTime = crewHasTime(row)
-            const computed = hasTime ? calcCrewHours(row.start_time, row.end_time) : null
+            const rawComputed = hasTime ? calcCrewHours(row.start_time, row.end_time) : null
+            const computed = rawComputed !== null && rawComputed > 0 ? Math.max(2, rawComputed) : rawComputed
             return (
               <div key={row._id} className="flex flex-col gap-1.5">
                 <select
@@ -1992,7 +2026,7 @@ const filteredCustomers = useMemo(
                     className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel"
                   />
                   {hasTime ? (
-                    <span className="text-sm font-medium text-warm w-14 text-right tabular-nums">{computed}h</span>
+                    <span className="text-sm font-medium text-warm w-14 text-right tabular-nums">{computed?.toFixed(2)}h</span>
                   ) : (
                     <input
                       type="number"
@@ -2606,6 +2640,12 @@ const filteredCustomers = useMemo(
                     <span className="text-success">+{fmt(summary.clientExpensesTotal)}</span>
                   </div>
                 )}
+                {summary.heavyItemCharge > 0 && (
+                  <div className="flex justify-between text-xs pl-2">
+                    <span className="text-dim">incl. Heavy Item</span>
+                    <span className="text-success">+{fmt(summary.heavyItemCharge)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-dim">GST (10%)</span>
                   <span className="text-danger font-medium">−{fmt(summary.gstAmount)}</span>
@@ -2922,6 +2962,20 @@ const filteredCustomers = useMemo(
               <Input id="rfv-cof-final" label="Call Out Fee — crew (hrs)" type="number" min="0" step="0.25" value={form.cof_final ?? ''} onChange={(e) => setField('cof_final', e.target.value)} placeholder="0" disabled={isReviewed} />
             </div>
 
+            {/* Heavy Item Charge — job-level client charge (inc. GST, same as expenses) */}
+            <div className="mb-3">
+              <Input
+                label="Heavy Item Charge ($, inc. GST)"
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.heavy_item_charge}
+                onChange={(e) => setField('heavy_item_charge', e.target.value)}
+                placeholder="0.00"
+                disabled={isReviewed}
+              />
+            </div>
+
             {/* Client COF override — only relevant when there's a COF */}
             {((parseFloat(form.cof_final) || 0) > 0 || form.client_cof_override) && (
               <div className="mb-3 space-y-2">
@@ -2994,52 +3048,111 @@ const filteredCustomers = useMemo(
                 <div className="space-y-2">
                   {crew.filter((r) => r.employee_id).map((r) => {
                     const emp = employees.find((e) => e.id === r.employee_id)
-                    const computed = crewHasTime(r) ? calcCrewHours(r.start_time, r.end_time) : null
+                    const cofFinalDisplay = form.cof_final.trim() ? (parseFloat(form.cof_final) || 0) : 0
+                    const baseHrs = (() => {
+                      const rawC = crewHasTime(r) ? calcCrewHours(r.start_time, r.end_time) : null
+                      if (rawC !== null && rawC > 0) return Math.max(2, rawC)
+                      if (form.actual_start_time && form.actual_finish_time) {
+                        const [sh, sm] = form.actual_start_time.split(':').map(Number)
+                        const [eh, em] = form.actual_finish_time.split(':').map(Number)
+                        const rawMins = (eh * 60 + em) - (sh * 60 + sm) - (parseFloat(form.break_minutes) || 0)
+                        if (rawMins > 0) return Math.max(2, Math.round(rawMins / 15) * 15 / 60)
+                      }
+                      const manual = parseFloat(r.hours) || 0
+                      return manual > 0 ? Math.max(2, manual) : 0
+                    })()
+                    const cofHrs = r.cof_share ? cofFinalDisplay : 0
+                    const hiHrs = r.heavy_item ? 0.5 : 0
+                    const totalHrs = baseHrs + cofHrs + hiHrs
+                    const parts: string[] = []
+                    if (baseHrs > 0) parts.push(`${baseHrs.toFixed(2)}h`)
+                    if (cofHrs > 0) parts.push(`+${cofHrs.toFixed(2)} COF`)
+                    if (hiHrs > 0) parts.push(`+0.50 HI`)
+                    const summaryText = parts.join(' ') + (parts.length > 1 ? ` = ${totalHrs.toFixed(2)}h` : '')
                     return (
-                      <div key={r._id} className="flex items-center gap-2">
-                        <span className="text-xs text-dim w-24 truncate shrink-0">{emp?.name ?? '—'}</span>
+                      <div key={r._id} className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-dim w-20 truncate shrink-0">{emp?.name ?? '—'}</span>
                         <input
                           type="time"
                           value={r.start_time}
                           disabled={isReviewed}
                           onChange={(e) => setCrew((prev) => prev.map((c) => c._id === r._id ? { ...c, start_time: e.target.value } : c))}
-                          className="text-xs bg-surface border border-wire rounded-lg px-2 py-1 text-parchment focus:border-gold-ring focus:outline-none disabled:opacity-50"
+                          className="text-xs bg-surface border border-wire rounded-lg px-2 py-1 text-parchment focus:border-gold-ring focus:outline-none disabled:opacity-50 shrink-0"
                         />
                         <input
                           type="time"
                           value={r.end_time}
                           disabled={isReviewed}
                           onChange={(e) => setCrew((prev) => prev.map((c) => c._id === r._id ? { ...c, end_time: e.target.value } : c))}
-                          className="text-xs bg-surface border border-wire rounded-lg px-2 py-1 text-parchment focus:border-gold-ring focus:outline-none disabled:opacity-50"
+                          className="text-xs bg-surface border border-wire rounded-lg px-2 py-1 text-parchment focus:border-gold-ring focus:outline-none disabled:opacity-50 shrink-0"
                         />
-                        {computed !== null && (
-                          <span className="text-xs text-dim font-mono">{computed.toFixed(2)}h</span>
+                        <label className="flex items-center gap-1 cursor-pointer select-none shrink-0" title="Heavy Item +0.5h">
+                          <input
+                            type="checkbox"
+                            checked={r.heavy_item}
+                            disabled={isReviewed}
+                            onChange={(e) => setCrew((prev) => prev.map((c) => c._id === r._id ? { ...c, heavy_item: e.target.checked } : c))}
+                            className="w-3 h-3 rounded accent-gold"
+                          />
+                          <span className="text-xs text-dim">HI</span>
+                        </label>
+                        {summaryText && (
+                          <span className="text-xs font-mono text-warm ml-auto whitespace-nowrap shrink-0">{summaryText}</span>
                         )}
                       </div>
                     )
                   })}
                   {casualCrew.filter((r) => r.name.trim()).map((r) => {
                     const hasTime = r.start_time.length === 5 && r.finish_time.length === 5
-                    const computed = hasTime ? calcCrewHours(r.start_time, r.finish_time) : null
+                    const cofFinalDisplay = form.cof_final.trim() ? (parseFloat(form.cof_final) || 0) : 0
+                    const baseHrs = (() => {
+                      const rawC = hasTime ? calcCrewHours(r.start_time, r.finish_time) : null
+                      if (rawC !== null && rawC > 0) return Math.max(2, rawC)
+                      if (form.actual_start_time && form.actual_finish_time) {
+                        const [sh, sm] = form.actual_start_time.split(':').map(Number)
+                        const [eh, em] = form.actual_finish_time.split(':').map(Number)
+                        const rawMins = (eh * 60 + em) - (sh * 60 + sm) - (parseFloat(form.break_minutes) || 0)
+                        if (rawMins > 0) return Math.max(2, Math.round(rawMins / 15) * 15 / 60)
+                      }
+                      return 0
+                    })()
+                    const cofHrs = r.cof_share ? cofFinalDisplay : 0
+                    const hiHrs = r.heavy_item ? 0.5 : 0
+                    const totalHrs = baseHrs + cofHrs + hiHrs
+                    const parts: string[] = []
+                    if (baseHrs > 0) parts.push(`${baseHrs.toFixed(2)}h`)
+                    if (cofHrs > 0) parts.push(`+${cofHrs.toFixed(2)} COF`)
+                    if (hiHrs > 0) parts.push(`+0.50 HI`)
+                    const summaryText = parts.join(' ') + (parts.length > 1 ? ` = ${totalHrs.toFixed(2)}h` : '')
                     return (
-                      <div key={r._id} className="flex items-center gap-2">
-                        <span className="text-xs text-dim w-24 truncate shrink-0">{r.name}</span>
+                      <div key={r._id} className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-dim w-20 truncate shrink-0">{r.name}</span>
                         <input
                           type="time"
                           value={r.start_time}
                           disabled={isReviewed}
                           onChange={(e) => setCasualCrew((prev) => prev.map((c) => c._id === r._id ? { ...c, start_time: e.target.value } : c))}
-                          className="text-xs bg-surface border border-wire rounded-lg px-2 py-1 text-parchment focus:border-gold-ring focus:outline-none disabled:opacity-50"
+                          className="text-xs bg-surface border border-wire rounded-lg px-2 py-1 text-parchment focus:border-gold-ring focus:outline-none disabled:opacity-50 shrink-0"
                         />
                         <input
                           type="time"
                           value={r.finish_time}
                           disabled={isReviewed}
                           onChange={(e) => setCasualCrew((prev) => prev.map((c) => c._id === r._id ? { ...c, finish_time: e.target.value } : c))}
-                          className="text-xs bg-surface border border-wire rounded-lg px-2 py-1 text-parchment focus:border-gold-ring focus:outline-none disabled:opacity-50"
+                          className="text-xs bg-surface border border-wire rounded-lg px-2 py-1 text-parchment focus:border-gold-ring focus:outline-none disabled:opacity-50 shrink-0"
                         />
-                        {computed !== null && (
-                          <span className="text-xs text-dim font-mono">{computed.toFixed(2)}h</span>
+                        <label className="flex items-center gap-1 cursor-pointer select-none shrink-0" title="Heavy Item +0.5h">
+                          <input
+                            type="checkbox"
+                            checked={r.heavy_item}
+                            disabled={isReviewed}
+                            onChange={(e) => setCasualCrew((prev) => prev.map((c) => c._id === r._id ? { ...c, heavy_item: e.target.checked } : c))}
+                            className="w-3 h-3 rounded accent-gold"
+                          />
+                          <span className="text-xs text-dim">HI</span>
+                        </label>
+                        {summaryText && (
+                          <span className="text-xs font-mono text-warm ml-auto whitespace-nowrap shrink-0">{summaryText}</span>
                         )}
                       </div>
                     )
@@ -3096,7 +3209,14 @@ const filteredCustomers = useMemo(
                         className="flex-1 min-w-0 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface"
                       >
                         <option value="">Select employee…</option>
-                        {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                        <optgroup label="— Staff —">
+                          {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                        </optgroup>
+                        {casualWorkers.length > 0 && (
+                          <optgroup label="— Casual Workers —">
+                            {casualWorkers.map((cw) => <option key={cw.id} value={cw.id}>{cw.name}</option>)}
+                          </optgroup>
+                        )}
                       </select>
                       <input type="time" value={row.start_time} onChange={(e) => updateExtraMan(row._id, 'start_time', e.target.value)} disabled={isReviewed} className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface" />
                       <span className="text-dim text-xs">–</span>
@@ -3185,33 +3305,40 @@ const filteredCustomers = useMemo(
                         const crewEmpIds = crew.filter((r) => r.employee_id).map((r) => r.employee_id)
                         const extraMenEmpIds = extraMen.filter((r) => r.employee_id).map((r) => r.employee_id)
                         const legacyId = form.extra_man_employee_id && !crewEmpIds.includes(form.extra_man_employee_id) && !extraMenEmpIds.includes(form.extra_man_employee_id) ? form.extra_man_employee_id : null
-                        const allIds = [...new Set([...crewEmpIds, ...extraMenEmpIds, ...(legacyId ? [legacyId] : [])])]
-                        return allIds.map((empId) => {
-                          const emp = employees.find((e) => e.id === empId)
-                          if (!emp) return null
-                          const checked = form.google_review_employee_ids.includes(emp.id)
-                          const isExtra = !crewEmpIds.includes(empId)
+                        const casualReviewIds = casualCrew
+                          .filter((r) => r.name.trim())
+                          .map((r) => casualWorkers.find((cw) => cw.name.toLowerCase() === r.name.trim().toLowerCase())?.id)
+                          .filter((id): id is string => !!id)
+                        const allIds = [...new Set([...crewEmpIds, ...extraMenEmpIds, ...(legacyId ? [legacyId] : []), ...casualReviewIds])]
+                        return allIds.map((id) => {
+                          const staffEmp = employees.find((e) => e.id === id)
+                          const casualWorker = staffEmp ? null : casualWorkers.find((cw) => cw.id === id)
+                          const name = staffEmp?.name ?? casualWorker?.name
+                          if (!name) return null
+                          const isCasual = !staffEmp
+                          const isExtra = !isCasual && !crewEmpIds.includes(id)
+                          const checked = form.google_review_employee_ids.includes(id)
                           return (
                             <button
-                              key={emp.id}
+                              key={id}
                               type="button"
                               onClick={() => setField(
                                 'google_review_employee_ids',
                                 checked
-                                  ? form.google_review_employee_ids.filter((id) => id !== emp.id)
-                                  : [...form.google_review_employee_ids, emp.id]
+                                  ? form.google_review_employee_ids.filter((rid) => rid !== id)
+                                  : [...form.google_review_employee_ids, id]
                               )}
                               disabled={isReviewed}
                               className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
                                 checked ? 'bg-gold/10 text-gold border-gold-ring' : 'bg-panel text-warm border-wire hover:border-gold-ring'
                               }`}
                             >
-                              {checked ? '★ ' : ''}{emp.name}{isExtra ? ' (extra)' : ''}
+                              {checked ? '★ ' : ''}{name}{isExtra ? ' (extra)' : ''}{isCasual ? ' (casual)' : ''}
                             </button>
                           )
                         })
                       })()}
-                      {crew.filter((r) => r.employee_id).length === 0 && extraMen.filter((r) => r.employee_id).length === 0 && !form.extra_man_employee_id && (
+                      {crew.filter((r) => r.employee_id).length === 0 && extraMen.filter((r) => r.employee_id).length === 0 && !form.extra_man_employee_id && casualCrew.filter((r) => r.name.trim()).length === 0 && (
                         <p className="text-xs text-dim">Add crew members above to select recipients.</p>
                       )}
                     </div>
@@ -3360,6 +3487,12 @@ const filteredCustomers = useMemo(
                 <div className="flex justify-between text-xs pl-2">
                   <span className="text-dim">incl. Client Expenses</span>
                   <span className="text-success">+{fmt(summary.clientExpensesTotal)}</span>
+                </div>
+              )}
+              {summary.heavyItemCharge > 0 && (
+                <div className="flex justify-between text-xs pl-2">
+                  <span className="text-dim">incl. Heavy Item</span>
+                  <span className="text-success">+{fmt(summary.heavyItemCharge)}</span>
                 </div>
               )}
               <div className="flex justify-between">
@@ -3528,7 +3661,14 @@ const filteredCustomers = useMemo(
                       className="flex-1 min-w-0 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
                     >
                       <option value="">Select employee…</option>
-                      {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                      <optgroup label="— Staff —">
+                        {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                      </optgroup>
+                      {casualWorkers.length > 0 && (
+                        <optgroup label="— Casual Workers —">
+                          {casualWorkers.map((cw) => <option key={cw.id} value={cw.id}>{cw.name}</option>)}
+                        </optgroup>
+                      )}
                     </select>
                     <input type="time" value={row.start_time} onChange={(e) => updateExtraMan(row._id, 'start_time', e.target.value)} className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring" />
                     <span className="text-dim text-xs">–</span>
