@@ -193,23 +193,15 @@ function calcJobDeductions(job: CalendarJob): number {
   return materialsCost + companyExpenses
 }
 
-// Used for JOB-LEVEL actual_start_time/actual_finish_time (no per-person time set).
-// Rounds to the nearest 15 minutes — matches JobForm's `_billingWorkedHrs`.
+// Rounds to the nearest 15-minute block. Used for BOTH job-level
+// actual_start_time/actual_finish_time AND individual per-person times
+// (job_crew / job_casual_crew) — same single rule everywhere, matching
+// JobForm's calcCrewHours / _billingWorkedHrs.
 function calcHoursFromTimes(start: string, finish: string): number {
   const [sh, sm] = start.split(':').map(Number)
   const [fh, fm] = finish.split(':').map(Number)
   const mins = (fh * 60 + fm) - (sh * 60 + sm)
   return Math.max(0, Math.round(mins / 15) * 15 / 60)
-}
-
-// Used for INDIVIDUAL per-person start/finish times (job_crew / job_casual_crew rows).
-// No 15-min snapping — matches JobForm's `calcCrewHours` exactly (rounds to nearest 0.01h).
-// Using the 15-min version here was under/over-counting individually-timed casual crew.
-function calcExactHours(start: string, finish: string): number {
-  const [sh, sm] = start.split(':').map(Number)
-  const [fh, fm] = finish.split(':').map(Number)
-  const mins = (fh * 60 + fm) - (sh * 60 + sm)
-  return Math.max(0, Math.round((mins / 60) * 100) / 100)
 }
 
 function buildStaffPayrollCrew(job: CalendarJob, crew: CrewRow[]): Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; heavy_item?: boolean }> {
@@ -223,8 +215,10 @@ function buildStaffPayrollCrew(job: CalendarJob, crew: CrewRow[]): Array<{ emplo
     const hasIndividualTime = r.start_time?.length === 5 && r.end_time?.length === 5
     let hours: number
     if (hasIndividualTime) {
-      // Individual times: stored hours are authoritative (saved correctly at job save time)
-      hours = r.hours
+      // Individual times: recompute live from start/end, same rounding rule
+      // as job-level. Don't trust the stored `hours` column — it may have
+      // been saved before this rounding rule existed.
+      hours = calcHoursFromTimes(r.start_time!, r.end_time!)
     } else if (liveWorkedHrs !== null) {
       // Job-level times: recompute live, same as job page does
       hours = Math.max(2, liveWorkedHrs)
@@ -254,7 +248,7 @@ function buildCasualPayroll(job: CalendarJob): Array<{ name: string; rate_per_ho
       const hasTime = r.start_time?.length === 5 && r.finish_time?.length === 5
       let hours: number
       if (hasTime) {
-        const rawHours = calcExactHours(r.start_time!, r.finish_time!)
+        const rawHours = calcHoursFromTimes(r.start_time!, r.finish_time!)
         hours = (rawHours > 0 ? Math.max(MIN_CALL, rawHours) : 0) + (r.cof_share ? cofFinalHrs : 0)
       } else if (billingWorkedHrs !== null) {
         hours = Math.max(MIN_CALL, billingWorkedHrs) + (r.cof_share ? cofFinalHrs : 0)

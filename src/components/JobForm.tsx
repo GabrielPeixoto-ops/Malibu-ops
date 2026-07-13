@@ -47,11 +47,14 @@ interface CrewRow {
   heavy_item: boolean
 }
 
+// Rounds to the nearest 15-minute block — same rule used for the job-level
+// actual_start_time/actual_finish_time calc, now applied consistently to
+// individual per-person times too (crew, casual crew, extra men).
 function calcCrewHours(start: string, end: string): number {
   const [sh, sm] = start.split(':').map(Number)
   const [eh, em] = end.split(':').map(Number)
   const mins = (eh * 60 + em) - (sh * 60 + sm)
-  return Math.round((mins / 60) * 100) / 100
+  return Math.max(0, Math.round(mins / 15) * 15 / 60)
 }
 
 function crewHasTime(row: { start_time: string; end_time: string }): boolean {
