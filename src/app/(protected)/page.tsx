@@ -70,7 +70,7 @@ function getMonthGrid(ref: Date): Date[] {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface EmbeddedEmployee { id: string; name: string; hourly_rate: number }
-interface CrewRow { employee_id: string; hours: number; cof_share: boolean; employee: EmbeddedEmployee | null }
+interface CrewRow { employee_id: string; hours: number; cof_share: boolean; cof_hours: number; start_time: string | null; end_time: string | null; employee: EmbeddedEmployee | null }
 interface MaterialRow { quantity: number; cost_price: number; sale_price: number }
 
 interface CalendarJob {
@@ -89,6 +89,7 @@ interface CalendarJob {
   extra_men_hours: number
   break_minutes: number
   discount: number
+  heavy_item_charge: number | null
   override_revenue: number | null
   malibu_revenue: number | null
   scheduled_time: string | null
@@ -103,6 +104,9 @@ interface CalendarJob {
   contract_client: { name: string } | null
   job_crew: CrewRow[]
   job_materials: MaterialRow[]
+  job_expenses: Array<{ amount: number; is_client_expense: boolean }>
+  job_casual_crew: Array<{ name: string; rate_per_hour: number; heavy_item: boolean; cof_share: boolean; start_time: string | null; finish_time: string | null }>
+  job_commissions: Array<{ employee_id: string | null; casual_worker_id: string | null; rate_per_hour: number; hours: number }>
   job_trucks: Array<{ fleet: { name: string; registration: string | null } | null }>
   subcontractor_rate_ph: number | null
   contract_rate_ph: number | null
@@ -145,26 +149,133 @@ function entityLabel(job: CalendarJob): string {
 }
 
 function calcJobRevenue(job: CalendarJob): number | null {
+  let base: number | null = null
+
   if (job.source === 'subcontract') {
     if (!job.subcontractor) return null
     if (job.subcontractor.billing_type === 'percent') {
-      return job.malibu_revenue != null && job.malibu_revenue > 0 ? job.malibu_revenue : null
+      base = job.malibu_revenue != null && job.malibu_revenue > 0 ? job.malibu_revenue : null
+    } else {
+      const effectiveOverride = job.malibu_revenue ?? job.override_revenue
+      base = calculateJobRevenue({ ...job, override_revenue: effectiveOverride }, job.subcontractor, job.subcontractor_rate_ph)
     }
-    const effectiveOverride = job.malibu_revenue ?? job.override_revenue
-    return calculateJobRevenue({ ...job, override_revenue: effectiveOverride }, job.subcontractor, job.subcontractor_rate_ph)
+  } else if (job.source === 'private') {
+    base = job.malibu_revenue != null && job.malibu_revenue > 0 ? job.malibu_revenue : null
+  } else {
+    // Contract: use malibu_revenue when available (saved on completion), fallback to live calc
+    if (job.malibu_revenue != null && job.malibu_revenue > 0) {
+      base = job.malibu_revenue
+    } else {
+      const entity = job.contract
+      if (!entity?.billing_type || !entity?.billing_config) return null
+      base = calculateClientRevenue(
+        { ...job, client_billing_config: job.client_billing_config as SubcontractorConfig | null },
+        entity.billing_type,
+        entity.billing_config as unknown as SubcontractorConfig,
+        job.contract_rate_ph
+      )
+    }
   }
-  if (job.source === 'private') {
-    return job.malibu_revenue != null && job.malibu_revenue > 0 ? job.malibu_revenue : null
+
+  if (base === null) return null
+  const clientExpenses = job.job_expenses.filter(e => e.is_client_expense).reduce((s, e) => s + e.amount, 0)
+  const materialsRevenue = job.job_materials.reduce((s, m) => s + Number(m.quantity) * Number(m.sale_price), 0)
+  const total = base + materialsRevenue + (Number(job.heavy_item_charge) || 0) - (Number(job.discount) || 0) + clientExpenses
+  return total > 0 ? total : null
+}
+
+// Costs that reduce Profit but are NOT part of Revenue: materials cost price,
+// and company-side expenses (is_client_expense = false). Mirrors calculateJobSummary
+// in billing.ts: profit = netRevenue - payrollTotal - materialsCost - companyExpensesTotal
+function calcJobDeductions(job: CalendarJob): number {
+  const materialsCost = job.job_materials.reduce((s, m) => s + Number(m.quantity) * Number(m.cost_price), 0)
+  const companyExpenses = job.job_expenses.filter(e => !e.is_client_expense).reduce((s, e) => s + e.amount, 0)
+  return materialsCost + companyExpenses
+}
+
+// Used for JOB-LEVEL actual_start_time/actual_finish_time (no per-person time set).
+// Rounds to the nearest 15 minutes — matches JobForm's `_billingWorkedHrs`.
+function calcHoursFromTimes(start: string, finish: string): number {
+  const [sh, sm] = start.split(':').map(Number)
+  const [fh, fm] = finish.split(':').map(Number)
+  const mins = (fh * 60 + fm) - (sh * 60 + sm)
+  return Math.max(0, Math.round(mins / 15) * 15 / 60)
+}
+
+// Used for INDIVIDUAL per-person start/finish times (job_crew / job_casual_crew rows).
+// No 15-min snapping — matches JobForm's `calcCrewHours` exactly (rounds to nearest 0.01h).
+// Using the 15-min version here was under/over-counting individually-timed casual crew.
+function calcExactHours(start: string, finish: string): number {
+  const [sh, sm] = start.split(':').map(Number)
+  const [fh, fm] = finish.split(':').map(Number)
+  const mins = (fh * 60 + fm) - (sh * 60 + sm)
+  return Math.max(0, Math.round((mins / 60) * 100) / 100)
+}
+
+function buildStaffPayrollCrew(job: CalendarJob, crew: CrewRow[]): Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; heavy_item?: boolean }> {
+  const cofFinalHrs = Number(job.cof_final ?? job.cof) || 0
+  const liveWorkedHrs = (() => {
+    if (!job.actual_start_time || !job.actual_finish_time) return null
+    const hrs = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time) - Number(job.break_minutes) / 60
+    return hrs > 0 ? hrs : null
+  })()
+  return crew.map(r => {
+    const hasIndividualTime = r.start_time?.length === 5 && r.end_time?.length === 5
+    let hours: number
+    if (hasIndividualTime) {
+      // Individual times: stored hours are authoritative (saved correctly at job save time)
+      hours = r.hours
+    } else if (liveWorkedHrs !== null) {
+      // Job-level times: recompute live, same as job page does
+      hours = Math.max(2, liveWorkedHrs)
+    } else {
+      // No actual times: fall back to stored hours
+      hours = r.hours
+    }
+    // Let calculatePayroll add Call Out Fee hours from cof_share/cof_hours,
+    // same as JobForm does — never bake COF into `hours` here, or it gets lost
+    // for crew with individual times (that branch doesn't touch cofFinalHrs at all).
+    return { employee_id: r.employee_id, hours, cof_share: r.cof_share, cof_hours: r.cof_share ? cofFinalHrs : 0 }
+  })
+}
+
+function buildCasualPayroll(job: CalendarJob): Array<{ name: string; rate_per_hour: number; hours: number; heavy_item: boolean }> {
+  const MIN_CALL = 2
+  const cofFinalHrs = Number(job.cof_final ?? job.cof) || 0
+  let billingWorkedHrs: number | null = null
+  if (job.actual_start_time && job.actual_finish_time) {
+    const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time)
+    const withBreak = raw - Number(job.break_minutes) / 60
+    if (withBreak > 0) billingWorkedHrs = withBreak
   }
-  // Contract
-  const entity = job.contract
-  if (!entity?.billing_type || !entity?.billing_config) return null
-  return calculateClientRevenue(
-    { ...job, client_billing_config: job.client_billing_config as SubcontractorConfig | null },
-    entity.billing_type,
-    entity.billing_config as unknown as SubcontractorConfig,
-    job.contract_rate_ph
-  )
+  return job.job_casual_crew
+    .filter(r => r.name.trim())
+    .map(r => {
+      const hasTime = r.start_time?.length === 5 && r.finish_time?.length === 5
+      let hours: number
+      if (hasTime) {
+        const rawHours = calcExactHours(r.start_time!, r.finish_time!)
+        hours = (rawHours > 0 ? Math.max(MIN_CALL, rawHours) : 0) + (r.cof_share ? cofFinalHrs : 0)
+      } else if (billingWorkedHrs !== null) {
+        hours = Math.max(MIN_CALL, billingWorkedHrs) + (r.cof_share ? cofFinalHrs : 0)
+      } else {
+        hours = r.cof_share ? cofFinalHrs : 0
+      }
+      return { name: r.name, rate_per_hour: r.rate_per_hour, hours, heavy_item: r.heavy_item }
+    })
+}
+
+function buildCommissionsForPayroll(job: CalendarJob): Array<{ employee_id: string | null; casual_worker_id: string | null; casual_worker_name: string; rate_per_hour: number; hours: number; label: string }> {
+  return job.job_commissions
+    .filter(r => (r.employee_id || r.casual_worker_id) && r.hours > 0 && r.rate_per_hour > 0)
+    .map(r => ({
+      employee_id: null,
+      casual_worker_id: r.employee_id ?? r.casual_worker_id ?? 'commission',
+      casual_worker_name: 'Commission',
+      rate_per_hour: r.rate_per_hour,
+      hours: r.hours,
+      label: 'Commission',
+    }))
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -242,15 +353,18 @@ export default function DashboardPage() {
         .from('jobs')
         .select(`
           id, job_number, date, status, source, notes, cof, cof_final, additional_hours,
-          additional_rate, rate_card_key, formula_vars, extra_men_hours, break_minutes, discount,
+          additional_rate, rate_card_key, formula_vars, extra_men_hours, break_minutes, discount, heavy_item_charge,
           actual_start_time, actual_finish_time, scheduled_time, override_revenue, malibu_revenue, client_billing_config,
           subcontractor_rate_id, contract_rate_id,
           subcontractor:subcontractors(*),
           customer:customers(name, billing_type, billing_config),
           contract:contracts(name, billing_type, billing_config, color_hex),
           contract_client:contract_clients(name),
-          job_crew(employee_id, hours, cof_share, employee:employees(id, name, hourly_rate)),
-          job_materials(quantity, cost_price, sale_price)
+          job_crew(employee_id, hours, cof_share, cof_hours, start_time, end_time, employee:employees(id, name, hourly_rate)),
+          job_materials(quantity, cost_price, sale_price),
+          job_expenses(amount, is_client_expense),
+          job_casual_crew(name, rate_per_hour, heavy_item, cof_share, start_time, finish_time),
+          job_commissions(employee_id, casual_worker_id, rate_per_hour, hours)
         `)
         .gte('date', start)
         .lte('date', end)
@@ -296,6 +410,9 @@ export default function DashboardPage() {
       setJobs(baseJobs.map((j) => ({
         ...j,
         job_trucks: truckMap.get(j.id) ?? [],
+        job_expenses: (j as unknown as { job_expenses?: CalendarJob['job_expenses'] }).job_expenses ?? [],
+        job_casual_crew: (j as unknown as { job_casual_crew?: CalendarJob['job_casual_crew'] }).job_casual_crew ?? [],
+        job_commissions: (j as unknown as { job_commissions?: CalendarJob['job_commissions'] }).job_commissions ?? [],
         subcontractor_rate_ph: j.subcontractor_rate_id ? (subRatePHMap.get(j.subcontractor_rate_id) ?? null) : null,
         contract_rate_ph: j.contract_rate_id ? (contractRatePHMap.get(j.contract_rate_id) ?? null) : null,
       })) as CalendarJob[])
@@ -306,14 +423,16 @@ export default function DashboardPage() {
   const weekSummary = useMemo(() => {
     let revenue = 0
     let payroll = 0
+    let deductions = 0
     for (const job of jobs) {
       revenue += calcJobRevenue(job) ?? 0
       const crew = job.job_crew.filter((c) => c.employee)
       const emps: Employee[] = crew.map((c) => c.employee!).filter(Boolean) as unknown as Employee[]
-      payroll += calculatePayroll(crew, emps, Number(job.cof_final ?? job.cof ?? 0)).total
+      payroll += calculatePayroll(buildStaffPayrollCrew(job, crew), emps, 0, [], [], buildCasualPayroll(job), buildCommissionsForPayroll(job)).total
+      deductions += calcJobDeductions(job)
     }
     const netRevenue = revenue > 0 ? revenue / 1.1 : 0
-    return { revenue, payroll, profit: netRevenue - payroll, count: jobs.length }
+    return { revenue, payroll, profit: netRevenue - payroll - deductions, count: jobs.length }
   }, [jobs])
 
   const jobsByDate = useMemo(() => {
@@ -683,9 +802,10 @@ function JobCard({
     const crew = job.job_crew.filter((c) => c.employee)
     if (!crew.length) return null
     const emps = crew.map((c) => c.employee!).filter(Boolean) as unknown as Employee[]
-    const cofHours = Number(job.cof_final ?? job.cof ?? 0)
-    const payroll = calculatePayroll(crew, emps, cofHours).total
-    return revenue / 1.1 - payroll
+    const staffCrew = buildStaffPayrollCrew(job, crew)
+    const commissionsInput = buildCommissionsForPayroll(job)
+    const payroll = calculatePayroll(staffCrew, emps, 0, [], [], buildCasualPayroll(job), commissionsInput).total
+    return revenue / 1.1 - payroll - calcJobDeductions(job)
   })()
 
   const _now = new Date()
