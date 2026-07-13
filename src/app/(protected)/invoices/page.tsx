@@ -108,12 +108,12 @@ const MIN_CALL = 2
 const HEAVY_ITEM_BONUS = 0.5
 const REVIEW_BONUS = 0.5
 
-// Rounds to the nearest 15-minute block — same rule as the job page and Dashboard.
+// Always rounds UP to the next 15-minute block — same rule as the job page and Dashboard.
 function calcHoursFromTimes(start: string, finish: string): number {
   const [sh, sm] = start.split(':').map(Number)
   const [fh, fm] = finish.split(':').map(Number)
   const mins = (fh * 60 + fm) - (sh * 60 + sm)
-  return Math.max(0, Math.round(mins / 15) * 15 / 60)
+  return Math.max(0, Math.ceil(mins / 15) * 15 / 60)
 }
 
 const filterInput = 'px-3 py-1.5 text-sm border border-wire rounded-lg bg-panel text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring'

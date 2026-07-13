@@ -47,14 +47,16 @@ interface CrewRow {
   heavy_item: boolean
 }
 
-// Rounds to the nearest 15-minute block — same rule used for the job-level
-// actual_start_time/actual_finish_time calc, now applied consistently to
-// individual per-person times too (crew, casual crew, extra men).
+// Always rounds UP to the next 15-minute block — same rule used for the
+// job-level actual_start_time/actual_finish_time calc, applied consistently
+// to individual per-person times too (crew, casual crew, extra men). Any
+// partial block (even 1 minute) counts as a full 15-min block, matching how
+// client billing has always worked.
 function calcCrewHours(start: string, end: string): number {
   const [sh, sm] = start.split(':').map(Number)
   const [eh, em] = end.split(':').map(Number)
   const mins = (eh * 60 + em) - (sh * 60 + sm)
-  return Math.max(0, Math.round(mins / 15) * 15 / 60)
+  return Math.max(0, Math.ceil(mins / 15) * 15 / 60)
 }
 
 function crewHasTime(row: { start_time: string; end_time: string }): boolean {
@@ -769,7 +771,7 @@ const filteredCustomers = useMemo(
       const [eh, em] = form.actual_finish_time.split(':').map(Number)
       const rawMins = (eh * 60 + em) - (sh * 60 + sm) - (parseFloat(form.break_minutes) || 0)
       if (rawMins <= 0) return null
-      return Math.round(rawMins / 15) * 15 / 60
+      return Math.ceil(rawMins / 15) * 15 / 60
     })()
     // Client COF: either same as crew (checkbox off) or custom value (checkbox on)
     const effectiveClientCof = form.client_cof_override
@@ -814,7 +816,7 @@ const filteredCustomers = useMemo(
       const [eh, em] = form.actual_finish_time.split(':').map(Number)
       const rawMins = (eh * 60 + em) - (sh * 60 + sm) - (parseFloat(form.break_minutes) || 0)
       if (rawMins <= 0) return null
-      return Math.round(rawMins / 15) * 15 / 60
+      return Math.ceil(rawMins / 15) * 15 / 60
     })()
     // Client COF: what gets billed to the client for the Call Out Fee portion
     const effectiveClientCof = form.client_cof_override
@@ -954,7 +956,7 @@ const filteredCustomers = useMemo(
     const breakMins = parseFloat(form.break_minutes) || 0
     const rawMins = totalMins - breakMins
     if (rawMins <= 0) return null
-    return Math.round(rawMins / 15) * 15 / 60
+    return Math.ceil(rawMins / 15) * 15 / 60
   }, [form.actual_start_time, form.actual_finish_time, form.break_minutes])
 
   // ── Field helpers ──────────────────────────────────────────────────────────
@@ -1205,7 +1207,7 @@ const filteredCustomers = useMemo(
       const [eh, em] = form.actual_finish_time.split(':').map(Number)
       const rawMins = (eh * 60 + em) - (sh * 60 + sm) - (parseFloat(form.break_minutes) || 0)
       if (rawMins <= 0) return null
-      return Math.round(rawMins / 15) * 15 / 60
+      return Math.ceil(rawMins / 15) * 15 / 60
     })()
 
     const isPercentSub = form.source === 'subcontract' && selectedSub?.billing_type === 'percent'
@@ -2233,9 +2235,13 @@ const filteredCustomers = useMemo(
           {casualCrew.map((row) => {
             const hasTime = row.start_time.length === 5 && row.finish_time.length === 5
             const cofFinalHrsUI = form.cof_final.trim() ? (parseFloat(form.cof_final) || null) : null
-            const computed = hasTime
+            const baseComputed = hasTime
               ? Math.max(0, calcCrewHours(row.start_time, row.finish_time))
               : (row.cof_share ? (cofFinalHrsUI ?? null) : null)
+            const casualWorkerIdUI = casualWorkers.find((cw) => cw.name.toLowerCase() === row.name.trim().toLowerCase())?.id
+            const reviewHrsUI = (baseComputed !== null && form.google_review && casualWorkerIdUI && form.google_review_employee_ids.includes(casualWorkerIdUI)) ? 0.5 : 0
+            const hiHrsUI = (baseComputed !== null && row.heavy_item) ? 0.5 : 0
+            const computed = baseComputed !== null ? baseComputed + reviewHrsUI + hiHrsUI : null
             const pay = computed !== null ? computed * (parseFloat(row.rate_per_hour) || 0) : null
             return (
               <div key={row._id} className="flex items-center gap-2 flex-wrap">
@@ -3059,18 +3065,20 @@ const filteredCustomers = useMemo(
                         const [sh, sm] = form.actual_start_time.split(':').map(Number)
                         const [eh, em] = form.actual_finish_time.split(':').map(Number)
                         const rawMins = (eh * 60 + em) - (sh * 60 + sm) - (parseFloat(form.break_minutes) || 0)
-                        if (rawMins > 0) return Math.max(2, Math.round(rawMins / 15) * 15 / 60)
+                        if (rawMins > 0) return Math.max(2, Math.ceil(rawMins / 15) * 15 / 60)
                       }
                       const manual = parseFloat(r.hours) || 0
                       return manual > 0 ? Math.max(2, manual) : 0
                     })()
                     const cofHrs = r.cof_share ? cofFinalDisplay : 0
                     const hiHrs = r.heavy_item ? 0.5 : 0
-                    const totalHrs = baseHrs + cofHrs + hiHrs
+                    const reviewHrs = (form.google_review && r.employee_id && form.google_review_employee_ids.includes(r.employee_id)) ? 0.5 : 0
+                    const totalHrs = baseHrs + cofHrs + hiHrs + reviewHrs
                     const parts: string[] = []
                     if (baseHrs > 0) parts.push(`${baseHrs.toFixed(2)}h`)
                     if (cofHrs > 0) parts.push(`+${cofHrs.toFixed(2)} COF`)
                     if (hiHrs > 0) parts.push(`+0.50 HI`)
+                    if (reviewHrs > 0) parts.push(`+0.50 ★`)
                     const summaryText = parts.join(' ') + (parts.length > 1 ? ` = ${totalHrs.toFixed(2)}h` : '')
                     return (
                       <div key={r._id} className="flex items-center gap-2 flex-wrap">
@@ -3115,17 +3123,20 @@ const filteredCustomers = useMemo(
                         const [sh, sm] = form.actual_start_time.split(':').map(Number)
                         const [eh, em] = form.actual_finish_time.split(':').map(Number)
                         const rawMins = (eh * 60 + em) - (sh * 60 + sm) - (parseFloat(form.break_minutes) || 0)
-                        if (rawMins > 0) return Math.max(2, Math.round(rawMins / 15) * 15 / 60)
+                        if (rawMins > 0) return Math.max(2, Math.ceil(rawMins / 15) * 15 / 60)
                       }
                       return 0
                     })()
                     const cofHrs = r.cof_share ? cofFinalDisplay : 0
                     const hiHrs = r.heavy_item ? 0.5 : 0
-                    const totalHrs = baseHrs + cofHrs + hiHrs
+                    const casualWorkerId = casualWorkers.find((cw) => cw.name.toLowerCase() === r.name.trim().toLowerCase())?.id
+                    const reviewHrs = (form.google_review && casualWorkerId && form.google_review_employee_ids.includes(casualWorkerId)) ? 0.5 : 0
+                    const totalHrs = baseHrs + cofHrs + hiHrs + reviewHrs
                     const parts: string[] = []
                     if (baseHrs > 0) parts.push(`${baseHrs.toFixed(2)}h`)
                     if (cofHrs > 0) parts.push(`+${cofHrs.toFixed(2)} COF`)
                     if (hiHrs > 0) parts.push(`+0.50 HI`)
+                    if (reviewHrs > 0) parts.push(`+0.50 ★`)
                     const summaryText = parts.join(' ') + (parts.length > 1 ? ` = ${totalHrs.toFixed(2)}h` : '')
                     return (
                       <div key={r._id} className="flex items-center gap-2 flex-wrap">
@@ -3202,7 +3213,13 @@ const filteredCustomers = useMemo(
               <div className="space-y-2">
                 {extraMen.map((row) => {
                   const hasTime = row.start_time.length === 5 && row.finish_time.length === 5
-                  const computed = hasTime ? Math.max(0, calcCrewHours(row.start_time, row.finish_time)) : null
+                  const rawComputed = hasTime ? Math.max(0, calcCrewHours(row.start_time, row.finish_time)) : null
+                  const baseHrs = rawComputed !== null && rawComputed > 0 ? Math.max(2, rawComputed) : rawComputed
+                  const reviewHrs = (baseHrs && form.google_review && row.employee_id && form.google_review_employee_ids.includes(row.employee_id)) ? 0.5 : 0
+                  const totalHrs = baseHrs !== null ? baseHrs + reviewHrs : null
+                  const computedLabel = totalHrs !== null
+                    ? (reviewHrs > 0 ? `${baseHrs!.toFixed(2)}h +0.50 ★ = ${totalHrs.toFixed(2)}h` : `${totalHrs.toFixed(2)}h`)
+                    : null
                   return (
                     <div key={row._id} className="flex items-center gap-2 flex-wrap">
                       <select
@@ -3224,7 +3241,7 @@ const filteredCustomers = useMemo(
                       <input type="time" value={row.start_time} onChange={(e) => updateExtraMan(row._id, 'start_time', e.target.value)} disabled={isReviewed} className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface" />
                       <span className="text-dim text-xs">–</span>
                       <input type="time" value={row.finish_time} onChange={(e) => updateExtraMan(row._id, 'finish_time', e.target.value)} disabled={isReviewed} className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface" />
-                      {computed !== null && <span className="text-sm text-dim tabular-nums w-10">{computed}h</span>}
+                      {computedLabel && <span className="text-xs font-mono text-warm tabular-nums whitespace-nowrap">{computedLabel}</span>}
                       {!isReviewed && (
                         <button type="button" onClick={() => removeExtraMan(row._id)} className="text-dim hover:text-danger">
                           <Trash2 size={15} />

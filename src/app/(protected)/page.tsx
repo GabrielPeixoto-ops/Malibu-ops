@@ -193,7 +193,7 @@ function calcJobDeductions(job: CalendarJob): number {
   return materialsCost + companyExpenses
 }
 
-// Rounds to the nearest 15-minute block. Used for BOTH job-level
+// Always rounds UP to the next 15-minute block. Used for BOTH job-level
 // actual_start_time/actual_finish_time AND individual per-person times
 // (job_crew / job_casual_crew) — same single rule everywhere, matching
 // JobForm's calcCrewHours / _billingWorkedHrs.
@@ -201,7 +201,7 @@ function calcHoursFromTimes(start: string, finish: string): number {
   const [sh, sm] = start.split(':').map(Number)
   const [fh, fm] = finish.split(':').map(Number)
   const mins = (fh * 60 + fm) - (sh * 60 + sm)
-  return Math.max(0, Math.round(mins / 15) * 15 / 60)
+  return Math.max(0, Math.ceil(mins / 15) * 15 / 60)
 }
 
 function buildStaffPayrollCrew(job: CalendarJob, crew: CrewRow[]): Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; heavy_item?: boolean }> {

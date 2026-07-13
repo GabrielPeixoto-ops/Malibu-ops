@@ -175,7 +175,8 @@ export function calculatePayroll(
     const hourlyRate = em.hourly_rate ?? staffEmp?.hourly_rate
     const name = em.employee_name ?? staffEmp?.name ?? em.employee_id
     if (!hourlyRate || em.hours <= 0) continue
-    const paid_hours = Math.max(em.hours, MIN_CALL)
+    const hasReviewBonus = reviewSet.has(em.employee_id)
+    const paid_hours = Math.max(em.hours, MIN_CALL) + (hasReviewBonus ? REVIEW_BONUS : 0)
     entries.push({
       employee_id: em.employee_id,
       employee_name: name,
@@ -183,6 +184,7 @@ export function calculatePayroll(
       paid_hours,
       hourly_rate: hourlyRate,
       pay: paid_hours * hourlyRate,
+      google_review_bonus: hasReviewBonus || undefined,
     })
   }
 
