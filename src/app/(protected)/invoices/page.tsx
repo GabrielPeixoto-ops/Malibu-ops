@@ -194,10 +194,24 @@ export default function InvoicesPage() {
       for (const job of filtered) {
         const row = job.job_crew.find((c) => c.employee_id === emp.id)
         if (row) {
+          // Recompute worked hours live from times (own row times, falling back to
+          // job-level actual_start/finish) instead of trusting the stored `hours`
+          // column, which can go stale relative to the current rounding rule
+          // (e.g. saved under the old nearest-15-min rule before it changed to
+          // always-round-up). Mirrors JobForm's resolveCrewHours/baseHrs logic.
+          const hasTime = row.start_time?.length === 5 && row.end_time?.length === 5
+          const jobLevelHours = (() => {
+            if (!job.actual_start_time || !job.actual_finish_time) return null
+            const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time) - Number(job.break_minutes) / 60
+            return raw > 0 ? raw : null
+          })()
+          const workedHours = hasTime
+            ? calcHoursFromTimes(row.start_time!, row.end_time!)
+            : (jobLevelHours ?? row.hours)
           const cofHours = row.cof_share ? (row.cof_hours > 0 ? row.cof_hours : Number(job.cof_final ?? job.cof ?? 0)) : 0
           const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
-          const paidHours = Math.max(row.hours, MIN_CALL) + cofHours + reviewBonus
-          entries.push({ job, workedHours: row.hours, cofHours, paidHours, pay: paidHours * emp.hourly_rate, googleReviewBonus: reviewBonus > 0 })
+          const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus
+          entries.push({ job, workedHours, cofHours, paidHours, pay: paidHours * emp.hourly_rate, googleReviewBonus: reviewBonus > 0 })
         }
         if (job.extra_man_employee_id === emp.id && job.extra_men_hours > 0) {
           entries.push({ job, workedHours: job.extra_men_hours, cofHours: 0, paidHours: job.extra_men_hours, pay: job.extra_men_hours * emp.hourly_rate, googleReviewBonus: false })
