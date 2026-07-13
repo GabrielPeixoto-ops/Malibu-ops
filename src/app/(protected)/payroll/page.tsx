@@ -62,11 +62,23 @@ interface PayrollJob {
   extra_man_employee_id: string | null
   google_review: boolean
   google_review_employee_ids: string[]
+  actual_start_time: string | null
+  actual_finish_time: string | null
+  break_minutes: number | null
   subcontractor: { name: string } | null
   customer: { name: string } | null
   contract: { name: string } | null
   contract_client: { name: string } | null
   job_crew: PayrollCrewRow[]
+}
+
+// Always rounds UP to the next 15-minute block — same rule as the job page,
+// Dashboard, and Invoices.
+function calcHoursFromTimes(start: string, finish: string): number {
+  const [sh, sm] = start.split(':').map(Number)
+  const [fh, fm] = finish.split(':').map(Number)
+  const mins = (fh * 60 + fm) - (sh * 60 + sm)
+  return Math.max(0, Math.ceil(mins / 15) * 15 / 60)
 }
 
 interface EmployeeEntry {
@@ -122,6 +134,7 @@ export default function PayrollPage() {
         id, job_number, date, status, source,
         cof, cof_final, extra_men_hours, extra_man_employee_id,
         google_review, google_review_employee_ids,
+        actual_start_time, actual_finish_time, break_minutes,
         subcontractor:subcontractors(name),
         customer:customers(name),
         contract:contracts(name),
@@ -145,13 +158,26 @@ export default function PayrollPage() {
         for (const job of jobs) {
           const row = job.job_crew.find((c) => c.employee_id === emp.id)
           if (row) {
-            const cofHours = row.cof_share ? (row.cof_hours || 0) : 0
+            // Recompute worked hours live from times (own row times, falling back
+            // to job-level actual_start/finish) instead of trusting the stored
+            // `hours` column, which can go stale relative to the current rounding
+            // rule. Mirrors JobForm's resolveCrewHours/baseHrs and the Invoices fix.
+            const hasTime = row.start_time?.length === 5 && row.end_time?.length === 5
+            const jobLevelHours = (() => {
+              if (!job.actual_start_time || !job.actual_finish_time) return null
+              const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time) - Number(job.break_minutes || 0) / 60
+              return raw > 0 ? raw : null
+            })()
+            const workedHours = hasTime
+              ? calcHoursFromTimes(row.start_time!, row.end_time!)
+              : (jobLevelHours ?? row.hours)
+            const cofHours = row.cof_share ? (row.cof_hours > 0 ? row.cof_hours : Number(job.cof_final ?? job.cof ?? 0)) : 0
             const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
-            const paidHours = Math.max(row.hours, MIN_CALL) + cofHours + reviewBonus
+            const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus
             const workedTime = (row.start_time && row.end_time)
               ? `${row.start_time.slice(0, 5)}–${row.end_time.slice(0, 5)}`
               : null
-            entries.push({ job, workedHours: row.hours, workedTime, cofHours, paidHours, pay: paidHours * emp.hourly_rate, googleReviewBonus: reviewBonus > 0 })
+            entries.push({ job, workedHours, workedTime, cofHours, paidHours, pay: paidHours * emp.hourly_rate, googleReviewBonus: reviewBonus > 0 })
           }
           if (job.extra_man_employee_id === emp.id && job.extra_men_hours > 0) {
             entries.push({
