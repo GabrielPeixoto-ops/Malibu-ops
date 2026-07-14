@@ -108,11 +108,14 @@ const MIN_CALL = 2
 const HEAVY_ITEM_BONUS = 0.5
 const REVIEW_BONUS = 0.5
 
-// Always rounds UP to the next 15-minute block — same rule as the job page and Dashboard.
-function calcHoursFromTimes(start: string, finish: string): number {
+// Always rounds UP to the next 15-minute block — same rule as the job page and
+// Dashboard. breakMinutes (job-level only) is subtracted BEFORE rounding, same
+// order as JobForm's workedHoursCalc — subtracting it after rounding gives a
+// different (wrong) result since the break may cross a 15-min boundary.
+function calcHoursFromTimes(start: string, finish: string, breakMinutes = 0): number {
   const [sh, sm] = start.split(':').map(Number)
   const [fh, fm] = finish.split(':').map(Number)
-  const mins = (fh * 60 + fm) - (sh * 60 + sm)
+  const mins = (fh * 60 + fm) - (sh * 60 + sm) - breakMinutes
   return Math.max(0, Math.ceil(mins / 15) * 15 / 60)
 }
 
@@ -202,7 +205,7 @@ export default function InvoicesPage() {
           const hasTime = row.start_time?.length === 5 && row.end_time?.length === 5
           const jobLevelHours = (() => {
             if (!job.actual_start_time || !job.actual_finish_time) return null
-            const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time) - Number(job.break_minutes) / 60
+            const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0)
             return raw > 0 ? raw : null
           })()
           const workedHours = hasTime
@@ -259,7 +262,7 @@ export default function InvoicesPage() {
 
       const jobLevelHours = (() => {
         if (!job.actual_start_time || !job.actual_finish_time) return null
-        const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time) - Number(job.break_minutes) / 60
+        const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0)
         return raw > 0 ? raw : null
       })()
       const cofFinalHrs = Number(job.cof_final ?? job.cof) || 0

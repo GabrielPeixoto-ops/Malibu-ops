@@ -197,10 +197,13 @@ function calcJobDeductions(job: CalendarJob): number {
 // actual_start_time/actual_finish_time AND individual per-person times
 // (job_crew / job_casual_crew) — same single rule everywhere, matching
 // JobForm's calcCrewHours / _billingWorkedHrs.
-function calcHoursFromTimes(start: string, finish: string): number {
+// breakMinutes (job-level only) is subtracted BEFORE rounding, same order as
+// JobForm's workedHoursCalc — subtracting it after rounding instead gives a
+// different (wrong) result, since the break may cross a 15-min boundary.
+function calcHoursFromTimes(start: string, finish: string, breakMinutes = 0): number {
   const [sh, sm] = start.split(':').map(Number)
   const [fh, fm] = finish.split(':').map(Number)
-  const mins = (fh * 60 + fm) - (sh * 60 + sm)
+  const mins = (fh * 60 + fm) - (sh * 60 + sm) - breakMinutes
   return Math.max(0, Math.ceil(mins / 15) * 15 / 60)
 }
 
@@ -208,7 +211,7 @@ function buildStaffPayrollCrew(job: CalendarJob, crew: CrewRow[]): Array<{ emplo
   const cofFinalHrs = Number(job.cof_final ?? job.cof) || 0
   const liveWorkedHrs = (() => {
     if (!job.actual_start_time || !job.actual_finish_time) return null
-    const hrs = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time) - Number(job.break_minutes) / 60
+    const hrs = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0)
     return hrs > 0 ? hrs : null
   })()
   return crew.map(r => {
@@ -238,8 +241,7 @@ function buildCasualPayroll(job: CalendarJob): Array<{ name: string; rate_per_ho
   const cofFinalHrs = Number(job.cof_final ?? job.cof) || 0
   let billingWorkedHrs: number | null = null
   if (job.actual_start_time && job.actual_finish_time) {
-    const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time)
-    const withBreak = raw - Number(job.break_minutes) / 60
+    const withBreak = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0)
     if (withBreak > 0) billingWorkedHrs = withBreak
   }
   return job.job_casual_crew
