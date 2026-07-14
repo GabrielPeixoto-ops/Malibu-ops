@@ -139,7 +139,7 @@ export function calculatePayroll(
   cofHours = 0,
   googleReviewEmployeeIds: string[] = [],
   extraMen: Array<{ employee_id: string; hours: number; hourly_rate?: number; employee_name?: string }> = [],
-  casualCrew: Array<{ name: string; rate_per_hour: number; hours: number; heavy_item?: boolean; casual_worker_id?: string }> = [],
+  casualCrew: Array<{ name: string; rate_per_hour: number; hours: number; heavy_item?: boolean; casual_worker_id?: string | null }> = [],
   commissions: Array<{ employee_id: string | null; casual_worker_id?: string | null; casual_worker_name?: string; rate_per_hour: number; hours: number; label?: string }> = []
 ): PayrollResult {
   const MIN_CALL = 2
@@ -277,7 +277,7 @@ export function calculateJobSummary(
   privateRate?: PrivateRateInput | null,
   rateOptions?: { subcontractorRatePerHour?: number | null; contractRatePerHour?: number | null },
   extraMen?: Array<{ employee_id: string; hours: number; hourly_rate?: number; employee_name?: string }>,
-  casualCrew?: Array<{ name: string; rate_per_hour: number; hours: number; heavy_item?: boolean; casual_worker_id?: string }>,
+  casualCrew?: Array<{ name: string; rate_per_hour: number; hours: number; heavy_item?: boolean; casual_worker_id?: string | null }>,
   commissions?: Array<{ employee_id: string | null; rate_per_hour: number; hours: number; label?: string }>,
   expenses?: Array<{ amount: number; is_client_expense: boolean }>
 ): JobSummary {

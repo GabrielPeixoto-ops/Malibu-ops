@@ -1386,6 +1386,11 @@ const filteredCustomers = useMemo(
             } else {
               hours = r.cof_share ? (cofFinalVal ?? 0) : 0
             }
+            // Persist the FK to casual_workers whenever the name matches a
+            // registered casual — without this, review-bonus lookups downstream
+            // (Dashboard/Invoices/Payroll) have no id to match against
+            // google_review_employee_ids and silently never apply the bonus.
+            const cw = casualWorkers.find((c) => c.name.toLowerCase() === r.name.trim().toLowerCase())
             return {
               job_id: jobId,
               name: r.name.trim(),
@@ -1395,6 +1400,7 @@ const filteredCustomers = useMemo(
               cof_share: r.cof_share,
               heavy_item: r.heavy_item,
               hours,
+              casual_worker_id: cw?.id ?? null,
             }
           }))
         }
@@ -1456,6 +1462,7 @@ const filteredCustomers = useMemo(
             } else {
               hours = r.cof_share ? (cofFinalVal ?? 0) : 0
             }
+            const cw = casualWorkers.find((c) => c.name.toLowerCase() === r.name.trim().toLowerCase())
             return {
               job_id: newId,
               name: r.name.trim(),
@@ -1465,6 +1472,7 @@ const filteredCustomers = useMemo(
               cof_share: r.cof_share,
               heavy_item: r.heavy_item,
               hours,
+              casual_worker_id: cw?.id ?? null,
             }
           }))
         }

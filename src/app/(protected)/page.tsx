@@ -70,7 +70,7 @@ function getMonthGrid(ref: Date): Date[] {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface EmbeddedEmployee { id: string; name: string; hourly_rate: number }
-interface CrewRow { employee_id: string; hours: number; cof_share: boolean; cof_hours: number; start_time: string | null; end_time: string | null; employee: EmbeddedEmployee | null }
+interface CrewRow { employee_id: string; hours: number; cof_share: boolean; cof_hours: number; heavy_item: boolean; start_time: string | null; end_time: string | null; employee: EmbeddedEmployee | null }
 interface MaterialRow { quantity: number; cost_price: number; sale_price: number }
 
 interface CalendarJob {
@@ -98,6 +98,8 @@ interface CalendarJob {
   actual_finish_time: string | null
   subcontractor_rate_id: string | null
   contract_rate_id: string | null
+  google_review: boolean
+  google_review_employee_ids: string[]
   subcontractor: Subcontractor | null
   customer: { name: string; billing_type: string | null; billing_config: Record<string, unknown> | null } | null
   contract: { name: string; billing_type: string; billing_config: Record<string, unknown>; color_hex: string | null } | null
@@ -105,7 +107,7 @@ interface CalendarJob {
   job_crew: CrewRow[]
   job_materials: MaterialRow[]
   job_expenses: Array<{ amount: number; is_client_expense: boolean }>
-  job_casual_crew: Array<{ name: string; rate_per_hour: number; heavy_item: boolean; cof_share: boolean; start_time: string | null; finish_time: string | null }>
+  job_casual_crew: Array<{ name: string; rate_per_hour: number; heavy_item: boolean; cof_share: boolean; start_time: string | null; finish_time: string | null; casual_worker_id: string | null }>
   job_commissions: Array<{ employee_id: string | null; casual_worker_id: string | null; rate_per_hour: number; hours: number }>
   job_trucks: Array<{ fleet: { name: string; registration: string | null } | null }>
   subcontractor_rate_ph: number | null
@@ -232,11 +234,11 @@ function buildStaffPayrollCrew(job: CalendarJob, crew: CrewRow[]): Array<{ emplo
     // Let calculatePayroll add Call Out Fee hours from cof_share/cof_hours,
     // same as JobForm does — never bake COF into `hours` here, or it gets lost
     // for crew with individual times (that branch doesn't touch cofFinalHrs at all).
-    return { employee_id: r.employee_id, hours, cof_share: r.cof_share, cof_hours: r.cof_share ? cofFinalHrs : 0 }
+    return { employee_id: r.employee_id, hours, cof_share: r.cof_share, cof_hours: r.cof_share ? cofFinalHrs : 0, heavy_item: r.heavy_item }
   })
 }
 
-function buildCasualPayroll(job: CalendarJob): Array<{ name: string; rate_per_hour: number; hours: number; heavy_item: boolean }> {
+function buildCasualPayroll(job: CalendarJob): Array<{ name: string; rate_per_hour: number; hours: number; heavy_item: boolean; casual_worker_id: string | null }> {
   const MIN_CALL = 2
   const cofFinalHrs = Number(job.cof_final ?? job.cof) || 0
   let billingWorkedHrs: number | null = null
@@ -257,7 +259,7 @@ function buildCasualPayroll(job: CalendarJob): Array<{ name: string; rate_per_ho
       } else {
         hours = r.cof_share ? cofFinalHrs : 0
       }
-      return { name: r.name, rate_per_hour: r.rate_per_hour, hours, heavy_item: r.heavy_item }
+      return { name: r.name, rate_per_hour: r.rate_per_hour, hours, heavy_item: r.heavy_item, casual_worker_id: r.casual_worker_id }
     })
 }
 
@@ -351,15 +353,15 @@ export default function DashboardPage() {
           id, job_number, date, status, source, notes, cof, cof_final, additional_hours,
           additional_rate, rate_card_key, formula_vars, extra_men_hours, break_minutes, discount, heavy_item_charge,
           actual_start_time, actual_finish_time, scheduled_time, override_revenue, malibu_revenue, client_billing_config,
-          subcontractor_rate_id, contract_rate_id,
+          subcontractor_rate_id, contract_rate_id, google_review, google_review_employee_ids,
           subcontractor:subcontractors(*),
           customer:customers(name, billing_type, billing_config),
           contract:contracts(name, billing_type, billing_config, color_hex),
           contract_client:contract_clients(name),
-          job_crew(employee_id, hours, cof_share, cof_hours, start_time, end_time, employee:employees(id, name, hourly_rate)),
+          job_crew(employee_id, hours, cof_share, cof_hours, heavy_item, start_time, end_time, employee:employees(id, name, hourly_rate)),
           job_materials(quantity, cost_price, sale_price),
           job_expenses(amount, is_client_expense),
-          job_casual_crew(name, rate_per_hour, heavy_item, cof_share, start_time, finish_time),
+          job_casual_crew(name, rate_per_hour, heavy_item, cof_share, start_time, finish_time, casual_worker_id),
           job_commissions(employee_id, casual_worker_id, rate_per_hour, hours)
         `)
         .gte('date', start)
@@ -424,7 +426,8 @@ export default function DashboardPage() {
       revenue += calcJobRevenue(job) ?? 0
       const crew = job.job_crew.filter((c) => c.employee)
       const emps: Employee[] = crew.map((c) => c.employee!).filter(Boolean) as unknown as Employee[]
-      payroll += calculatePayroll(buildStaffPayrollCrew(job, crew), emps, 0, [], [], buildCasualPayroll(job), buildCommissionsForPayroll(job)).total
+      const reviewIds = job.google_review ? (job.google_review_employee_ids ?? []) : []
+      payroll += calculatePayroll(buildStaffPayrollCrew(job, crew), emps, 0, reviewIds, [], buildCasualPayroll(job), buildCommissionsForPayroll(job)).total
       deductions += calcJobDeductions(job)
     }
     const netRevenue = revenue > 0 ? revenue / 1.1 : 0
@@ -800,7 +803,8 @@ function JobCard({
     const emps = crew.map((c) => c.employee!).filter(Boolean) as unknown as Employee[]
     const staffCrew = buildStaffPayrollCrew(job, crew)
     const commissionsInput = buildCommissionsForPayroll(job)
-    const payroll = calculatePayroll(staffCrew, emps, 0, [], [], buildCasualPayroll(job), commissionsInput).total
+    const reviewIds = job.google_review ? (job.google_review_employee_ids ?? []) : []
+    const payroll = calculatePayroll(staffCrew, emps, 0, reviewIds, [], buildCasualPayroll(job), commissionsInput).total
     return revenue / 1.1 - payroll - calcJobDeductions(job)
   })()
 
