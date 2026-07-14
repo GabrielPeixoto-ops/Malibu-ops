@@ -43,11 +43,16 @@ interface InvoiceJob {
   extra_man_employee_id: string | null
   break_minutes: number
   discount: number
+  heavy_item_charge: number
   override_revenue: number | null
   malibu_revenue: number | null
   client_billing_config: Record<string, unknown> | null
   google_review: boolean
   google_review_employee_ids: string[]
+  subcontractor_rate_id: string | null
+  contract_rate_id: string | null
+  subcontractor_rate_ph: number | null
+  contract_rate_ph: number | null
   subcontractor: Subcontractor | null
   customer: { id: string; name: string; billing_type: string | null; billing_config: Record<string, unknown> | null } | null
   contract: { id: string; name: string; billing_type: string; billing_config: Record<string, unknown> } | null
@@ -57,6 +62,8 @@ interface InvoiceJob {
   job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; start_time: string | null; end_time: string | null }>
   job_casual_crew: Array<{ casual_worker_id: string | null; name: string; rate_per_hour: number; hours: number; cof_share: boolean; heavy_item: boolean; start_time: string | null; finish_time: string | null }>
   job_commissions: Array<{ employee_id: string | null; casual_worker_id: string | null; rate_per_hour: number; hours: number; commission_type: { name: string } | null }>
+  job_materials: Array<{ quantity: number; cost_price: number; sale_price: number }>
+  job_expenses: Array<{ amount: number; is_client_expense: boolean }>
 }
 
 const fmtAUD = (n: number) =>
@@ -68,19 +75,53 @@ function fmtMoney(n: number) {
   return n.toLocaleString('en-AU', { style: 'currency', currency: 'AUD', minimumFractionDigits: 2 })
 }
 
+// Mirrors Dashboard's calcJobRevenue exactly (src/app/(protected)/page.tsx) — same
+// source-by-source precedence rules, otherwise the two pages silently disagree:
+// - subcontract + percent billing: ONLY malibu_revenue (a gross-based number the
+//   applyBillingConfig 'percent' formula cannot reproduce) — never live-calculate.
+// - subcontract (other billing types): malibu_revenue/override_revenue as an
+//   override when set, else live calc via calculateJobRevenue with the resolved
+//   per-hour rate (subcontractor_rate_ph) for rateList-based subs.
+// - private: ONLY malibu_revenue. Customers' billing_type/billing_config are not
+//   populated in this codebase (private pricing lives in private_rate_id / the
+//   private_rates table instead), so falling back to calculateClientRevenue here
+//   would silently return null for every private job.
+// - contract: prefer the saved malibu_revenue; only live-calculate as a fallback
+//   for jobs saved before completion, passing contract_rate_ph so rate-list-based
+//   contracts don't get treated as a $0 flat-rate lookup.
 function calcRevenue(job: InvoiceJob): number | null {
+  let base: number | null = null
+
   if (job.source === 'subcontract') {
     if (!job.subcontractor) return null
-    const effectiveOverride = job.malibu_revenue ?? job.override_revenue
-    return calculateJobRevenue({ ...job, override_revenue: effectiveOverride }, job.subcontractor)
+    if (job.subcontractor.billing_type === 'percent') {
+      base = job.malibu_revenue != null && job.malibu_revenue > 0 ? job.malibu_revenue : null
+    } else {
+      const effectiveOverride = job.malibu_revenue ?? job.override_revenue
+      base = calculateJobRevenue({ ...job, override_revenue: effectiveOverride }, job.subcontractor, job.subcontractor_rate_ph)
+    }
+  } else if (job.source === 'private') {
+    base = job.malibu_revenue != null && job.malibu_revenue > 0 ? job.malibu_revenue : null
+  } else {
+    if (job.malibu_revenue != null && job.malibu_revenue > 0) {
+      base = job.malibu_revenue
+    } else {
+      const entity = job.contract
+      if (!entity?.billing_type || !entity?.billing_config) return null
+      base = calculateClientRevenue(
+        { ...job, client_billing_config: job.client_billing_config as SubcontractorConfig | null },
+        entity.billing_type,
+        entity.billing_config as unknown as SubcontractorConfig,
+        job.contract_rate_ph
+      )
+    }
   }
-  const entity = job.source === 'private' ? job.customer : job.contract
-  if (!entity?.billing_type || !entity?.billing_config) return null
-  return calculateClientRevenue(
-    { ...job, client_billing_config: job.client_billing_config as SubcontractorConfig | null },
-    entity.billing_type,
-    entity.billing_config as unknown as SubcontractorConfig
-  )
+
+  if (base === null) return null
+  const clientExpenses = (job.job_expenses ?? []).filter((e) => e.is_client_expense).reduce((s, e) => s + e.amount, 0)
+  const materialsRevenue = (job.job_materials ?? []).reduce((s, m) => s + Number(m.quantity) * Number(m.sale_price), 0)
+  const total = base + materialsRevenue + (Number(job.heavy_item_charge) || 0) - (Number(job.discount) || 0) + clientExpenses
+  return total > 0 ? total : null
 }
 
 function entityLabel(job: InvoiceJob): string {
@@ -158,22 +199,52 @@ export default function InvoicesPage() {
       .select(`
         id, job_number, date, status, source,
         cof, cof_final, additional_hours, additional_rate, rate_card_key, formula_vars,
-        extra_men_hours, extra_man_employee_id, break_minutes, discount, override_revenue, malibu_revenue, client_billing_config,
+        extra_men_hours, extra_man_employee_id, break_minutes, discount, heavy_item_charge, override_revenue, malibu_revenue, client_billing_config,
         google_review, google_review_employee_ids, actual_start_time, actual_finish_time,
+        subcontractor_rate_id, contract_rate_id,
         subcontractor:subcontractors(*),
         customer:customers(id, name, billing_type, billing_config),
         contract:contracts(id, name, billing_type, billing_config),
         contract_client:contract_clients(name),
         job_crew(employee_id, hours, cof_share, cof_hours, start_time, end_time),
         job_casual_crew(casual_worker_id, name, rate_per_hour, hours, cof_share, heavy_item, start_time, finish_time),
-        job_commissions(employee_id, casual_worker_id, rate_per_hour, hours, commission_type:commission_types(name))
+        job_commissions(employee_id, casual_worker_id, rate_per_hour, hours, commission_type:commission_types(name)),
+        job_materials(quantity, cost_price, sale_price),
+        job_expenses(amount, is_client_expense)
       `)
       .gte('date', dateFrom)
       .lte('date', dateTo)
       .not('status', 'in', '("draft","cancelled")')
       .order('date', { ascending: false })
-      .then(({ data }) => {
-        setJobs((data ?? []) as unknown as InvoiceJob[])
+      .then(async ({ data }) => {
+        const baseJobs = (data ?? []) as unknown as Omit<InvoiceJob, 'subcontractor_rate_ph' | 'contract_rate_ph'>[]
+
+        // Resolve per-hour rates for rate-list-based subcontractors/contracts —
+        // mirrors Dashboard's subRatePHMap/contractRatePHMap so both pages agree
+        // on revenue for jobs that use subcontractor_rate_id/contract_rate_id
+        // instead of the flat rate_card_key mechanism.
+        const subRatePHMap = new Map<string, number>()
+        const contractRatePHMap = new Map<string, number>()
+        const uniqueSubRateIds = [...new Set(baseJobs.map((j) => j.subcontractor_rate_id).filter(Boolean) as string[])]
+        const uniqueContractRateIds = [...new Set(baseJobs.map((j) => j.contract_rate_id).filter(Boolean) as string[])]
+        if (uniqueSubRateIds.length > 0) {
+          try {
+            const { data: srRows } = await supabase.from('subcontractor_rates').select('id, rate_per_hour').in('id', uniqueSubRateIds)
+            for (const r of (srRows ?? []) as Array<{ id: string; rate_per_hour: number }>) subRatePHMap.set(r.id, r.rate_per_hour)
+          } catch { /* table not yet migrated */ }
+        }
+        if (uniqueContractRateIds.length > 0) {
+          try {
+            const { data: crRows } = await supabase.from('contract_rates').select('id, rate_per_hour').in('id', uniqueContractRateIds)
+            for (const r of (crRows ?? []) as Array<{ id: string; rate_per_hour: number }>) contractRatePHMap.set(r.id, r.rate_per_hour)
+          } catch { /* table not yet migrated */ }
+        }
+
+        setJobs(baseJobs.map((j) => ({
+          ...j,
+          subcontractor_rate_ph: j.subcontractor_rate_id ? (subRatePHMap.get(j.subcontractor_rate_id) ?? null) : null,
+          contract_rate_ph: j.contract_rate_id ? (contractRatePHMap.get(j.contract_rate_id) ?? null) : null,
+        })) as InvoiceJob[])
         setLoading(false)
       })
   }, [dateFrom, dateTo])
