@@ -62,7 +62,7 @@ interface InvoiceJob {
   job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; start_time: string | null; end_time: string | null }>
   job_casual_crew: Array<{ casual_worker_id: string | null; name: string; rate_per_hour: number; hours: number; cof_share: boolean; heavy_item: boolean; start_time: string | null; finish_time: string | null }>
   job_commissions: Array<{ employee_id: string | null; casual_worker_id: string | null; rate_per_hour: number; hours: number; commission_type: { name: string } | null }>
-  job_extra_men: Array<{ employee_id: string | null; start_time: string | null; finish_time: string | null; cof_share: boolean; client_charge_amount: number }>
+  job_extra_men: Array<{ employee_id: string | null; name: string | null; rate_per_hour: number | null; start_time: string | null; finish_time: string | null; cof_share: boolean; client_charge_amount: number }>
   job_materials: Array<{ quantity: number; cost_price: number; sale_price: number }>
   job_expenses: Array<{ amount: number; is_client_expense: boolean }>
 }
@@ -223,7 +223,7 @@ export default function InvoicesPage() {
         job_commissions(employee_id, casual_worker_id, rate_per_hour, hours, commission_type:commission_types(name)),
         job_materials(quantity, cost_price, sale_price),
         job_expenses(amount, is_client_expense),
-        job_extra_men(employee_id, start_time, finish_time, cof_share, client_charge_amount)
+        job_extra_men(employee_id, name, rate_per_hour, start_time, finish_time, cof_share, client_charge_amount)
       `)
       .gte('date', dateFrom)
       .lte('date', dateTo)
@@ -301,8 +301,9 @@ export default function InvoicesPage() {
           entries.push({ job, workedHours, cofHours, paidHours, pay: paidHours * emp.hourly_rate, googleReviewBonus: reviewBonus > 0 })
         }
         // Extra Men who resolve to this staff employee — same hours/COF/review
-        // treatment as regular crew (job_extra_men has no rate of its own,
-        // hence resolving against `emp` here rather than trusting a stored pay).
+        // treatment as regular crew. Prefer the per-job rate captured at save
+        // time (lets a rate be negotiated for a one-off addition) and fall
+        // back to the employee's standard hourly_rate.
         for (const em of job.job_extra_men ?? []) {
           if (em.employee_id !== emp.id) continue
           const hasTime = em.start_time?.length === 5 && em.finish_time?.length === 5
@@ -316,7 +317,8 @@ export default function InvoicesPage() {
           const cofHours = em.cof_share ? Number(job.cof_final ?? job.cof ?? 0) : 0
           const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
           const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus
-          entries.push({ job, workedHours, cofHours, paidHours, pay: paidHours * emp.hourly_rate, googleReviewBonus: reviewBonus > 0 })
+          const rate = em.rate_per_hour || emp.hourly_rate
+          entries.push({ job, workedHours, cofHours, paidHours, pay: paidHours * rate, googleReviewBonus: reviewBonus > 0 })
         }
         // Legacy single-extra-man fields, kept only for any historical jobs
         // saved before the job_extra_men table existed.
@@ -409,25 +411,29 @@ export default function InvoicesPage() {
         })
       }
 
-      // Extra Men who resolve to a casual worker rather than a staff employee
-      // (job_extra_men has no rate of its own — resolve against casualWorkers,
-      // same ambiguity as JobForm's "Select employee…" dropdown). Staff
-      // extra men are already handled in employeeData above.
+      // Extra Men who resolve to a casual worker rather than a staff employee.
+      // Prefer the free-text name/rate captured at save time (same convention
+      // as job_casual_crew) — fall back to a live casual_workers lookup by id
+      // for rows saved before those columns existed. Staff extra men are
+      // already handled in employeeData above.
       for (const em of job.job_extra_men ?? []) {
-        if (!em.employee_id || employees.some((e) => e.id === em.employee_id)) continue
-        const cw = casualWorkers.find((c) => c.id === em.employee_id)
-        if (!cw || cw.rate_per_hour <= 0) continue
+        if (em.employee_id && employees.some((e) => e.id === em.employee_id)) continue
+        const cw = em.employee_id ? casualWorkers.find((c) => c.id === em.employee_id) : undefined
+        const name = ((em.name && em.name.trim()) || cw?.name || '').trim()
+        if (!name) continue
+        const rate = em.rate_per_hour || cw?.rate_per_hour || 0
+        if (rate <= 0) continue
         const hasTime = em.start_time?.length === 5 && em.finish_time?.length === 5
         const rawHours = hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!) : (jobLevelHours ?? 0)
         const workedHours = rawHours > 0 ? Math.max(MIN_CALL, rawHours) : 0
         const cofHours = em.cof_share ? cofFinalHrs : 0
-        const hasReviewBonus = reviewSet.has(cw.id)
+        const hasReviewBonus = cw ? reviewSet.has(cw.id) : false
         const paidHours = workedHours + cofHours + (hasReviewBonus ? REVIEW_BONUS : 0)
         if (paidHours <= 0) continue
-        const key = cw.name.trim().toLowerCase()
-        if (!byKey.has(key)) byKey.set(key, { name: cw.name, entries: [] })
+        const key = name.toLowerCase()
+        if (!byKey.has(key)) byKey.set(key, { name, entries: [] })
         byKey.get(key)!.entries.push({
-          job, workedHours, cofHours, paidHours, pay: paidHours * cw.rate_per_hour,
+          job, workedHours, cofHours, paidHours, pay: paidHours * rate,
           heavyItem: false, googleReviewBonus: hasReviewBonus,
         })
       }

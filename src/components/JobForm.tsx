@@ -78,7 +78,13 @@ interface MaterialRow {
 interface ExtraManRow {
   _id: string
   dbId?: string
-  employee_id: string
+  // Free-text name with autofill against Staff/Casual Workers, mirroring the
+  // Casual / Packing Crew row — this is a sporadic mid-job addition, not a
+  // dropdown pick. Resolved to a staff or casual-worker id at render/save
+  // time by matching name (see resolveExtraMan()); if the name doesn't match
+  // anyone, the person is offered up to be added as a new casual worker.
+  name: string
+  rate_per_hour: string
   start_time: string
   finish_time: string
   cof_share: boolean
@@ -420,8 +426,9 @@ export default function JobForm({ jobId }: { jobId?: string }) {
       const loadedSubs = (subsRes.data ?? []) as Subcontractor[]
       const loadedCustomers = (custsRes.data ?? []) as Customer[]
       const loadedContracts = (contsRes.data ?? []) as (Contract & { contract_clients: ContractClient[] })[]
+      const loadedEmployees = (empsRes.data ?? []) as Employee[]
       setSubs(loadedSubs)
-      setEmployees((empsRes.data ?? []) as Employee[])
+      setEmployees(loadedEmployees)
       setCustomers(loadedCustomers)
       setContracts(loadedContracts)
       setPrivateRates((ratesRes.data ?? []) as PrivateRate[])
@@ -431,9 +438,11 @@ export default function JobForm({ jobId }: { jobId?: string }) {
         const { data: ctData } = await supabase.from('commission_types').select('*').eq('is_active', true).order('sort_order')
         setCommissionTypes((ctData ?? []) as CommissionType[])
       } catch { /* migration not yet applied */ }
+      let loadedCasualWorkers: CasualWorker[] = []
       try {
         const { data: cwData } = await supabase.from('casual_workers').select('*').order('name')
-        setCasualWorkers((cwData ?? []) as CasualWorker[])
+        loadedCasualWorkers = (cwData ?? []) as CasualWorker[]
+        setCasualWorkers(loadedCasualWorkers)
       } catch { /* migration not yet applied */ }
 
       try {
@@ -598,15 +607,24 @@ export default function JobForm({ jobId }: { jobId?: string }) {
 
           try {
             const { data: emData } = await supabase.from('job_extra_men').select('*').eq('job_id', jobId).order('created_at')
-            setExtraMan((emData ?? []).map((r: { id: string; employee_id: string | null; start_time: string | null; finish_time: string | null; cof_share?: boolean; client_charge_amount?: number }) => ({
-              _id: r.id,
-              dbId: r.id,
-              employee_id: r.employee_id ?? '',
-              start_time: r.start_time ?? '',
-              finish_time: r.finish_time ?? '',
-              cof_share: r.cof_share ?? false,
-              client_charge: r.client_charge_amount ? r.client_charge_amount.toString() : '',
-            })))
+            setExtraMan((emData ?? []).map((r: { id: string; employee_id: string | null; name?: string | null; rate_per_hour?: number | null; start_time: string | null; finish_time: string | null; cof_share?: boolean; client_charge_amount?: number }) => {
+              // Legacy rows (saved before the free-text name/rate columns existed)
+              // only have employee_id — resolve a display name/rate from it.
+              const staffEmp = r.employee_id ? loadedEmployees.find((e) => e.id === r.employee_id) : undefined
+              const casualWorker = !staffEmp && r.employee_id ? loadedCasualWorkers.find((cw) => cw.id === r.employee_id) : undefined
+              const resolvedName = r.name ?? staffEmp?.name ?? casualWorker?.name ?? ''
+              const resolvedRate = r.rate_per_hour ?? staffEmp?.hourly_rate ?? casualWorker?.rate_per_hour ?? null
+              return {
+                _id: r.id,
+                dbId: r.id,
+                name: resolvedName,
+                rate_per_hour: resolvedRate !== null && resolvedRate !== undefined ? resolvedRate.toString() : '',
+                start_time: r.start_time ?? '',
+                finish_time: r.finish_time ?? '',
+                cof_share: r.cof_share ?? false,
+                client_charge: r.client_charge_amount ? r.client_charge_amount.toString() : '',
+              }
+            }))
           } catch { /* migration not yet applied */ }
 
           try {
@@ -804,14 +822,14 @@ const filteredCustomers = useMemo(
     if (form.source === 'contract' && !selectedEntity) return null
 
     const extraMenForBilling = extraMen
-      .filter((r) => r.employee_id && r.start_time.length === 5 && r.finish_time.length === 5)
+      .filter((r) => r.name.trim() && r.start_time.length === 5 && r.finish_time.length === 5)
       .map((r) => {
-        const cw = casualWorkers.find((c) => c.id === r.employee_id)
+        const match = resolveExtraMan(r.name)
         return {
-          employee_id: r.employee_id,
+          employee_id: match?.id ?? '',
           hours: Math.max(0, calcCrewHours(r.start_time, r.finish_time)),
-          hourly_rate: cw?.rate_per_hour,
-          employee_name: cw?.name,
+          hourly_rate: parseFloat(r.rate_per_hour) || match?.rate,
+          employee_name: r.name.trim(),
           cof_share: r.cof_share,
           client_charge: parseFloat(r.client_charge) || 0,
         }
@@ -1039,15 +1057,26 @@ const filteredCustomers = useMemo(
 
   // ── Extra men helpers ──────────────────────────────────────────────────────
   function addExtraMan() {
-    setExtraMan((em) => [...em, { _id: crypto.randomUUID(), employee_id: '', start_time: '', finish_time: '', cof_share: false, client_charge: '' }])
+    setExtraMan((em) => [...em, { _id: crypto.randomUUID(), name: '', rate_per_hour: '', start_time: '', finish_time: '', cof_share: false, client_charge: '' }])
   }
-  function updateExtraMan(_id: string, field: 'employee_id' | 'start_time' | 'finish_time' | 'client_charge', value: string): void
+  function updateExtraMan(_id: string, field: 'name' | 'rate_per_hour' | 'start_time' | 'finish_time' | 'client_charge', value: string): void
   function updateExtraMan(_id: string, field: 'cof_share', value: boolean): void
-  function updateExtraMan(_id: string, field: 'employee_id' | 'start_time' | 'finish_time' | 'client_charge' | 'cof_share', value: string | boolean) {
+  function updateExtraMan(_id: string, field: 'name' | 'rate_per_hour' | 'start_time' | 'finish_time' | 'client_charge' | 'cof_share', value: string | boolean) {
     setExtraMan((em) => em.map((r) => r._id === _id ? { ...r, [field]: value } : r))
   }
   function removeExtraMan(_id: string) {
     setExtraMan((em) => em.filter((r) => r._id !== _id))
+  }
+  // Resolves a free-text Extra Man name to a staff or casual-worker id/rate,
+  // mirroring how Casual Crew rows are matched. Staff takes precedence.
+  function resolveExtraMan(name: string): { id: string; rate: number; isCasual: boolean } | null {
+    const trimmed = name.trim()
+    if (!trimmed) return null
+    const staffEmp = employees.find((e) => e.name.toLowerCase() === trimmed.toLowerCase())
+    if (staffEmp) return { id: staffEmp.id, rate: staffEmp.hourly_rate, isCasual: false }
+    const cw = casualWorkers.find((c) => c.name.toLowerCase() === trimmed.toLowerCase())
+    if (cw) return { id: cw.id, rate: cw.rate_per_hour, isCasual: true }
+    return null
   }
 
   // ── Material helpers ───────────────────────────────────────────────────────
@@ -1204,7 +1233,7 @@ const filteredCustomers = useMemo(
 
     const clientBillingConfig = overrideOpen ? buildOverrideConfig(overrideBilling) : null
 
-    const extraMenRows = extraMen.filter((r) => r.employee_id && r.start_time && r.finish_time)
+    const extraMenRows = extraMen.filter((r) => r.name.trim() && r.start_time && r.finish_time)
     const computedExtraMenHours = extraMenRows.reduce((s, r) => {
       const h = calcCrewHours(r.start_time, r.finish_time)
       return s + (h > 0 ? h : 0)
@@ -1375,14 +1404,19 @@ const filteredCustomers = useMemo(
       try {
         await supabase.from('job_extra_men').delete().eq('job_id', jobId)
         if (extraMenRows.length) {
-          await supabase.from('job_extra_men').insert(extraMenRows.map((r) => ({
-            job_id: jobId,
-            employee_id: r.employee_id || null,
-            start_time: r.start_time || null,
-            finish_time: r.finish_time || null,
-            cof_share: r.cof_share,
-            client_charge_amount: parseFloat(r.client_charge) || 0,
-          })))
+          await supabase.from('job_extra_men').insert(extraMenRows.map((r) => {
+            const match = resolveExtraMan(r.name)
+            return {
+              job_id: jobId,
+              employee_id: match?.id ?? null,
+              name: r.name.trim(),
+              rate_per_hour: parseFloat(r.rate_per_hour) || match?.rate || 0,
+              start_time: r.start_time || null,
+              finish_time: r.finish_time || null,
+              cof_share: r.cof_share,
+              client_charge_amount: parseFloat(r.client_charge) || 0,
+            }
+          }))
         }
       } catch { /* migration not yet applied */ }
       try {
@@ -1454,14 +1488,19 @@ const filteredCustomers = useMemo(
       if (photos.length) await supabase.from('job_photos').insert(photos.map((p) => ({ job_id: newId, url: p.url, caption: p.caption || null, category: p.category })))
       try {
         if (extraMenRows.length) {
-          await supabase.from('job_extra_men').insert(extraMenRows.map((r) => ({
-            job_id: newId,
-            employee_id: r.employee_id || null,
-            start_time: r.start_time || null,
-            finish_time: r.finish_time || null,
-            cof_share: r.cof_share,
-            client_charge_amount: parseFloat(r.client_charge) || 0,
-          })))
+          await supabase.from('job_extra_men').insert(extraMenRows.map((r) => {
+            const match = resolveExtraMan(r.name)
+            return {
+              job_id: newId,
+              employee_id: match?.id ?? null,
+              name: r.name.trim(),
+              rate_per_hour: parseFloat(r.rate_per_hour) || match?.rate || 0,
+              start_time: r.start_time || null,
+              finish_time: r.finish_time || null,
+              cof_share: r.cof_share,
+              client_charge_amount: parseFloat(r.client_charge) || 0,
+            }
+          }))
         }
       } catch { /* migration not yet applied */ }
       try {
@@ -1553,12 +1592,20 @@ const filteredCustomers = useMemo(
   }
 
   async function handleSave() {
-    const unregistered = casualCrew.find((r) => {
+    const unregisteredCasual = casualCrew.find((r) => {
       const name = r.name.trim()
       return name &&
         !casualWorkers.some((cw) => cw.name.toLowerCase() === name.toLowerCase()) &&
         !declinedCasualWorkerNamesRef.current.has(name.toLowerCase())
     })
+    const unregisteredExtraMan = !unregisteredCasual && extraMen.find((r) => {
+      const name = r.name.trim()
+      return name &&
+        !employees.some((e) => e.name.toLowerCase() === name.toLowerCase()) &&
+        !casualWorkers.some((cw) => cw.name.toLowerCase() === name.toLowerCase()) &&
+        !declinedCasualWorkerNamesRef.current.has(name.toLowerCase())
+    })
+    const unregistered = unregisteredCasual || unregisteredExtraMan
     if (unregistered) {
       setPendingNewCasualWorker({
         rowId: unregistered._id,
@@ -3233,6 +3280,10 @@ const filteredCustomers = useMemo(
                 )}
               </div>
               {extraMen.length === 0 && <p className="text-xs text-dim opacity-100">No extra men added.</p>}
+              <datalist id="extra-man-list">
+                {employees.map((e) => <option key={`e-${e.id}`} value={e.name} />)}
+                {casualWorkers.map((cw) => <option key={`c-${cw.id}`} value={cw.name} />)}
+              </datalist>
               <div className="space-y-2">
                 {extraMen.map((row) => {
                   const hasTime = row.start_time.length === 5 && row.finish_time.length === 5
@@ -3240,7 +3291,8 @@ const filteredCustomers = useMemo(
                   const baseHrs = rawComputed !== null && rawComputed > 0 ? Math.max(2, rawComputed) : rawComputed
                   const cofFinalDisplay = form.cof_final.trim() ? (parseFloat(form.cof_final) || 0) : 0
                   const cofHrs = (baseHrs !== null && row.cof_share) ? cofFinalDisplay : 0
-                  const reviewHrs = (baseHrs && form.google_review && row.employee_id && form.google_review_employee_ids.includes(row.employee_id)) ? 0.5 : 0
+                  const matchedId = resolveExtraMan(row.name)?.id
+                  const reviewHrs = (baseHrs && form.google_review && matchedId && form.google_review_employee_ids.includes(matchedId)) ? 0.5 : 0
                   const totalHrs = baseHrs !== null ? baseHrs + cofHrs + reviewHrs : null
                   const parts: string[] = []
                   if (baseHrs !== null) parts.push(`${baseHrs.toFixed(2)}h`)
@@ -3251,22 +3303,41 @@ const filteredCustomers = useMemo(
                     : null
                   return (
                     <div key={row._id} className="flex items-center gap-2 flex-wrap">
-                      <select
-                        value={row.employee_id}
-                        onChange={(e) => updateExtraMan(row._id, 'employee_id', e.target.value)}
+                      <input
+                        type="text"
+                        list="extra-man-list"
+                        value={row.name}
+                        onChange={(e) => {
+                          const val = e.target.value
+                          updateExtraMan(row._id, 'name', val)
+                          const match = resolveExtraMan(val)
+                          if (match) updateExtraMan(row._id, 'rate_per_hour', match.rate.toString())
+                        }}
+                        onBlur={() => {
+                          const name = row.name.trim()
+                          if (!name || isReviewed) return
+                          if (!resolveExtraMan(name) && !declinedCasualWorkerNamesRef.current.has(name.toLowerCase())) {
+                            setPendingNewCasualWorker({ rowId: row._id, name, rate: parseFloat(row.rate_per_hour) || 0 })
+                          }
+                        }}
                         disabled={isReviewed}
-                        className="flex-1 min-w-0 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface"
-                      >
-                        <option value="">Select employee…</option>
-                        <optgroup label="— Staff —">
-                          {employees.map((e) => <option key={e.id} value={e.id}>{e.name} (${e.hourly_rate}/hr)</option>)}
-                        </optgroup>
-                        {casualWorkers.length > 0 && (
-                          <optgroup label="— Casual Workers —">
-                            {casualWorkers.map((cw) => <option key={cw.id} value={cw.id}>{cw.name} (${cw.rate_per_hour}/hr)</option>)}
-                          </optgroup>
-                        )}
-                      </select>
+                        placeholder="Person name…"
+                        className="flex-1 min-w-[120px] px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface"
+                      />
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-xs text-dim">$</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.50"
+                          value={row.rate_per_hour}
+                          onChange={(e) => updateExtraMan(row._id, 'rate_per_hour', e.target.value)}
+                          disabled={isReviewed}
+                          placeholder="0"
+                          className="w-16 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface"
+                        />
+                        <span className="text-xs text-dim">/hr</span>
+                      </div>
                       <input type="time" value={row.start_time} onChange={(e) => updateExtraMan(row._id, 'start_time', e.target.value)} disabled={isReviewed} className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface" />
                       <span className="text-dim text-xs">–</span>
                       <input type="time" value={row.finish_time} onChange={(e) => updateExtraMan(row._id, 'finish_time', e.target.value)} disabled={isReviewed} className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface" />
@@ -3375,7 +3446,9 @@ const filteredCustomers = useMemo(
                     <div className="flex flex-wrap gap-1.5">
                       {(() => {
                         const crewEmpIds = crew.filter((r) => r.employee_id).map((r) => r.employee_id)
-                        const extraMenEmpIds = extraMen.filter((r) => r.employee_id).map((r) => r.employee_id)
+                        const extraMenEmpIds = extraMen
+                          .map((r) => resolveExtraMan(r.name)?.id)
+                          .filter((id): id is string => !!id)
                         const legacyId = form.extra_man_employee_id && !crewEmpIds.includes(form.extra_man_employee_id) && !extraMenEmpIds.includes(form.extra_man_employee_id) ? form.extra_man_employee_id : null
                         const casualReviewIds = casualCrew
                           .filter((r) => r.name.trim())
@@ -3410,7 +3483,7 @@ const filteredCustomers = useMemo(
                           )
                         })
                       })()}
-                      {crew.filter((r) => r.employee_id).length === 0 && extraMen.filter((r) => r.employee_id).length === 0 && !form.extra_man_employee_id && casualCrew.filter((r) => r.name.trim()).length === 0 && (
+                      {crew.filter((r) => r.employee_id).length === 0 && extraMen.filter((r) => r.name.trim()).length === 0 && !form.extra_man_employee_id && casualCrew.filter((r) => r.name.trim()).length === 0 && (
                         <p className="text-xs text-dim">Add crew members above to select recipients.</p>
                       )}
                     </div>
@@ -3721,27 +3794,49 @@ const filteredCustomers = useMemo(
             </button>
           }>
             {extraMen.length === 0 && <p className="text-sm text-dim text-center py-2">No extra men added.</p>}
+            <datalist id="extra-man-list">
+              {employees.map((e) => <option key={`e-${e.id}`} value={e.name} />)}
+              {casualWorkers.map((cw) => <option key={`c-${cw.id}`} value={cw.name} />)}
+            </datalist>
             <div className="space-y-2">
               {extraMen.map((row) => {
                 const hasTime = row.start_time.length === 5 && row.finish_time.length === 5
                 const computed = hasTime ? Math.max(0, calcCrewHours(row.start_time, row.finish_time)) : null
                 return (
                   <div key={row._id} className="flex items-center gap-2 flex-wrap">
-                    <select
-                      value={row.employee_id}
-                      onChange={(e) => updateExtraMan(row._id, 'employee_id', e.target.value)}
-                      className="flex-1 min-w-0 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
-                    >
-                      <option value="">Select employee…</option>
-                      <optgroup label="— Staff —">
-                        {employees.map((e) => <option key={e.id} value={e.id}>{e.name} (${e.hourly_rate}/hr)</option>)}
-                      </optgroup>
-                      {casualWorkers.length > 0 && (
-                        <optgroup label="— Casual Workers —">
-                          {casualWorkers.map((cw) => <option key={cw.id} value={cw.id}>{cw.name} (${cw.rate_per_hour}/hr)</option>)}
-                        </optgroup>
-                      )}
-                    </select>
+                    <input
+                      type="text"
+                      list="extra-man-list"
+                      value={row.name}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        updateExtraMan(row._id, 'name', val)
+                        const match = resolveExtraMan(val)
+                        if (match) updateExtraMan(row._id, 'rate_per_hour', match.rate.toString())
+                      }}
+                      onBlur={() => {
+                        const name = row.name.trim()
+                        if (!name) return
+                        if (!resolveExtraMan(name) && !declinedCasualWorkerNamesRef.current.has(name.toLowerCase())) {
+                          setPendingNewCasualWorker({ rowId: row._id, name, rate: parseFloat(row.rate_per_hour) || 0 })
+                        }
+                      }}
+                      placeholder="Person name…"
+                      className="flex-1 min-w-[120px] px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
+                    />
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-xs text-dim">$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.50"
+                        value={row.rate_per_hour}
+                        onChange={(e) => updateExtraMan(row._id, 'rate_per_hour', e.target.value)}
+                        placeholder="0"
+                        className="w-16 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
+                      />
+                      <span className="text-xs text-dim">/hr</span>
+                    </div>
                     <input type="time" value={row.start_time} onChange={(e) => updateExtraMan(row._id, 'start_time', e.target.value)} className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring" />
                     <span className="text-dim text-xs">–</span>
                     <input type="time" value={row.finish_time} onChange={(e) => updateExtraMan(row._id, 'finish_time', e.target.value)} className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring" />

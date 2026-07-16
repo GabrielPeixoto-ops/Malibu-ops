@@ -109,7 +109,7 @@ interface CalendarJob {
   job_expenses: Array<{ amount: number; is_client_expense: boolean }>
   job_casual_crew: Array<{ name: string; rate_per_hour: number; heavy_item: boolean; cof_share: boolean; start_time: string | null; finish_time: string | null; casual_worker_id: string | null }>
   job_commissions: Array<{ employee_id: string | null; casual_worker_id: string | null; rate_per_hour: number; hours: number }>
-  job_extra_men: Array<{ employee_id: string | null; start_time: string | null; finish_time: string | null; cof_share: boolean; client_charge_amount: number }>
+  job_extra_men: Array<{ employee_id: string | null; name: string | null; rate_per_hour: number | null; start_time: string | null; finish_time: string | null; cof_share: boolean; client_charge_amount: number }>
   job_trucks: Array<{ fleet: { name: string; registration: string | null } | null }>
   subcontractor_rate_ph: number | null
   contract_rate_ph: number | null
@@ -284,7 +284,7 @@ function buildExtraMenPayroll(
     return hrs > 0 ? hrs : null
   })()
   return (job.job_extra_men ?? [])
-    .filter((r) => r.employee_id)
+    .filter((r) => r.employee_id || (r.name && r.name.trim()))
     .map((r) => {
       const hasTime = r.start_time?.length === 5 && r.finish_time?.length === 5
       let hours: number
@@ -295,16 +295,16 @@ function buildExtraMenPayroll(
       } else {
         hours = 0
       }
-      // job_extra_men only stores an id — it may point at a staff employee or
-      // a casual worker (same "Select employee…" dropdown as JobForm), so
-      // resolve the rate/name from whichever list matches.
+      // Prefer the per-job name/rate captured at save time (free-text entry,
+      // same convention as job_casual_crew) — fall back to a live employee_id
+      // lookup for rows saved before those columns existed.
       const staffEmp = employees.find((e) => e.id === r.employee_id)
       const casualWorker = staffEmp ? null : casualWorkers.find((cw) => cw.id === r.employee_id)
       return {
-        employee_id: r.employee_id!,
+        employee_id: r.employee_id ?? '',
         hours,
-        hourly_rate: staffEmp?.hourly_rate ?? casualWorker?.rate_per_hour,
-        employee_name: staffEmp?.name ?? casualWorker?.name,
+        hourly_rate: r.rate_per_hour ?? staffEmp?.hourly_rate ?? casualWorker?.rate_per_hour,
+        employee_name: (r.name && r.name.trim()) || staffEmp?.name || casualWorker?.name,
         cof_share: r.cof_share,
         client_charge: Number(r.client_charge_amount) || 0,
       }
@@ -418,7 +418,7 @@ export default function DashboardPage() {
           job_expenses(amount, is_client_expense),
           job_casual_crew(name, rate_per_hour, heavy_item, cof_share, start_time, finish_time, casual_worker_id),
           job_commissions(employee_id, casual_worker_id, rate_per_hour, hours),
-          job_extra_men(employee_id, start_time, finish_time, cof_share, client_charge_amount)
+          job_extra_men(employee_id, name, rate_per_hour, start_time, finish_time, cof_share, client_charge_amount)
         `)
         .gte('date', start)
         .lte('date', end)
@@ -866,7 +866,7 @@ function JobCard({
   const jobProfit = (() => {
     if (revenue === null) return null
     const crew = job.job_crew.filter((c) => c.employee)
-    if (!crew.length && !(job.job_extra_men ?? []).some((r) => r.employee_id)) return null
+    if (!crew.length && !(job.job_extra_men ?? []).some((r) => r.employee_id || (r.name && r.name.trim()))) return null
     const emps = crew.map((c) => c.employee!).filter(Boolean) as unknown as Employee[]
     const staffCrew = buildStaffPayrollCrew(job, crew)
     const commissionsInput = buildCommissionsForPayroll(job)

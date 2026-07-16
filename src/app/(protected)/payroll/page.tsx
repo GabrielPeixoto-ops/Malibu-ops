@@ -70,7 +70,7 @@ interface PayrollJob {
   contract: { name: string } | null
   contract_client: { name: string } | null
   job_crew: PayrollCrewRow[]
-  job_extra_men: Array<{ employee_id: string | null; start_time: string | null; finish_time: string | null; cof_share: boolean }>
+  job_extra_men: Array<{ employee_id: string | null; rate_per_hour: number | null; start_time: string | null; finish_time: string | null; cof_share: boolean }>
 }
 
 // Always rounds UP to the next 15-minute block — same rule as the job page,
@@ -144,7 +144,7 @@ export default function PayrollPage() {
         contract:contracts(name),
         contract_client:contract_clients(name),
         job_crew(employee_id, hours, cof_share, cof_hours, start_time, end_time),
-        job_extra_men(employee_id, start_time, finish_time, cof_share)
+        job_extra_men(employee_id, rate_per_hour, start_time, finish_time, cof_share)
       `)
       .in('status', ['reviewed', 'invoiced', 'paid'])
       .gte('date', start)
@@ -200,13 +200,14 @@ export default function PayrollPage() {
             const workedTime = (em.start_time && em.finish_time)
               ? `${em.start_time.slice(0, 5)}–${em.finish_time.slice(0, 5)}`
               : null
+            const rate = em.rate_per_hour || emp.hourly_rate
             entries.push({
               job,
               workedHours,
               workedTime,
               cofHours,
               paidHours,
-              pay: paidHours * emp.hourly_rate,
+              pay: paidHours * rate,
               isExtraMan: true,
               googleReviewBonus: reviewBonus > 0,
             })
