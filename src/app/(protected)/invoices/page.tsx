@@ -2,9 +2,9 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { ExternalLink } from 'lucide-react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
+import { useRouter, useSearchParams, usePathname } from 'next/navigation'
+import { ExternalLink, ChevronLeft, ChevronRight, Check, CheckCheck } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { calculateJobRevenue, calculateClientRevenue } from '@/lib/billing'
 import type { Employee, JobSource, JobStatus, Subcontractor, SubcontractorConfig } from '@/types/database'
@@ -25,6 +25,18 @@ interface FormalInvoice {
   xero_invoice_id: string | null
   xero_invoice_url: string | null
   created_at: string
+}
+
+interface InvoiceReview {
+  id: string
+  subject_type: 'employee' | 'casual'
+  subject_id: string
+  subject_name: string
+  period_from: string
+  period_to: string
+  status: 'reviewed' | 'approved'
+  reviewed_at: string
+  approved_at: string | null
 }
 
 interface InvoiceJob {
@@ -143,6 +155,39 @@ function monthStart(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
 }
 
+// ── Week/Day date navigation (mirrors Dashboard's page.tsx) ─────────────────
+type DateMode = 'week' | 'day' | 'range'
+
+function getMonday(d: Date): Date {
+  const date = new Date(d)
+  const day = date.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  date.setDate(date.getDate() + diff)
+  date.setHours(0, 0, 0, 0)
+  return date
+}
+function addDays(d: Date, n: number): Date {
+  const date = new Date(d)
+  date.setDate(date.getDate() + n)
+  return date
+}
+function toISODate(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+function parseISODate(s: string): Date {
+  const [y, m, d] = s.split('-').map(Number)
+  return new Date(y, (m || 1) - 1, d || 1)
+}
+function fmtWeekRange(start: Date): string {
+  const end = addDays(start, 6)
+  const s = start.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
+  const e = end.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
+  return `${s} – ${e}`
+}
+
 const STATUS_STYLE: Partial<Record<JobStatus, string>> = {
   reviewed: 'bg-cyan-500/10 text-cyan-300',
   invoiced: 'bg-purple-500/10 text-purple-300',
@@ -167,18 +212,38 @@ function calcHoursFromTimes(start: string, finish: string, breakMinutes = 0): nu
 const filterInput = 'px-3 py-1.5 text-sm border border-wire rounded-lg bg-panel text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring'
 
 export default function InvoicesPage() {
+  return (
+    <Suspense fallback={<p className="text-warm text-sm py-12 text-center">Loading…</p>}>
+      <InvoicesPageContent />
+    </Suspense>
+  )
+}
+
+function InvoicesPageContent() {
   const supabase = createClient()
   const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
 
-  const [tab, setTab] = useState<Tab>('employees')
-  const [dateFrom, setDateFrom] = useState(monthStart())
-  const [dateTo, setDateTo] = useState(today())
-  const [statusFilter, setStatusFilter] = useState<JobStatus | 'all'>('all')
-  const [empSearch, setEmpSearch] = useState('')
-  const [casualSearch, setCasualSearch] = useState('')
-  const [commissionSearch, setCommissionSearch] = useState('')
-  const [subFilter, setSubFilter] = useState('all')
-  const [contractFilter, setContractFilter] = useState('all')
+  // Everything the person filters by is seeded from the URL on first render and
+  // kept in sync afterwards (see the sync effect below). This means navigating
+  // away to edit a job and hitting the browser Back button returns to the exact
+  // same period/tab/search instead of resetting to today's defaults — the
+  // "toda vez preciso selecionar tudo de novo" complaint this feature exists for.
+  const [tab, setTab] = useState<Tab>(() => (searchParams.get('tab') as Tab) || 'employees')
+  const [dateMode, setDateMode] = useState<DateMode>(() => (searchParams.get('mode') as DateMode) || 'range')
+  const [periodRef, setPeriodRef] = useState<Date>(() => {
+    const p = searchParams.get('ref')
+    return p ? parseISODate(p) : new Date()
+  })
+  const [dateFrom, setDateFrom] = useState(() => searchParams.get('from') || monthStart())
+  const [dateTo, setDateTo] = useState(() => searchParams.get('to') || today())
+  const [statusFilter, setStatusFilter] = useState<JobStatus | 'all'>(() => (searchParams.get('status') as JobStatus | 'all') || 'all')
+  const [empSearch, setEmpSearch] = useState(() => searchParams.get('q') || '')
+  const [casualSearch, setCasualSearch] = useState(() => searchParams.get('q') || '')
+  const [commissionSearch, setCommissionSearch] = useState(() => searchParams.get('q') || '')
+  const [subFilter, setSubFilter] = useState(() => searchParams.get('sub') || 'all')
+  const [contractFilter, setContractFilter] = useState(() => searchParams.get('contract') || 'all')
   const [jobs, setJobs] = useState<InvoiceJob[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
   // Needed to resolve Extra Man entries that point at a casual worker rather
@@ -186,6 +251,7 @@ export default function InvoicesPage() {
   // as JobForm's "Select employee…" dropdown.
   const [casualWorkers, setCasualWorkers] = useState<Array<{ id: string; name: string; rate_per_hour: number }>>([])
   const [formalInvoices, setFormalInvoices] = useState<FormalInvoice[]>([])
+  const [reviews, setReviews] = useState<InvoiceReview[]>([])
   const [sendingInvoice, setSendingInvoice] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -203,6 +269,55 @@ export default function InvoicesPage() {
       .order('created_at', { ascending: false })
       .then(({ data }) => setFormalInvoices((data ?? []) as FormalInvoice[]))
   }, [])
+
+  // ── Week/Day nav: dateFrom/dateTo are derived from periodRef whenever the
+  // person navigates or switches modes — set directly in these event handlers
+  // (not a useEffect) so we're not synchronously setState-ing inside an effect.
+  // 'range' mode leaves dateFrom/dateTo directly editable via the date inputs.
+  function applyPeriodRef(newRef: Date, mode: DateMode = dateMode) {
+    setPeriodRef(newRef)
+    if (mode === 'week') {
+      const monday = getMonday(newRef)
+      setDateFrom(toISODate(monday))
+      setDateTo(toISODate(addDays(monday, 6)))
+    } else if (mode === 'day') {
+      const iso = toISODate(newRef)
+      setDateFrom(iso)
+      setDateTo(iso)
+    }
+  }
+  function prevPeriod() {
+    if (dateMode === 'week') applyPeriodRef(addDays(periodRef, -7))
+    else if (dateMode === 'day') applyPeriodRef(addDays(periodRef, -1))
+  }
+  function nextPeriod() {
+    if (dateMode === 'week') applyPeriodRef(addDays(periodRef, 7))
+    else if (dateMode === 'day') applyPeriodRef(addDays(periodRef, 1))
+  }
+  function goToday() { applyPeriodRef(new Date()) }
+  function changeDateMode(mode: DateMode) {
+    setDateMode(mode)
+    if (mode !== 'range') applyPeriodRef(periodRef, mode)
+  }
+
+  // ── Keep the URL in sync with every filter so Back-navigation (e.g. after
+  // clicking into a job to fix something and coming back) restores exactly
+  // where the person left off, instead of resetting to today's defaults.
+  useEffect(() => {
+    const params = new URLSearchParams()
+    params.set('tab', tab)
+    params.set('mode', dateMode)
+    if (dateMode !== 'range') params.set('ref', toISODate(periodRef))
+    params.set('from', dateFrom)
+    params.set('to', dateTo)
+    if (statusFilter !== 'all') params.set('status', statusFilter)
+    if (subFilter !== 'all') params.set('sub', subFilter)
+    if (contractFilter !== 'all') params.set('contract', contractFilter)
+    const q = tab === 'employees' ? empSearch : tab === 'casuals' ? casualSearch : tab === 'commissions' ? commissionSearch : ''
+    if (q) params.set('q', q)
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, dateMode, periodRef, dateFrom, dateTo, statusFilter, subFilter, contractFilter, empSearch, casualSearch, commissionSearch])
 
   useEffect(() => {
     setLoading(true)
@@ -261,6 +376,54 @@ export default function InvoicesPage() {
         setLoading(false)
       })
   }, [dateFrom, dateTo])
+
+  // ── Reviewed/Approved checklist, scoped to the EXACT period currently
+  // selected — never a loose "this week" label — so switching weeks can never
+  // bleed one week's review status into another's.
+  useEffect(() => {
+    supabase
+      .from('invoice_reviews')
+      .select('*')
+      .eq('period_from', dateFrom)
+      .eq('period_to', dateTo)
+      .then(({ data }) => setReviews((data ?? []) as InvoiceReview[]))
+  }, [dateFrom, dateTo])
+
+  function reviewFor(subjectType: 'employee' | 'casual', subjectId: string): InvoiceReview | undefined {
+    return reviews.find((r) => r.subject_type === subjectType && r.subject_id === subjectId)
+  }
+
+  // A period is only "closed" once its last day is in the past — reviewing an
+  // in-progress week risks marking hours that can still change.
+  const periodClosed = dateTo < today()
+
+  async function markReviewed(subjectType: 'employee' | 'casual', subjectId: string, subjectName: string) {
+    if (!periodClosed) return
+    const { data } = await supabase
+      .from('invoice_reviews')
+      .upsert(
+        { subject_type: subjectType, subject_id: subjectId, subject_name: subjectName, period_from: dateFrom, period_to: dateTo, status: 'reviewed', reviewed_at: new Date().toISOString(), approved_at: null },
+        { onConflict: 'subject_type,subject_id,period_from,period_to' }
+      )
+      .select()
+      .single()
+    if (data) setReviews((rs) => [...rs.filter((r) => r.id !== (data as InvoiceReview).id), data as InvoiceReview])
+  }
+
+  async function markApproved(review: InvoiceReview) {
+    const { data } = await supabase
+      .from('invoice_reviews')
+      .update({ status: 'approved', approved_at: new Date().toISOString() })
+      .eq('id', review.id)
+      .select()
+      .single()
+    if (data) setReviews((rs) => rs.map((r) => (r.id === review.id ? (data as InvoiceReview) : r)))
+  }
+
+  async function undoReview(review: InvoiceReview) {
+    await supabase.from('invoice_reviews').delete().eq('id', review.id)
+    setReviews((rs) => rs.filter((r) => r.id !== review.id))
+  }
 
   const filtered = useMemo(() => {
     if (statusFilter === 'all') return jobs
@@ -588,15 +751,94 @@ export default function InvoicesPage() {
   const groupHeader = 'flex items-center justify-between px-4 py-3 bg-panel border-b border-wire'
   const totalBar = 'bg-gold/10 border border-gold-ring rounded-xl px-4 py-3 flex items-center justify-between'
 
+  const fmtRangeAU = (from: string, to: string) => {
+    const f = parseISODate(from).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit' })
+    const t = parseISODate(to).toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit' })
+    return from === to ? f : `${f}–${t}`
+  }
+
+  // Shared reviewed/approved control rendered on each Employee/Casual card.
+  // Always tied to the exact dateFrom/dateTo on screen — never a vague "this
+  // week" — so switching periods can't accidentally mix up which week was
+  // actually checked.
+  function renderReviewControl(subjectType: 'employee' | 'casual', subjectId: string, subjectName: string) {
+    const review = reviewFor(subjectType, subjectId)
+    if (!review) {
+      return (
+        <button
+          type="button"
+          disabled={!periodClosed}
+          onClick={() => markReviewed(subjectType, subjectId, subjectName)}
+          title={!periodClosed ? "Can't review a period that hasn't closed yet" : undefined}
+          className="text-xs px-2 py-1 rounded-full border border-wire text-dim hover:text-warm hover:border-gold-ring transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Mark as reviewed
+        </button>
+      )
+    }
+    if (review.status === 'reviewed') {
+      return (
+        <div className="flex items-center gap-1.5">
+          <span className="flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-cyan-500/10 text-cyan-300 font-medium">
+            <Check size={12} /> Reviewed {fmtRangeAU(review.period_from, review.period_to)}
+          </span>
+          <button type="button" onClick={() => markApproved(review)} className="text-xs px-2 py-1 rounded-full border border-gold-ring text-gold hover:bg-gold/10 transition-colors">
+            Approve
+          </button>
+          <button type="button" onClick={() => undoReview(review)} title="Undo" className="text-dim hover:text-danger text-xs px-1">
+            ✕
+          </button>
+        </div>
+      )
+    }
+    return (
+      <div className="flex items-center gap-1.5">
+        <span className="flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-gold/15 text-gold font-medium">
+          <CheckCheck size={12} /> Approved {fmtRangeAU(review.period_from, review.period_to)}
+        </span>
+        <button type="button" onClick={() => undoReview(review)} title="Undo (back to unreviewed)" className="text-dim hover:text-danger text-xs px-1">
+          ✕
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div className="max-w-4xl">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
         <h1 className="text-2xl font-display font-bold text-parchment">Invoices</h1>
         <div className="flex items-center gap-2 flex-wrap">
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={filterInput} />
-          <span className="text-dim text-sm">–</span>
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={filterInput} />
+          <div className="flex rounded-lg border border-wire overflow-hidden text-sm">
+            {(['week', 'day', 'range'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => changeDateMode(m)}
+                className={`px-3 py-1.5 capitalize transition-colors ${dateMode === m ? 'bg-gold text-[#0d0d0d] font-semibold' : 'bg-surface text-warm hover:bg-panel hover:text-parchment'}`}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+          {dateMode === 'range' ? (
+            <>
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={filterInput} />
+              <span className="text-dim text-sm">–</span>
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={filterInput} />
+            </>
+          ) : (
+            <div className="flex items-center gap-1">
+              <button onClick={prevPeriod} className="p-1.5 rounded-lg hover:bg-panel text-warm hover:text-parchment transition-colors">
+                <ChevronLeft size={16} />
+              </button>
+              <button onClick={goToday} className="text-sm font-semibold text-parchment min-w-[150px] text-center hover:text-gold transition-colors px-1">
+                {dateMode === 'week' ? fmtWeekRange(getMonday(periodRef)) : periodRef.toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+              </button>
+              <button onClick={nextPeriod} className="p-1.5 rounded-lg hover:bg-panel text-warm hover:text-parchment transition-colors">
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          )}
           {tab !== 'employees' && tab !== 'casuals' && (
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as JobStatus | 'all')} className={filterInput}>
               {ALL_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
@@ -656,9 +898,12 @@ export default function InvoicesPage() {
                       <span className="font-semibold text-parchment">{emp.name}</span>
                       <span className="ml-2 text-xs text-dim font-mono">${emp.hourly_rate}/hr</span>
                     </div>
-                    <div className="text-right">
-                      <div className="text-sm font-mono font-bold text-gold">{fmtMoney(totalPay)}</div>
-                      <div className="text-xs text-dim font-mono">{fmtHours(totalPaidHours)}</div>
+                    <div className="flex items-center gap-3">
+                      {renderReviewControl('employee', emp.id, emp.name)}
+                      <div className="text-right">
+                        <div className="text-sm font-mono font-bold text-gold">{fmtMoney(totalPay)}</div>
+                        <div className="text-xs text-dim font-mono">{fmtHours(totalPaidHours)}</div>
+                      </div>
                     </div>
                   </div>
                   <table className="w-full text-sm">
@@ -730,9 +975,12 @@ export default function InvoicesPage() {
                     <div>
                       <span className="font-semibold text-parchment">{name}</span>
                     </div>
-                    <div className="text-right">
-                      <div className="text-sm font-mono font-bold text-gold">{fmtMoney(totalPay)}</div>
-                      <div className="text-xs text-dim font-mono">{fmtHours(totalPaidHours)}</div>
+                    <div className="flex items-center gap-3">
+                      {renderReviewControl('casual', key, name)}
+                      <div className="text-right">
+                        <div className="text-sm font-mono font-bold text-gold">{fmtMoney(totalPay)}</div>
+                        <div className="text-xs text-dim font-mono">{fmtHours(totalPaidHours)}</div>
+                      </div>
                     </div>
                   </div>
                   <table className="w-full text-sm">
