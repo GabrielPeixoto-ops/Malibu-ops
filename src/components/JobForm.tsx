@@ -1134,45 +1134,75 @@ const filteredCustomers = useMemo(
   function removeExpense(_id: string) { setExpenses((e) => e.filter((r) => r._id !== _id)) }
 
   // ── Photo helpers ──────────────────────────────────────────────────────────
+  // Core single-file upload — does not touch the shared uploading/caption
+  // state, so it can be called in a loop by uploadPhotos below without each
+  // iteration stomping on the others' loading indicator.
+  async function uploadOnePhoto(file: File, category: string, caption: string) {
+    const ts = Date.now()
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const folder = isEdit && jobId ? jobId : pendingJobId.current
+    const path = `jobs/${folder}/${ts}-${safeName}`
+    const { error: upErr } = await supabase.storage.from('job-photos').upload(path, file)
+    if (upErr) throw upErr
+    const { data: urlData } = supabase.storage.from('job-photos').getPublicUrl(path)
+    const publicUrl = urlData.publicUrl
+    if (isEdit && jobId) {
+      const { data, error: insertErr } = await supabase
+        .from('job_photos')
+        .insert({ job_id: jobId, url: publicUrl, caption: caption || null, category })
+        .select()
+        .single()
+      if (insertErr) throw insertErr
+      // Always update state regardless of whether data returned non-null
+      const p = data as { id: string; url: string; caption: string | null; category: string } | null
+      setPhotos((prev) => [...prev, {
+        _id: p?.id ?? crypto.randomUUID(),
+        dbId: p?.id,
+        url: publicUrl,
+        caption,
+        storagePath: path,
+        category,
+      }])
+    } else {
+      setPhotos((prev) => [...prev, { _id: crypto.randomUUID(), url: publicUrl, caption, storagePath: path, category }])
+    }
+  }
+
   async function uploadPhoto(file: File, category = photoCategory) {
     setUploadingPhoto(true)
     setUploadError('')
     try {
-      const ts = Date.now()
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
-      const folder = isEdit && jobId ? jobId : pendingJobId.current
-      const path = `jobs/${folder}/${ts}-${safeName}`
-      const { error: upErr } = await supabase.storage.from('job-photos').upload(path, file)
-      if (upErr) throw upErr
-      const { data: urlData } = supabase.storage.from('job-photos').getPublicUrl(path)
-      const publicUrl = urlData.publicUrl
-      const caption = photoCaption.trim()
-      if (isEdit && jobId) {
-        const { data, error: insertErr } = await supabase
-          .from('job_photos')
-          .insert({ job_id: jobId, url: publicUrl, caption: caption || null, category })
-          .select()
-          .single()
-        if (insertErr) throw insertErr
-        // Always update state regardless of whether data returned non-null
-        const p = data as { id: string; url: string; caption: string | null; category: string } | null
-        setPhotos((prev) => [...prev, {
-          _id: p?.id ?? crypto.randomUUID(),
-          dbId: p?.id,
-          url: publicUrl,
-          caption,
-          storagePath: path,
-          category,
-        }])
-      } else {
-        setPhotos((prev) => [...prev, { _id: crypto.randomUUID(), url: publicUrl, caption, storagePath: path, category }])
-      }
+      await uploadOnePhoto(file, category, photoCaption.trim())
       setPhotoCaption('')
     } catch (e) {
       setUploadError(e instanceof Error ? e.message : 'Upload failed')
     } finally {
       setUploadingPhoto(false)
     }
+  }
+
+  // Uploads a batch of files one after another (sequential — Supabase Storage
+  // doesn't benefit from parallel uploads here and it keeps error reporting
+  // simple). The caption field only applies when a single file is selected;
+  // for a multi-file selection, applying one caption to every file wouldn't
+  // make sense, so those are saved without a caption.
+  async function uploadPhotos(files: FileList | File[], category = photoCategory) {
+    const list = Array.from(files)
+    if (list.length === 0) return
+    setUploadingPhoto(true)
+    setUploadError('')
+    const caption = list.length === 1 ? photoCaption.trim() : ''
+    const failed: string[] = []
+    for (const file of list) {
+      try {
+        await uploadOnePhoto(file, category, caption)
+      } catch {
+        failed.push(file.name)
+      }
+    }
+    if (failed.length > 0) setUploadError(`Failed to upload: ${failed.join(', ')}`)
+    setPhotoCaption('')
+    setUploadingPhoto(false)
   }
 
   async function removePhoto(_id: string) {
@@ -2156,8 +2186,8 @@ const filteredCustomers = useMemo(
       ? availableCategories
       : ['inventory', 'completion', 'damage', 'receipt', 'google_review'].filter((c) => availableCategories.includes(c))
 
-    function isPdf(url: string) {
-      return /\.pdf(\?|$)/i.test(url) || url.includes('/pdf')
+    function isImage(url: string) {
+      return /\.(png|jpe?g|gif|webp|heic|heif|bmp)(\?|$)/i.test(url)
     }
 
     function fileNameFromUrl(url: string) {
@@ -2198,13 +2228,14 @@ const filteredCustomers = useMemo(
               {uploadingPhoto ? 'Uploading…' : 'Add'}
               <input
                 type="file"
-                accept="image/*,application/pdf"
+                accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+                multiple
                 className="hidden"
                 disabled={uploadingPhoto}
                 onChange={(e) => {
-                  const f = e.target.files?.[0]
+                  const files = e.target.files
                   const cat = availableCategories.length === 1 ? availableCategories[0] : photoCategory
-                  if (f) { uploadPhoto(f, cat); e.target.value = '' }
+                  if (files && files.length > 0) { uploadPhotos(files, cat); e.target.value = '' }
                 }}
               />
             </label>
@@ -2224,7 +2255,7 @@ const filteredCustomers = useMemo(
               )}
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {catPhotos.map((p) => (
-                  isPdf(p.url) ? (
+                  !isImage(p.url) ? (
                     <div key={p._id} className="relative group rounded-lg overflow-hidden bg-wire/30 aspect-video flex flex-col items-center justify-center gap-1.5 px-2">
                       {locked ? (
                         <a
@@ -3902,12 +3933,12 @@ const filteredCustomers = useMemo(
           <div>
             <label className="block text-sm font-medium text-warm mb-1">Notes</label>
             <textarea
-              rows={3}
+              rows={8}
               value={form.notes ?? ''}
               onChange={(e) => setField('notes', e.target.value)}
               disabled={isReviewed}
               placeholder="e.g. EASTWOOD › EPPING"
-              className="w-full px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel disabled:text-dim"
+              className="w-full px-3 py-2 text-base leading-relaxed border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel disabled:text-dim resize-y"
             />
           </div>
         </Card>
