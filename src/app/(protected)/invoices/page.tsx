@@ -2,9 +2,9 @@
 
 export const dynamic = 'force-dynamic'
 
-import { Suspense, useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
-import { ExternalLink, ChevronLeft, ChevronRight, Check, CheckCheck } from 'lucide-react'
+import { ExternalLink, ChevronLeft, ChevronRight, Check, CheckCheck, Clock, DollarSign, Paperclip } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { calculateJobRevenue, calculateClientRevenue } from '@/lib/billing'
 import type { Employee, JobSource, JobStatus, Subcontractor, SubcontractorConfig } from '@/types/database'
@@ -34,9 +34,13 @@ interface InvoiceReview {
   subject_name: string
   period_from: string
   period_to: string
-  status: 'reviewed' | 'approved'
+  status: 'reviewed' | 'pending_approval' | 'approved' | 'paid'
   reviewed_at: string
   approved_at: string | null
+  note: string | null
+  attachment_url: string | null
+  attachment_name: string | null
+  paid_at: string | null
 }
 
 interface InvoiceJob {
@@ -396,13 +400,28 @@ function InvoicesPageContent() {
   // A period is only "closed" once its last day is in the past — reviewing an
   // in-progress week risks marking hours that can still change.
   const periodClosed = dateTo < today()
+  const [uploadingNote, setUploadingNote] = useState<string | null>(null)
 
-  async function markReviewed(subjectType: 'employee' | 'casual', subjectId: string, subjectName: string) {
+  async function upsertReview(
+    subjectType: 'employee' | 'casual',
+    subjectId: string,
+    subjectName: string,
+    status: 'reviewed' | 'pending_approval',
+    note: string,
+    attachment: { url: string; name: string } | null
+  ) {
     if (!periodClosed) return
     const { data } = await supabase
       .from('invoice_reviews')
       .upsert(
-        { subject_type: subjectType, subject_id: subjectId, subject_name: subjectName, period_from: dateFrom, period_to: dateTo, status: 'reviewed', reviewed_at: new Date().toISOString(), approved_at: null },
+        {
+          subject_type: subjectType, subject_id: subjectId, subject_name: subjectName,
+          period_from: dateFrom, period_to: dateTo, status,
+          reviewed_at: new Date().toISOString(), approved_at: null, paid_at: null,
+          note: note.trim() || null,
+          attachment_url: attachment?.url ?? null,
+          attachment_name: attachment?.name ?? null,
+        },
         { onConflict: 'subject_type,subject_id,period_from,period_to' }
       )
       .select()
@@ -420,9 +439,47 @@ function InvoicesPageContent() {
     if (data) setReviews((rs) => rs.map((r) => (r.id === review.id ? (data as InvoiceReview) : r)))
   }
 
+  async function markPaid(review: InvoiceReview) {
+    const { data } = await supabase
+      .from('invoice_reviews')
+      .update({ status: 'paid', paid_at: new Date().toISOString() })
+      .eq('id', review.id)
+      .select()
+      .single()
+    if (data) setReviews((rs) => rs.map((r) => (r.id === review.id ? (data as InvoiceReview) : r)))
+  }
+
+  // Steps a review back one stage: paid→approved→reviewed→(deleted). Never
+  // jumps straight to deleted from approved/paid, so an accidental click can't
+  // silently wipe out an approval or payment record.
   async function undoReview(review: InvoiceReview) {
+    if (review.status === 'paid') {
+      const { data } = await supabase.from('invoice_reviews').update({ status: 'approved', paid_at: null }).eq('id', review.id).select().single()
+      if (data) setReviews((rs) => rs.map((r) => (r.id === review.id ? (data as InvoiceReview) : r)))
+      return
+    }
+    if (review.status === 'approved') {
+      const { data } = await supabase.from('invoice_reviews').update({ status: 'reviewed', approved_at: null }).eq('id', review.id).select().single()
+      if (data) setReviews((rs) => rs.map((r) => (r.id === review.id ? (data as InvoiceReview) : r)))
+      return
+    }
     await supabase.from('invoice_reviews').delete().eq('id', review.id)
     setReviews((rs) => rs.filter((r) => r.id !== review.id))
+  }
+
+  // Uploads the note's image/PDF attachment to the same 'job-photos' bucket
+  // JobForm uses for job photos, under its own path prefix.
+  async function uploadReviewAttachment(file: File, subjectType: string, subjectId: string): Promise<{ url: string; name: string } | null> {
+    const ts = Date.now()
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const path = `invoice-reviews/${subjectType}-${subjectId}-${dateFrom}-${dateTo}-${ts}-${safeName}`
+    const { error: upErr } = await supabase.storage.from('job-photos').upload(path, file)
+    if (upErr) {
+      alert(`Upload failed: ${upErr.message}`)
+      return null
+    }
+    const { data: urlData } = supabase.storage.from('job-photos').getPublicUrl(path)
+    return { url: urlData.publicUrl, name: file.name }
   }
 
   const filtered = useMemo(() => {
@@ -757,46 +814,221 @@ function InvoicesPageContent() {
     return from === to ? f : `${f}–${t}`
   }
 
-  // Shared reviewed/approved control rendered on each Employee/Casual card.
-  // Always tied to the exact dateFrom/dateTo on screen — never a vague "this
-  // week" — so switching periods can't accidentally mix up which week was
-  // actually checked.
+  // Badge styles per status — dark/high-contrast text so they're legible
+  // against the app's cream/light card backgrounds (the illegible
+  // bg-cyan-500/10 + text-cyan-300 combo the user flagged).
+  const REVIEW_BADGE_STYLE: Record<InvoiceReview['status'], string> = {
+    reviewed: 'bg-sky-100 text-sky-900 border border-sky-300',
+    pending_approval: 'bg-amber-100 text-amber-900 border border-amber-300',
+    approved: 'bg-violet-100 text-violet-900 border border-violet-300',
+    paid: 'bg-emerald-100 text-emerald-900 border border-emerald-300',
+  }
+  const REVIEW_BADGE_LABEL: Record<InvoiceReview['status'], string> = {
+    reviewed: 'Revisado',
+    pending_approval: 'Pendente Aprovação',
+    approved: 'Aprovado',
+    paid: 'Pago',
+  }
+
+  // Inline note+attachment editor state, keyed by "subjectType:subjectId" so
+  // each card's editor is independent of the others.
+  const [pendingNoteKey, setPendingNoteKey] = useState<string | null>(null)
+  const [pendingNoteText, setPendingNoteText] = useState('')
+  const [pendingNoteFile, setPendingNoteFile] = useState<File | null>(null)
+  const noteFileInputRef = useRef<HTMLInputElement>(null)
+
+  function openNoteEditor(key: string, existingNote?: string | null) {
+    setPendingNoteKey(key)
+    setPendingNoteText(existingNote ?? '')
+    setPendingNoteFile(null)
+  }
+  function closeNoteEditor() {
+    setPendingNoteKey(null)
+    setPendingNoteText('')
+    setPendingNoteFile(null)
+  }
+
+  async function submitPendingApproval(subjectType: 'employee' | 'casual', subjectId: string, subjectName: string) {
+    const key = `${subjectType}:${subjectId}`
+    setUploadingNote(key)
+    try {
+      let attachment: { url: string; name: string } | null = null
+      const existing = reviewFor(subjectType, subjectId)
+      if (pendingNoteFile) {
+        attachment = await uploadReviewAttachment(pendingNoteFile, subjectType, subjectId)
+        if (!attachment) return // upload failed, alert already shown
+      } else if (existing?.attachment_url) {
+        // Keep the previously uploaded attachment if the person didn't replace it.
+        attachment = { url: existing.attachment_url, name: existing.attachment_name ?? 'Anexo' }
+      }
+      // Editing an existing 'reviewed' record just to add/change a note keeps
+      // it 'reviewed' — only a brand-new note (no prior review) starts as
+      // 'pending_approval', matching the two distinct buttons on the first click.
+      const targetStatus: 'reviewed' | 'pending_approval' = existing?.status === 'pending_approval' ? 'pending_approval' : existing?.status === 'reviewed' ? 'reviewed' : 'pending_approval'
+      await upsertReview(subjectType, subjectId, subjectName, targetStatus, pendingNoteText, attachment)
+      closeNoteEditor()
+    } finally {
+      setUploadingNote(null)
+    }
+  }
+
+  // Shared reviewed/pending-approval/approved/paid control rendered on each
+  // Employee/Casual card. Always tied to the exact dateFrom/dateTo on screen —
+  // never a vague "this week" — so switching periods can't accidentally mix
+  // up which week was actually checked.
   function renderReviewControl(subjectType: 'employee' | 'casual', subjectId: string, subjectName: string) {
     const review = reviewFor(subjectType, subjectId)
+    const key = `${subjectType}:${subjectId}`
+    const editingNote = pendingNoteKey === key
+
     if (!review) {
-      return (
-        <button
-          type="button"
-          disabled={!periodClosed}
-          onClick={() => markReviewed(subjectType, subjectId, subjectName)}
-          title={!periodClosed ? "Can't review a period that hasn't closed yet" : undefined}
-          className="text-xs px-2 py-1 rounded-full border border-wire text-dim hover:text-warm hover:border-gold-ring transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          Mark as reviewed
-        </button>
-      )
-    }
-    if (review.status === 'reviewed') {
+      if (editingNote) {
+        return (
+          <div className="flex flex-col gap-1.5 items-end bg-panel border border-wire rounded-lg p-2 w-72">
+            <textarea
+              value={pendingNoteText}
+              onChange={(e) => setPendingNoteText(e.target.value)}
+              placeholder="Nota (ex: invoice não bate, falta aprovação do boss...)"
+              className="w-full text-xs px-2 py-1.5 rounded border border-wire bg-surface text-parchment focus:outline-none focus:border-gold-ring resize-none"
+              rows={3}
+            />
+            <div className="flex items-center justify-between w-full gap-2">
+              <button
+                type="button"
+                onClick={() => noteFileInputRef.current?.click()}
+                className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-wire text-dim hover:text-warm hover:border-gold-ring transition-colors"
+              >
+                <Paperclip size={12} /> {pendingNoteFile ? pendingNoteFile.name.slice(0, 18) : 'Anexar'}
+              </button>
+              <input
+                ref={noteFileInputRef}
+                type="file"
+                accept="image/*,.pdf"
+                className="hidden"
+                onChange={(e) => setPendingNoteFile(e.target.files?.[0] ?? null)}
+              />
+              <div className="flex items-center gap-1.5">
+                <button type="button" onClick={closeNoteEditor} className="text-xs px-2 py-1 rounded text-dim hover:text-warm transition-colors">
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={uploadingNote === key}
+                  onClick={() => submitPendingApproval(subjectType, subjectId, subjectName)}
+                  className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200 transition-colors disabled:opacity-50"
+                >
+                  {uploadingNote === key ? 'Enviando…' : 'Salvar'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
       return (
         <div className="flex items-center gap-1.5">
-          <span className="flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-cyan-500/10 text-cyan-300 font-medium">
-            <Check size={12} /> Reviewed {fmtRangeAU(review.period_from, review.period_to)}
-          </span>
-          <button type="button" onClick={() => markApproved(review)} className="text-xs px-2 py-1 rounded-full border border-gold-ring text-gold hover:bg-gold/10 transition-colors">
-            Approve
+          <button
+            type="button"
+            disabled={!periodClosed}
+            onClick={() => upsertReview(subjectType, subjectId, subjectName, 'reviewed', '', null)}
+            title={!periodClosed ? "Não é possível revisar um período que ainda não fechou" : undefined}
+            className="text-xs px-2 py-1 rounded-full border border-wire text-dim hover:text-warm hover:border-gold-ring transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Revisado
           </button>
-          <button type="button" onClick={() => undoReview(review)} title="Undo" className="text-dim hover:text-danger text-xs px-1">
-            ✕
+          <button
+            type="button"
+            disabled={!periodClosed}
+            onClick={() => openNoteEditor(key)}
+            title={!periodClosed ? "Não é possível revisar um período que ainda não fechou" : undefined}
+            className="text-xs px-2 py-1 rounded-full border border-amber-300 text-amber-800 hover:bg-amber-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Pendente Aprovação
           </button>
         </div>
       )
     }
+
+    const badge = (
+      <span className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full font-medium ${REVIEW_BADGE_STYLE[review.status]}`}>
+        {review.status === 'paid' ? <DollarSign size={12} /> : review.status === 'pending_approval' ? <Clock size={12} /> : review.status === 'approved' ? <CheckCheck size={12} /> : <Check size={12} />}
+        {REVIEW_BADGE_LABEL[review.status]} {fmtRangeAU(review.period_from, review.period_to)}
+      </span>
+    )
+
+    const noteBlock = (review.note || review.attachment_url) && (
+      <div className="flex flex-col items-end gap-0.5 text-xs max-w-[220px]">
+        {review.note && <p className="text-dim italic text-right">&ldquo;{review.note}&rdquo;</p>}
+        {review.attachment_url && (
+          <a href={review.attachment_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-gold hover:text-gold-bright">
+            <Paperclip size={11} /> {review.attachment_name ?? 'Anexo'}
+          </a>
+        )}
+      </div>
+    )
+
+    if (editingNote) {
+      return (
+        <div className="flex flex-col gap-1.5 items-end bg-panel border border-wire rounded-lg p-2 w-72">
+          <textarea
+            value={pendingNoteText}
+            onChange={(e) => setPendingNoteText(e.target.value)}
+            placeholder="Nota (ex: invoice não bate, falta aprovação do boss...)"
+            className="w-full text-xs px-2 py-1.5 rounded border border-wire bg-surface text-parchment focus:outline-none focus:border-gold-ring resize-none"
+            rows={3}
+          />
+          <div className="flex items-center justify-between w-full gap-2">
+            <button
+              type="button"
+              onClick={() => noteFileInputRef.current?.click()}
+              className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-wire text-dim hover:text-warm hover:border-gold-ring transition-colors"
+            >
+              <Paperclip size={12} /> {pendingNoteFile ? pendingNoteFile.name.slice(0, 18) : 'Anexar'}
+            </button>
+            <input
+              ref={noteFileInputRef}
+              type="file"
+              accept="image/*,.pdf"
+              className="hidden"
+              onChange={(e) => setPendingNoteFile(e.target.files?.[0] ?? null)}
+            />
+            <div className="flex items-center gap-1.5">
+              <button type="button" onClick={closeNoteEditor} className="text-xs px-2 py-1 rounded text-dim hover:text-warm transition-colors">
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={uploadingNote === key}
+                onClick={() => submitPendingApproval(subjectType, subjectId, subjectName)}
+                className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200 transition-colors disabled:opacity-50"
+              >
+                {uploadingNote === key ? 'Enviando…' : 'Salvar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <div className="flex items-center gap-1.5">
-        <span className="flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-gold/15 text-gold font-medium">
-          <CheckCheck size={12} /> Approved {fmtRangeAU(review.period_from, review.period_to)}
-        </span>
-        <button type="button" onClick={() => undoReview(review)} title="Undo (back to unreviewed)" className="text-dim hover:text-danger text-xs px-1">
+        {noteBlock}
+        {badge}
+        {(review.status === 'reviewed' || review.status === 'pending_approval') && (
+          <button type="button" onClick={() => openNoteEditor(key, review.note)} title="Editar nota/anexo" className="text-dim hover:text-warm text-xs px-1">
+            <Paperclip size={12} />
+          </button>
+        )}
+        {(review.status === 'reviewed' || review.status === 'pending_approval') && (
+          <button type="button" onClick={() => markApproved(review)} className="text-xs px-2 py-1 rounded-full border border-violet-300 text-violet-800 hover:bg-violet-50 transition-colors">
+            Aprovar
+          </button>
+        )}
+        {review.status === 'approved' && (
+          <button type="button" onClick={() => markPaid(review)} className="text-xs px-2 py-1 rounded-full border border-emerald-300 text-emerald-800 hover:bg-emerald-50 transition-colors">
+            PAGO
+          </button>
+        )}
+        <button type="button" onClick={() => undoReview(review)} title="Voltar / desfazer" className="text-dim hover:text-danger text-xs px-1">
           ✕
         </button>
       </div>
