@@ -9,7 +9,7 @@ import { createClient } from '@/lib/supabase/client'
 import { calculateJobRevenue, calculateClientRevenue } from '@/lib/billing'
 import type { Employee, JobSource, JobStatus, Subcontractor, SubcontractorConfig } from '@/types/database'
 
-type Tab = 'employees' | 'casuals' | 'subcontractors' | 'contracts' | 'clients'
+type Tab = 'employees' | 'casuals' | 'commissions' | 'subcontractors' | 'contracts' | 'clients'
 
 interface FormalInvoice {
   id: string
@@ -176,6 +176,7 @@ export default function InvoicesPage() {
   const [statusFilter, setStatusFilter] = useState<JobStatus | 'all'>('all')
   const [empSearch, setEmpSearch] = useState('')
   const [casualSearch, setCasualSearch] = useState('')
+  const [commissionSearch, setCommissionSearch] = useState('')
   const [subFilter, setSubFilter] = useState('all')
   const [contractFilter, setContractFilter] = useState('all')
   const [jobs, setJobs] = useState<InvoiceJob[]>([])
@@ -441,6 +442,49 @@ export default function InvoicesPage() {
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [filtered, employees, casualWorkers])
 
+  // Commissions — dedicated view pulling every job_commissions row together
+  // (staff and casual), regardless of which tab they'd otherwise surface in.
+  // Same grouping convention as casualData: keyed per person, one row per job.
+  const commissionData = useMemo(() => {
+    const byKey = new Map<string, {
+      name: string
+      entries: Array<{ job: InvoiceJob; label: string; rate: number; hours: number; pay: number }>
+    }>()
+    for (const job of filtered) {
+      for (const com of job.job_commissions ?? []) {
+        if (com.hours <= 0 || com.rate_per_hour <= 0) continue
+        let key: string | null = null
+        let name: string | null = null
+        if (com.employee_id) {
+          const emp = employees.find((e) => e.id === com.employee_id)
+          key = `staff:${com.employee_id}`
+          name = emp?.name ?? 'Unknown staff'
+        } else if (com.casual_worker_id) {
+          const linked = job.job_casual_crew?.find((r) => r.casual_worker_id === com.casual_worker_id)
+          const cw = casualWorkers.find((c) => c.id === com.casual_worker_id)
+          key = `casual:${com.casual_worker_id}`
+          name = (linked?.name?.trim() || cw?.name) ?? 'Unknown casual'
+        }
+        if (!key || !name) continue
+        if (!byKey.has(key)) byKey.set(key, { name, entries: [] })
+        byKey.get(key)!.entries.push({
+          job,
+          label: com.commission_type?.name ?? 'Commission',
+          rate: com.rate_per_hour,
+          hours: com.hours,
+          pay: com.hours * com.rate_per_hour,
+        })
+      }
+    }
+    return [...byKey.entries()]
+      .map(([key, { name, entries }]) => ({
+        key, name, entries,
+        totalHours: entries.reduce((s, e) => s + e.hours, 0),
+        totalPay: entries.reduce((s, e) => s + e.pay, 0),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [filtered, employees, casualWorkers])
+
   const subcontractorData = useMemo(() => {
     const subJobs = filtered.filter((j) => j.source === 'subcontract' && j.subcontractor)
     const byId = new Map<string, { name: string; jobs: Array<{ job: InvoiceJob; revenue: number | null }> }>()
@@ -517,6 +561,7 @@ export default function InvoicesPage() {
   const tabs: Array<{ id: Tab; label: string }> = [
     { id: 'employees', label: 'Employees' },
     { id: 'casuals', label: 'Casuals' },
+    { id: 'commissions', label: 'Commissions' },
     { id: 'subcontractors', label: 'Subcontractors' },
     { id: 'contracts', label: 'Contracts' },
     { id: 'clients', label: 'Clients' },
@@ -730,6 +775,84 @@ export default function InvoicesPage() {
                 <div className={totalBar}>
                   <span className="text-sm font-display font-semibold text-gold">Total payroll</span>
                   <span className="text-lg font-mono font-bold text-gold">{fmtMoney(casualData.reduce((s, d) => s + d.totalPay, 0))}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Commissions ───────────────────────────────────────────── */}
+          {tab === 'commissions' && (
+            <div className="space-y-4">
+              <input
+                type="text"
+                placeholder="Search person…"
+                value={commissionSearch}
+                onChange={(e) => setCommissionSearch(e.target.value)}
+                className={`${filterInput} w-52`}
+              />
+              {commissionData.filter((d) => d.name.toLowerCase().includes(commissionSearch.toLowerCase())).length === 0 && (
+                <div className="bg-surface rounded-xl border border-wire p-12 text-center text-dim">No commissions for this period.</div>
+              )}
+              {commissionData.filter((d) => d.name.toLowerCase().includes(commissionSearch.toLowerCase())).map(({ key, name, entries, totalHours, totalPay }) => (
+                <div key={key} className="bg-surface rounded-xl border border-wire overflow-hidden">
+                  <div className={groupHeader}>
+                    <div>
+                      <span className="font-semibold text-parchment">{name}</span>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-mono font-bold text-gold">{fmtMoney(totalPay)}</div>
+                      <div className="text-xs text-dim font-mono">{fmtHours(totalHours)}</div>
+                    </div>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-wire">
+                        <th className={thCell}>Date</th>
+                        <th className={thCell}>Job</th>
+                        <th className={`${thCell} hidden sm:table-cell`}>Entity</th>
+                        <th className={thCell}>Type</th>
+                        <th className={`${thCell} text-right`}>Rate</th>
+                        <th className={`${thCell} text-right`}>Hours</th>
+                        <th className={`${thCell} text-right`}>Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-wire">
+                      {entries.map(({ job, label, rate, hours, pay }, i) => (
+                        <tr key={`${job.id}-${i}`} className="hover:bg-panel transition-colors cursor-pointer" onClick={() => router.push(`/jobs/${job.id}/edit`)}>
+                          <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
+                          <td className="px-4 py-2">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-mono text-parchment">#{job.job_number}</span>
+                              {STATUS_STYLE[job.status] && (
+                                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${STATUS_STYLE[job.status]}`}>{job.status}</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-2 text-dim text-xs hidden sm:table-cell">{entityLabel(job)}</td>
+                          <td className="px-4 py-2">
+                            <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-300 font-medium">{label}</span>
+                          </td>
+                          <td className="px-4 py-2 text-right font-mono text-dim">{fmtMoney(rate)}/hr</td>
+                          <td className="px-4 py-2 text-right font-mono font-medium text-parchment">{fmtHours(hours)}</td>
+                          <td className="px-4 py-2 text-right font-mono font-semibold text-gold">{fmtMoney(pay)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t border-wire bg-panel">
+                        <td colSpan={5} className="px-4 py-2 text-xs font-semibold text-dim hidden sm:table-cell">Total</td>
+                        <td colSpan={4} className="px-4 py-2 sm:hidden text-xs font-semibold text-dim">Total</td>
+                        <td className="px-4 py-2 text-right text-xs font-mono font-bold text-parchment">{fmtHours(totalHours)}</td>
+                        <td className="px-4 py-2 text-right text-xs font-mono font-bold text-gold">{fmtMoney(totalPay)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              ))}
+              {commissionData.length > 0 && (
+                <div className={totalBar}>
+                  <span className="text-sm font-display font-semibold text-gold">Total commissions</span>
+                  <span className="text-lg font-mono font-bold text-gold">{fmtMoney(commissionData.reduce((s, d) => s + d.totalPay, 0))}</span>
                 </div>
               )}
             </div>
