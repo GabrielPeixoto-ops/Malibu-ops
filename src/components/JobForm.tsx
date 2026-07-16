@@ -3339,6 +3339,33 @@ const filteredCustomers = useMemo(
               </div>
             )}
 
+            {/* Commission per crew member (visible while closing the job) */}
+            {commissions.some((r) => r.employee_id || r.casual_worker_id) && (
+              <div className="mb-3 pt-2 border-t border-wire">
+                <p className="text-xs font-medium text-warm mb-2">Commission</p>
+                <div className="space-y-1">
+                  {commissions.filter((r) => r.employee_id || r.casual_worker_id).map((r) => {
+                    const person = r.employee_id
+                      ? employees.find((e) => e.id === r.employee_id)?.name
+                      : casualWorkers.find((cw) => cw.id === r.casual_worker_id)?.name
+                    const type = commissionTypes.find((t) => t.id === r.commission_type_id)
+                    const hours = parseFloat(r.hours) || 0
+                    const rate = parseFloat(r.rate_per_hour) || 0
+                    const total = rate * hours
+                    return (
+                      <div key={r._id} className="flex items-center justify-between text-xs flex-wrap gap-1">
+                        <span className="text-dim truncate">
+                          {person ?? '—'}{type ? ` · ${type.name}` : ''}
+                          {hours > 0 && <span className="text-dim/70"> ({hours}h × {fmt(rate)})</span>}
+                        </span>
+                        <span className="font-mono text-gold">{fmt(total)}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Gross Job Value (percent subs only) */}
             {form.source === 'subcontract' && selectedSub?.billing_type === 'percent' && (
               <div className="mb-3 pt-2 border-t border-wire">
