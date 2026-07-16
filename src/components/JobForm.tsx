@@ -3259,11 +3259,11 @@ const filteredCustomers = useMemo(
                       >
                         <option value="">Select employee…</option>
                         <optgroup label="— Staff —">
-                          {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                          {employees.map((e) => <option key={e.id} value={e.id}>{e.name} (${e.hourly_rate}/hr)</option>)}
                         </optgroup>
                         {casualWorkers.length > 0 && (
                           <optgroup label="— Casual Workers —">
-                            {casualWorkers.map((cw) => <option key={cw.id} value={cw.id}>{cw.name}</option>)}
+                            {casualWorkers.map((cw) => <option key={cw.id} value={cw.id}>{cw.name} (${cw.rate_per_hour}/hr)</option>)}
                           </optgroup>
                         )}
                       </select>
@@ -3734,11 +3734,11 @@ const filteredCustomers = useMemo(
                     >
                       <option value="">Select employee…</option>
                       <optgroup label="— Staff —">
-                        {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                        {employees.map((e) => <option key={e.id} value={e.id}>{e.name} (${e.hourly_rate}/hr)</option>)}
                       </optgroup>
                       {casualWorkers.length > 0 && (
                         <optgroup label="— Casual Workers —">
-                          {casualWorkers.map((cw) => <option key={cw.id} value={cw.id}>{cw.name}</option>)}
+                          {casualWorkers.map((cw) => <option key={cw.id} value={cw.id}>{cw.name} (${cw.rate_per_hour}/hr)</option>)}
                         </optgroup>
                       )}
                     </select>
