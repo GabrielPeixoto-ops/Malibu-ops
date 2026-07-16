@@ -956,11 +956,16 @@ function InvoicesPageContent() {
     )
 
     const noteBlock = (review.note || review.attachment_url) && (
-      <div className="flex flex-col items-end gap-0.5 text-xs max-w-[220px]">
+      <div className="flex flex-col items-end gap-1 text-xs max-w-[220px]">
         {review.note && <p className="text-dim italic text-right">&ldquo;{review.note}&rdquo;</p>}
         {review.attachment_url && (
-          <a href={review.attachment_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-gold hover:text-gold-bright">
-            <Paperclip size={11} /> {review.attachment_name ?? 'Anexo'}
+          <a
+            href={review.attachment_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 px-2 py-1 rounded-full bg-gold/15 text-gold font-semibold underline underline-offset-2 hover:bg-gold/25 hover:text-gold-bright transition-colors"
+          >
+            <Paperclip size={12} /> Ver anexo{review.attachment_name ? ` (${review.attachment_name})` : ''}
           </a>
         )}
       </div>
