@@ -109,6 +109,7 @@ interface CalendarJob {
   job_expenses: Array<{ amount: number; is_client_expense: boolean }>
   job_casual_crew: Array<{ name: string; rate_per_hour: number; heavy_item: boolean; cof_share: boolean; start_time: string | null; finish_time: string | null; casual_worker_id: string | null }>
   job_commissions: Array<{ employee_id: string | null; casual_worker_id: string | null; rate_per_hour: number; hours: number }>
+  job_extra_men: Array<{ employee_id: string | null; start_time: string | null; finish_time: string | null; cof_share: boolean; client_charge_amount: number }>
   job_trucks: Array<{ fleet: { name: string; registration: string | null } | null }>
   subcontractor_rate_ph: number | null
   contract_rate_ph: number | null
@@ -182,7 +183,10 @@ function calcJobRevenue(job: CalendarJob): number | null {
   if (base === null) return null
   const clientExpenses = job.job_expenses.filter(e => e.is_client_expense).reduce((s, e) => s + e.amount, 0)
   const materialsRevenue = job.job_materials.reduce((s, m) => s + Number(m.quantity) * Number(m.sale_price), 0)
-  const total = base + materialsRevenue + (Number(job.heavy_item_charge) || 0) - (Number(job.discount) || 0) + clientExpenses
+  // What we charge the client for each Extra Man — separate from what the
+  // extra man is paid, and independent of source (subcontract/private/contract).
+  const extraMenRevenue = (job.job_extra_men ?? []).reduce((s, em) => s + (Number(em.client_charge_amount) || 0), 0)
+  const total = base + materialsRevenue + (Number(job.heavy_item_charge) || 0) + extraMenRevenue - (Number(job.discount) || 0) + clientExpenses
   return total > 0 ? total : null
 }
 
@@ -263,6 +267,50 @@ function buildCasualPayroll(job: CalendarJob): Array<{ name: string; rate_per_ho
     })
 }
 
+// Extra men are extra crew for the same call-out. Hours come from their own
+// start/finish times (falling back to job-level times, same as crew); COF is
+// added separately by calculatePayroll based on cof_share, never baked in here
+// — same convention as buildStaffPayrollCrew. client_charge_amount is what we
+// bill the client for adding this person; it's pure revenue and independent
+// of what they're actually paid.
+function buildExtraMenPayroll(
+  job: CalendarJob,
+  employees: Employee[],
+  casualWorkers: Array<{ id: string; name: string; rate_per_hour: number }>
+): Array<{ employee_id: string; hours: number; hourly_rate?: number; employee_name?: string; cof_share: boolean; client_charge: number }> {
+  const liveWorkedHrs = (() => {
+    if (!job.actual_start_time || !job.actual_finish_time) return null
+    const hrs = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0)
+    return hrs > 0 ? hrs : null
+  })()
+  return (job.job_extra_men ?? [])
+    .filter((r) => r.employee_id)
+    .map((r) => {
+      const hasTime = r.start_time?.length === 5 && r.finish_time?.length === 5
+      let hours: number
+      if (hasTime) {
+        hours = calcHoursFromTimes(r.start_time!, r.finish_time!)
+      } else if (liveWorkedHrs !== null) {
+        hours = Math.max(2, liveWorkedHrs)
+      } else {
+        hours = 0
+      }
+      // job_extra_men only stores an id — it may point at a staff employee or
+      // a casual worker (same "Select employee…" dropdown as JobForm), so
+      // resolve the rate/name from whichever list matches.
+      const staffEmp = employees.find((e) => e.id === r.employee_id)
+      const casualWorker = staffEmp ? null : casualWorkers.find((cw) => cw.id === r.employee_id)
+      return {
+        employee_id: r.employee_id!,
+        hours,
+        hourly_rate: staffEmp?.hourly_rate ?? casualWorker?.rate_per_hour,
+        employee_name: staffEmp?.name ?? casualWorker?.name,
+        cof_share: r.cof_share,
+        client_charge: Number(r.client_charge_amount) || 0,
+      }
+    })
+}
+
 function buildCommissionsForPayroll(job: CalendarJob): Array<{ employee_id: string | null; casual_worker_id: string | null; casual_worker_name: string; rate_per_hour: number; hours: number; label: string }> {
   return job.job_commissions
     .filter(r => (r.employee_id || r.casual_worker_id) && r.hours > 0 && r.rate_per_hour > 0)
@@ -288,6 +336,11 @@ export default function DashboardPage() {
   const [jobs, setJobs] = useState<CalendarJob[]>([])
   const [loading, setLoading] = useState(true)
   const [privateColor, setPrivateColor] = useState<string | null>(null)
+  // Full staff + casual worker lists, needed to resolve Extra Men entries
+  // (job_extra_men has no rate_per_hour of its own — it can point at either an
+  // employee or a casual_worker, same as JobForm's "Select employee…" dropdown).
+  const [allEmployees, setAllEmployees] = useState<Employee[]>([])
+  const [allCasualWorkers, setAllCasualWorkers] = useState<Array<{ id: string; name: string; rate_per_hour: number }>>([])
 
   const today = toISO(new Date())
 
@@ -338,6 +391,8 @@ export default function DashboardPage() {
       .eq('entity_key', 'private')
       .maybeSingle()
       .then(({ data }) => { if (data?.color_hex) setPrivateColor(data.color_hex) })
+    supabase.from('employees').select('*').eq('active', true).then(({ data }) => setAllEmployees((data ?? []) as Employee[]))
+    supabase.from('casual_workers').select('id, name, rate_per_hour').then(({ data }) => setAllCasualWorkers((data ?? []) as Array<{ id: string; name: string; rate_per_hour: number }>))
   }, [])
 
   useEffect(() => {
@@ -362,7 +417,8 @@ export default function DashboardPage() {
           job_materials(quantity, cost_price, sale_price),
           job_expenses(amount, is_client_expense),
           job_casual_crew(name, rate_per_hour, heavy_item, cof_share, start_time, finish_time, casual_worker_id),
-          job_commissions(employee_id, casual_worker_id, rate_per_hour, hours)
+          job_commissions(employee_id, casual_worker_id, rate_per_hour, hours),
+          job_extra_men(employee_id, start_time, finish_time, cof_share, client_charge_amount)
         `)
         .gte('date', start)
         .lte('date', end)
@@ -411,6 +467,7 @@ export default function DashboardPage() {
         job_expenses: (j as unknown as { job_expenses?: CalendarJob['job_expenses'] }).job_expenses ?? [],
         job_casual_crew: (j as unknown as { job_casual_crew?: CalendarJob['job_casual_crew'] }).job_casual_crew ?? [],
         job_commissions: (j as unknown as { job_commissions?: CalendarJob['job_commissions'] }).job_commissions ?? [],
+        job_extra_men: (j as unknown as { job_extra_men?: CalendarJob['job_extra_men'] }).job_extra_men ?? [],
         subcontractor_rate_ph: j.subcontractor_rate_id ? (subRatePHMap.get(j.subcontractor_rate_id) ?? null) : null,
         contract_rate_ph: j.contract_rate_id ? (contractRatePHMap.get(j.contract_rate_id) ?? null) : null,
       })) as CalendarJob[])
@@ -427,12 +484,12 @@ export default function DashboardPage() {
       const crew = job.job_crew.filter((c) => c.employee)
       const emps: Employee[] = crew.map((c) => c.employee!).filter(Boolean) as unknown as Employee[]
       const reviewIds = job.google_review ? (job.google_review_employee_ids ?? []) : []
-      payroll += calculatePayroll(buildStaffPayrollCrew(job, crew), emps, 0, reviewIds, [], buildCasualPayroll(job), buildCommissionsForPayroll(job)).total
+      payroll += calculatePayroll(buildStaffPayrollCrew(job, crew), emps, 0, reviewIds, buildExtraMenPayroll(job, allEmployees, allCasualWorkers), buildCasualPayroll(job), buildCommissionsForPayroll(job)).total
       deductions += calcJobDeductions(job)
     }
     const netRevenue = revenue > 0 ? revenue / 1.1 : 0
     return { revenue, payroll, profit: netRevenue - payroll - deductions, count: jobs.length }
-  }, [jobs])
+  }, [jobs, allEmployees, allCasualWorkers])
 
   const jobsByDate = useMemo(() => {
     const map = new Map<string, CalendarJob[]>()
@@ -535,6 +592,8 @@ export default function DashboardPage() {
           onDragOver={setDragOverDate}
           onDrop={handleJobDrop}
           privateColor={privateColor}
+          allEmployees={allEmployees}
+          allCasualWorkers={allCasualWorkers}
         />
       ) : (
         <MonthView
@@ -611,6 +670,7 @@ function SourceBadge({ source }: { source: JobSource }) {
 function WeekView({
   days, jobsByDate, today, onJobClick, onStart, onFinish,
   draggingJobId, dragOverDate, onDragStart, onDragEnd, onDragOver, onDrop, privateColor,
+  allEmployees, allCasualWorkers,
 }: {
   days: Date[]
   jobsByDate: Map<string, CalendarJob[]>
@@ -625,6 +685,8 @@ function WeekView({
   onDragOver: (date: string) => void
   onDrop: (date: string) => void
   privateColor: string | null
+  allEmployees: Employee[]
+  allCasualWorkers: Array<{ id: string; name: string; rate_per_hour: number }>
 }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-wire bg-surface">
@@ -676,6 +738,8 @@ function WeekView({
                     onDragStart={() => onDragStart(job.id)}
                     onDragEnd={onDragEnd}
                     privateColor={privateColor}
+                    allEmployees={allEmployees}
+                    allCasualWorkers={allCasualWorkers}
                   />
                 ))}
               </div>
@@ -782,6 +846,7 @@ function MonthView({
 // ─── Job card (week view) ─────────────────────────────────────────────────────
 function JobCard({
   job, today, onClick, onStart, onFinish, isDragging, onDragStart, onDragEnd, privateColor,
+  allEmployees, allCasualWorkers,
 }: {
   job: CalendarJob
   today: string
@@ -792,6 +857,8 @@ function JobCard({
   onDragStart?: () => void
   onDragEnd?: () => void
   privateColor: string | null
+  allEmployees: Employee[]
+  allCasualWorkers: Array<{ id: string; name: string; rate_per_hour: number }>
 }) {
   const s = STATUS_CARD[job.status]
   const revenue = calcJobRevenue(job)
@@ -799,12 +866,12 @@ function JobCard({
   const jobProfit = (() => {
     if (revenue === null) return null
     const crew = job.job_crew.filter((c) => c.employee)
-    if (!crew.length) return null
+    if (!crew.length && !(job.job_extra_men ?? []).some((r) => r.employee_id)) return null
     const emps = crew.map((c) => c.employee!).filter(Boolean) as unknown as Employee[]
     const staffCrew = buildStaffPayrollCrew(job, crew)
     const commissionsInput = buildCommissionsForPayroll(job)
     const reviewIds = job.google_review ? (job.google_review_employee_ids ?? []) : []
-    const payroll = calculatePayroll(staffCrew, emps, 0, reviewIds, [], buildCasualPayroll(job), commissionsInput).total
+    const payroll = calculatePayroll(staffCrew, emps, 0, reviewIds, buildExtraMenPayroll(job, allEmployees, allCasualWorkers), buildCasualPayroll(job), commissionsInput).total
     return revenue / 1.1 - payroll - calcJobDeductions(job)
   })()
 

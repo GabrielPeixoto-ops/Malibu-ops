@@ -62,6 +62,7 @@ interface InvoiceJob {
   job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; start_time: string | null; end_time: string | null }>
   job_casual_crew: Array<{ casual_worker_id: string | null; name: string; rate_per_hour: number; hours: number; cof_share: boolean; heavy_item: boolean; start_time: string | null; finish_time: string | null }>
   job_commissions: Array<{ employee_id: string | null; casual_worker_id: string | null; rate_per_hour: number; hours: number; commission_type: { name: string } | null }>
+  job_extra_men: Array<{ employee_id: string | null; start_time: string | null; finish_time: string | null; cof_share: boolean; client_charge_amount: number }>
   job_materials: Array<{ quantity: number; cost_price: number; sale_price: number }>
   job_expenses: Array<{ amount: number; is_client_expense: boolean }>
 }
@@ -120,7 +121,10 @@ function calcRevenue(job: InvoiceJob): number | null {
   if (base === null) return null
   const clientExpenses = (job.job_expenses ?? []).filter((e) => e.is_client_expense).reduce((s, e) => s + e.amount, 0)
   const materialsRevenue = (job.job_materials ?? []).reduce((s, m) => s + Number(m.quantity) * Number(m.sale_price), 0)
-  const total = base + materialsRevenue + (Number(job.heavy_item_charge) || 0) - (Number(job.discount) || 0) + clientExpenses
+  // What we charge the client for each Extra Man — pure company revenue,
+  // independent of what the extra man is actually paid.
+  const extraMenRevenue = (job.job_extra_men ?? []).reduce((s, em) => s + (Number(em.client_charge_amount) || 0), 0)
+  const total = base + materialsRevenue + (Number(job.heavy_item_charge) || 0) + extraMenRevenue - (Number(job.discount) || 0) + clientExpenses
   return total > 0 ? total : null
 }
 
@@ -176,6 +180,10 @@ export default function InvoicesPage() {
   const [contractFilter, setContractFilter] = useState('all')
   const [jobs, setJobs] = useState<InvoiceJob[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
+  // Needed to resolve Extra Man entries that point at a casual worker rather
+  // than a staff employee — job_extra_men only stores an id, same ambiguity
+  // as JobForm's "Select employee…" dropdown.
+  const [casualWorkers, setCasualWorkers] = useState<Array<{ id: string; name: string; rate_per_hour: number }>>([])
   const [formalInvoices, setFormalInvoices] = useState<FormalInvoice[]>([])
   const [sendingInvoice, setSendingInvoice] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -183,6 +191,9 @@ export default function InvoicesPage() {
   useEffect(() => {
     supabase.from('employees').select('*').eq('active', true).order('name').then(({ data }) => {
       setEmployees((data ?? []) as Employee[])
+    })
+    supabase.from('casual_workers').select('id, name, rate_per_hour').then(({ data }) => {
+      setCasualWorkers((data ?? []) as Array<{ id: string; name: string; rate_per_hour: number }>)
     })
     supabase
       .from('invoices')
@@ -210,7 +221,8 @@ export default function InvoicesPage() {
         job_casual_crew(casual_worker_id, name, rate_per_hour, hours, cof_share, heavy_item, start_time, finish_time),
         job_commissions(employee_id, casual_worker_id, rate_per_hour, hours, commission_type:commission_types(name)),
         job_materials(quantity, cost_price, sale_price),
-        job_expenses(amount, is_client_expense)
+        job_expenses(amount, is_client_expense),
+        job_extra_men(employee_id, start_time, finish_time, cof_share, client_charge_amount)
       `)
       .gte('date', dateFrom)
       .lte('date', dateTo)
@@ -287,7 +299,27 @@ export default function InvoicesPage() {
           const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus
           entries.push({ job, workedHours, cofHours, paidHours, pay: paidHours * emp.hourly_rate, googleReviewBonus: reviewBonus > 0 })
         }
-        if (job.extra_man_employee_id === emp.id && job.extra_men_hours > 0) {
+        // Extra Men who resolve to this staff employee — same hours/COF/review
+        // treatment as regular crew (job_extra_men has no rate of its own,
+        // hence resolving against `emp` here rather than trusting a stored pay).
+        for (const em of job.job_extra_men ?? []) {
+          if (em.employee_id !== emp.id) continue
+          const hasTime = em.start_time?.length === 5 && em.finish_time?.length === 5
+          const jobLevelHours = (() => {
+            if (!job.actual_start_time || !job.actual_finish_time) return null
+            const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0)
+            return raw > 0 ? raw : null
+          })()
+          const workedHours = hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!) : (jobLevelHours ?? 0)
+          if (workedHours <= 0) continue
+          const cofHours = em.cof_share ? Number(job.cof_final ?? job.cof ?? 0) : 0
+          const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
+          const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus
+          entries.push({ job, workedHours, cofHours, paidHours, pay: paidHours * emp.hourly_rate, googleReviewBonus: reviewBonus > 0 })
+        }
+        // Legacy single-extra-man fields, kept only for any historical jobs
+        // saved before the job_extra_men table existed.
+        if (job.extra_man_employee_id === emp.id && job.extra_men_hours > 0 && !(job.job_extra_men ?? []).some((em) => em.employee_id === emp.id)) {
           entries.push({ job, workedHours: job.extra_men_hours, cofHours: 0, paidHours: job.extra_men_hours, pay: job.extra_men_hours * emp.hourly_rate, googleReviewBonus: false })
         }
         for (const com of (job.job_commissions ?? [])) {
@@ -375,6 +407,29 @@ export default function InvoicesPage() {
           heavyItem: false, googleReviewBonus: false, label: com.commission_type?.name ?? 'Commission',
         })
       }
+
+      // Extra Men who resolve to a casual worker rather than a staff employee
+      // (job_extra_men has no rate of its own — resolve against casualWorkers,
+      // same ambiguity as JobForm's "Select employee…" dropdown). Staff
+      // extra men are already handled in employeeData above.
+      for (const em of job.job_extra_men ?? []) {
+        if (!em.employee_id || employees.some((e) => e.id === em.employee_id)) continue
+        const cw = casualWorkers.find((c) => c.id === em.employee_id)
+        if (!cw || cw.rate_per_hour <= 0) continue
+        const hasTime = em.start_time?.length === 5 && em.finish_time?.length === 5
+        const rawHours = hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!) : (jobLevelHours ?? 0)
+        const workedHours = rawHours > 0 ? Math.max(MIN_CALL, rawHours) : 0
+        const cofHours = em.cof_share ? cofFinalHrs : 0
+        const hasReviewBonus = reviewSet.has(cw.id)
+        const paidHours = workedHours + cofHours + (hasReviewBonus ? REVIEW_BONUS : 0)
+        if (paidHours <= 0) continue
+        const key = cw.name.trim().toLowerCase()
+        if (!byKey.has(key)) byKey.set(key, { name: cw.name, entries: [] })
+        byKey.get(key)!.entries.push({
+          job, workedHours, cofHours, paidHours, pay: paidHours * cw.rate_per_hour,
+          heavyItem: false, googleReviewBonus: hasReviewBonus,
+        })
+      }
     }
 
     return [...byKey.entries()]
@@ -384,7 +439,7 @@ export default function InvoicesPage() {
         totalPay: entries.reduce((s, e) => s + e.pay, 0),
       }))
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [filtered])
+  }, [filtered, employees, casualWorkers])
 
   const subcontractorData = useMemo(() => {
     const subJobs = filtered.filter((j) => j.source === 'subcontract' && j.subcontractor)

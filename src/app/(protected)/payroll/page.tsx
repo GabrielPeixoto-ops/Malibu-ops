@@ -70,6 +70,7 @@ interface PayrollJob {
   contract: { name: string } | null
   contract_client: { name: string } | null
   job_crew: PayrollCrewRow[]
+  job_extra_men: Array<{ employee_id: string | null; start_time: string | null; finish_time: string | null; cof_share: boolean }>
 }
 
 // Always rounds UP to the next 15-minute block — same rule as the job page,
@@ -142,7 +143,8 @@ export default function PayrollPage() {
         customer:customers(name),
         contract:contracts(name),
         contract_client:contract_clients(name),
-        job_crew(employee_id, hours, cof_share, cof_hours, start_time, end_time)
+        job_crew(employee_id, hours, cof_share, cof_hours, start_time, end_time),
+        job_extra_men(employee_id, start_time, finish_time, cof_share)
       `)
       .in('status', ['reviewed', 'invoiced', 'paid'])
       .gte('date', start)
@@ -182,7 +184,36 @@ export default function PayrollPage() {
               : null
             entries.push({ job, workedHours, workedTime, cofHours, paidHours, pay: paidHours * emp.hourly_rate, googleReviewBonus: reviewBonus > 0 })
           }
-          if (job.extra_man_employee_id === emp.id && job.extra_men_hours > 0) {
+          for (const em of job.job_extra_men ?? []) {
+            if (em.employee_id !== emp.id) continue
+            const hasTime = em.start_time?.length === 5 && em.finish_time?.length === 5
+            const jobLevelHours = (() => {
+              if (!job.actual_start_time || !job.actual_finish_time) return null
+              const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0)
+              return raw > 0 ? raw : null
+            })()
+            const workedHours = hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!) : (jobLevelHours ?? 0)
+            if (workedHours <= 0) continue
+            const cofHours = em.cof_share ? Number(job.cof_final ?? job.cof ?? 0) : 0
+            const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
+            const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus
+            const workedTime = (em.start_time && em.finish_time)
+              ? `${em.start_time.slice(0, 5)}–${em.finish_time.slice(0, 5)}`
+              : null
+            entries.push({
+              job,
+              workedHours,
+              workedTime,
+              cofHours,
+              paidHours,
+              pay: paidHours * emp.hourly_rate,
+              isExtraMan: true,
+              googleReviewBonus: reviewBonus > 0,
+            })
+          }
+          // Legacy single-extra-man fields, kept only for any historical jobs
+          // saved before the job_extra_men table existed.
+          if (job.extra_man_employee_id === emp.id && job.extra_men_hours > 0 && !(job.job_extra_men ?? []).some((em) => em.employee_id === emp.id)) {
             entries.push({
               job,
               workedHours: job.extra_men_hours,

@@ -81,6 +81,11 @@ interface ExtraManRow {
   employee_id: string
   start_time: string
   finish_time: string
+  cof_share: boolean
+  // Amount charged to the client for bringing on this extra man — pure company
+  // revenue/profit, independent of what the extra man is actually paid (hours
+  // worked + COF + review bonus, computed separately for payroll).
+  client_charge: string
 }
 
 interface PhotoLocal {
@@ -593,12 +598,14 @@ export default function JobForm({ jobId }: { jobId?: string }) {
 
           try {
             const { data: emData } = await supabase.from('job_extra_men').select('*').eq('job_id', jobId).order('created_at')
-            setExtraMan((emData ?? []).map((r: { id: string; employee_id: string | null; start_time: string | null; finish_time: string | null }) => ({
+            setExtraMan((emData ?? []).map((r: { id: string; employee_id: string | null; start_time: string | null; finish_time: string | null; cof_share?: boolean; client_charge_amount?: number }) => ({
               _id: r.id,
               dbId: r.id,
               employee_id: r.employee_id ?? '',
               start_time: r.start_time ?? '',
               finish_time: r.finish_time ?? '',
+              cof_share: r.cof_share ?? false,
+              client_charge: r.client_charge_amount ? r.client_charge_amount.toString() : '',
             })))
           } catch { /* migration not yet applied */ }
 
@@ -805,6 +812,8 @@ const filteredCustomers = useMemo(
           hours: Math.max(0, calcCrewHours(r.start_time, r.finish_time)),
           hourly_rate: cw?.rate_per_hour,
           employee_name: cw?.name,
+          cof_share: r.cof_share,
+          client_charge: parseFloat(r.client_charge) || 0,
         }
       })
       .filter((r) => r.hours > 0)
@@ -1030,9 +1039,11 @@ const filteredCustomers = useMemo(
 
   // ── Extra men helpers ──────────────────────────────────────────────────────
   function addExtraMan() {
-    setExtraMan((em) => [...em, { _id: crypto.randomUUID(), employee_id: '', start_time: '', finish_time: '' }])
+    setExtraMan((em) => [...em, { _id: crypto.randomUUID(), employee_id: '', start_time: '', finish_time: '', cof_share: false, client_charge: '' }])
   }
-  function updateExtraMan(_id: string, field: 'employee_id' | 'start_time' | 'finish_time', value: string) {
+  function updateExtraMan(_id: string, field: 'employee_id' | 'start_time' | 'finish_time' | 'client_charge', value: string): void
+  function updateExtraMan(_id: string, field: 'cof_share', value: boolean): void
+  function updateExtraMan(_id: string, field: 'employee_id' | 'start_time' | 'finish_time' | 'client_charge' | 'cof_share', value: string | boolean) {
     setExtraMan((em) => em.map((r) => r._id === _id ? { ...r, [field]: value } : r))
   }
   function removeExtraMan(_id: string) {
@@ -1369,6 +1380,8 @@ const filteredCustomers = useMemo(
             employee_id: r.employee_id || null,
             start_time: r.start_time || null,
             finish_time: r.finish_time || null,
+            cof_share: r.cof_share,
+            client_charge_amount: parseFloat(r.client_charge) || 0,
           })))
         }
       } catch { /* migration not yet applied */ }
@@ -1446,6 +1459,8 @@ const filteredCustomers = useMemo(
             employee_id: r.employee_id || null,
             start_time: r.start_time || null,
             finish_time: r.finish_time || null,
+            cof_share: r.cof_share,
+            client_charge_amount: parseFloat(r.client_charge) || 0,
           })))
         }
       } catch { /* migration not yet applied */ }
@@ -3223,10 +3238,16 @@ const filteredCustomers = useMemo(
                   const hasTime = row.start_time.length === 5 && row.finish_time.length === 5
                   const rawComputed = hasTime ? Math.max(0, calcCrewHours(row.start_time, row.finish_time)) : null
                   const baseHrs = rawComputed !== null && rawComputed > 0 ? Math.max(2, rawComputed) : rawComputed
+                  const cofFinalDisplay = form.cof_final.trim() ? (parseFloat(form.cof_final) || 0) : 0
+                  const cofHrs = (baseHrs !== null && row.cof_share) ? cofFinalDisplay : 0
                   const reviewHrs = (baseHrs && form.google_review && row.employee_id && form.google_review_employee_ids.includes(row.employee_id)) ? 0.5 : 0
-                  const totalHrs = baseHrs !== null ? baseHrs + reviewHrs : null
+                  const totalHrs = baseHrs !== null ? baseHrs + cofHrs + reviewHrs : null
+                  const parts: string[] = []
+                  if (baseHrs !== null) parts.push(`${baseHrs.toFixed(2)}h`)
+                  if (cofHrs > 0) parts.push(`+${cofHrs.toFixed(2)} COF`)
+                  if (reviewHrs > 0) parts.push(`+0.50 ★`)
                   const computedLabel = totalHrs !== null
-                    ? (reviewHrs > 0 ? `${baseHrs!.toFixed(2)}h +0.50 ★ = ${totalHrs.toFixed(2)}h` : `${totalHrs.toFixed(2)}h`)
+                    ? parts.join(' ') + (parts.length > 1 ? ` = ${totalHrs.toFixed(2)}h` : '')
                     : null
                   return (
                     <div key={row._id} className="flex items-center gap-2 flex-wrap">
@@ -3249,7 +3270,30 @@ const filteredCustomers = useMemo(
                       <input type="time" value={row.start_time} onChange={(e) => updateExtraMan(row._id, 'start_time', e.target.value)} disabled={isReviewed} className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface" />
                       <span className="text-dim text-xs">–</span>
                       <input type="time" value={row.finish_time} onChange={(e) => updateExtraMan(row._id, 'finish_time', e.target.value)} disabled={isReviewed} className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface" />
+                      <label className="flex items-center gap-1 cursor-pointer select-none shrink-0" title="Include Call Out Fee">
+                        <input
+                          type="checkbox"
+                          checked={row.cof_share}
+                          disabled={isReviewed}
+                          onChange={(e) => updateExtraMan(row._id, 'cof_share', e.target.checked)}
+                          className="w-3 h-3 rounded accent-gold"
+                        />
+                        <span className="text-xs text-dim">COF</span>
+                      </label>
                       {computedLabel && <span className="text-xs font-mono text-warm tabular-nums whitespace-nowrap">{computedLabel}</span>}
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-xs text-dim whitespace-nowrap">Charge client $</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={row.client_charge}
+                          onChange={(e) => updateExtraMan(row._id, 'client_charge', e.target.value)}
+                          disabled={isReviewed}
+                          placeholder="0.00"
+                          className="w-20 px-2 py-1 text-xs border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface"
+                        />
+                      </div>
                       {!isReviewed && (
                         <button type="button" onClick={() => removeExtraMan(row._id)} className="text-dim hover:text-danger">
                           <Trash2 size={15} />
@@ -3702,6 +3746,27 @@ const filteredCustomers = useMemo(
                     <span className="text-dim text-xs">–</span>
                     <input type="time" value={row.finish_time} onChange={(e) => updateExtraMan(row._id, 'finish_time', e.target.value)} className="w-28 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring" />
                     {computed !== null && <span className="text-sm text-dim tabular-nums w-10">{computed}h</span>}
+                    <label className="flex items-center gap-1 cursor-pointer select-none shrink-0" title="Include Call Out Fee">
+                      <input
+                        type="checkbox"
+                        checked={row.cof_share}
+                        onChange={(e) => updateExtraMan(row._id, 'cof_share', e.target.checked)}
+                        className="w-3 h-3 rounded accent-gold"
+                      />
+                      <span className="text-xs text-dim">COF</span>
+                    </label>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-xs text-dim whitespace-nowrap">Charge client $</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={row.client_charge}
+                        onChange={(e) => updateExtraMan(row._id, 'client_charge', e.target.value)}
+                        placeholder="0.00"
+                        className="w-20 px-2 py-1 text-xs border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
+                      />
+                    </div>
                     <button type="button" onClick={() => removeExtraMan(row._id)} className="text-dim hover:text-danger">
                       <Trash2 size={15} />
                     </button>

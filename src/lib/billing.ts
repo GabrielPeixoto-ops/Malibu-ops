@@ -138,7 +138,7 @@ export function calculatePayroll(
   employees: Employee[],
   cofHours = 0,
   googleReviewEmployeeIds: string[] = [],
-  extraMen: Array<{ employee_id: string; hours: number; hourly_rate?: number; employee_name?: string }> = [],
+  extraMen: Array<{ employee_id: string; hours: number; hourly_rate?: number; employee_name?: string; cof_share?: boolean }> = [],
   casualCrew: Array<{ name: string; rate_per_hour: number; hours: number; heavy_item?: boolean; casual_worker_id?: string | null }> = [],
   commissions: Array<{ employee_id: string | null; casual_worker_id?: string | null; casual_worker_name?: string; rate_per_hour: number; hours: number; label?: string }> = []
 ): PayrollResult {
@@ -176,7 +176,11 @@ export function calculatePayroll(
     const name = em.employee_name ?? staffEmp?.name ?? em.employee_id
     if (!hourlyRate || em.hours <= 0) continue
     const hasReviewBonus = reviewSet.has(em.employee_id)
-    const paid_hours = Math.max(em.hours, MIN_CALL) + (hasReviewBonus ? REVIEW_BONUS : 0)
+    // Extra men are extra crew for the same call-out — they must get the Call
+    // Out Fee the same way regular crew does (via cof_share), otherwise they're
+    // silently underpaid relative to everyone else on the same job.
+    const rowCof = em.cof_share ? cofHours : 0
+    const paid_hours = Math.max(em.hours, MIN_CALL) + rowCof + (hasReviewBonus ? REVIEW_BONUS : 0)
     entries.push({
       employee_id: em.employee_id,
       employee_name: name,
@@ -247,6 +251,7 @@ export interface JobSummary {
   discount: number
   deposit: number
   heavyItemCharge: number
+  extraMenRevenue: number
   clientExpensesTotal: number
   companyExpensesTotal: number
   totalRevenue: number
@@ -276,7 +281,7 @@ export function calculateJobSummary(
   clientEntity?: { billing_type: string; billing_config: SubcontractorConfig } | null,
   privateRate?: PrivateRateInput | null,
   rateOptions?: { subcontractorRatePerHour?: number | null; contractRatePerHour?: number | null },
-  extraMen?: Array<{ employee_id: string; hours: number; hourly_rate?: number; employee_name?: string }>,
+  extraMen?: Array<{ employee_id: string; hours: number; hourly_rate?: number; employee_name?: string; cof_share?: boolean; client_charge?: number }>,
   casualCrew?: Array<{ name: string; rate_per_hour: number; hours: number; heavy_item?: boolean; casual_worker_id?: string | null }>,
   commissions?: Array<{ employee_id: string | null; rate_per_hour: number; hours: number; label?: string }>,
   expenses?: Array<{ amount: number; is_client_expense: boolean }>
@@ -304,7 +309,11 @@ export function calculateJobSummary(
   const discount = Number(job.discount) || 0
   const deposit = Number(job.deposit) || 0
   const heavyItemCharge = Number(job.heavy_item_charge) || 0
-  const totalRevenue = subRevenue + materialsRevenue + clientExpensesTotal + heavyItemCharge - discount
+  // What we charge the client for bringing on an extra man is company revenue —
+  // it's independent of what the extra man is actually paid (hours + COF +
+  // review bonus, computed separately in calculatePayroll below).
+  const extraMenRevenue = (extraMen ?? []).reduce((s, em) => s + (Number(em.client_charge) || 0), 0)
+  const totalRevenue = subRevenue + materialsRevenue + clientExpensesTotal + heavyItemCharge + extraMenRevenue - discount
   const cofHours = Number(job.cof_final ?? job.cof) || 0
   const reviewIds = job.google_review ? (job.google_review_employee_ids ?? []) : []
   const { total: payrollTotal, entries: payrollEntries, casualEntries } = calculatePayroll(
@@ -323,5 +332,5 @@ export function calculateJobSummary(
   const netRevenue = totalRevenue - gstAmount
   const profit = netRevenue - payrollTotal - materialsCost - companyExpensesTotal
   const margin = netRevenue !== 0 ? profit / netRevenue : null
-  return { subRevenue, materialsRevenue, materialsCost, discount, deposit, heavyItemCharge, clientExpensesTotal, companyExpensesTotal, totalRevenue, gstAmount, netRevenue, payrollTotal, payrollEntries, casualEntries, googleReviewBonuses, profit, margin }
+  return { subRevenue, materialsRevenue, materialsCost, discount, deposit, heavyItemCharge, extraMenRevenue, clientExpensesTotal, companyExpensesTotal, totalRevenue, gstAmount, netRevenue, payrollTotal, payrollEntries, casualEntries, googleReviewBonuses, profit, margin }
 }
