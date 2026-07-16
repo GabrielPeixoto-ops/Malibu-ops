@@ -1327,6 +1327,13 @@ const filteredCustomers = useMemo(
     const clientBillingConfig = overrideOpen ? buildOverrideConfig(overrideBilling) : null
 
     const extraMenRows = extraMen.filter((r) => r.name.trim() && r.start_time && r.finish_time)
+    // Rows persisted to job_extra_men must NOT require start/finish time —
+    // otherwise an extra man added with just a name/rate (times filled in later,
+    // or never) is silently dropped from the DB on every save, since the delete+
+    // reinsert below only recreates rows from this array. Hours/revenue math
+    // still legitimately depends on times (extraMenRows above), but persistence
+    // must not.
+    const extraMenPersistRows = extraMen.filter((r) => r.name.trim())
     const computedExtraMenHours = extraMenRows.reduce((s, r) => {
       const h = calcCrewHours(r.start_time, r.finish_time)
       return s + (h > 0 ? h : 0)
@@ -1496,8 +1503,8 @@ const filteredCustomers = useMemo(
       if (truckFleetIds.length) await supabase.from('job_trucks').insert(truckFleetIds.map((fid) => ({ job_id: jobId, fleet_id: fid })))
       try {
         await supabase.from('job_extra_men').delete().eq('job_id', jobId)
-        if (extraMenRows.length) {
-          await supabase.from('job_extra_men').insert(extraMenRows.map((r) => {
+        if (extraMenPersistRows.length) {
+          await supabase.from('job_extra_men').insert(extraMenPersistRows.map((r) => {
             const match = resolveExtraMan(r.name)
             return {
               job_id: jobId,
@@ -1580,8 +1587,8 @@ const filteredCustomers = useMemo(
       if (truckFleetIds.length) await supabase.from('job_trucks').insert(truckFleetIds.map((fid) => ({ job_id: newId, fleet_id: fid })))
       if (photos.length) await supabase.from('job_photos').insert(photos.map((p) => ({ job_id: newId, url: p.url, caption: p.caption || null, category: p.category })))
       try {
-        if (extraMenRows.length) {
-          await supabase.from('job_extra_men').insert(extraMenRows.map((r) => {
+        if (extraMenPersistRows.length) {
+          await supabase.from('job_extra_men').insert(extraMenPersistRows.map((r) => {
             const match = resolveExtraMan(r.name)
             return {
               job_id: newId,
