@@ -36,6 +36,14 @@ import Select from '@/components/ui/Select'
 import Modal from '@/components/ui/Modal'
 
 // ─── Local types ──────────────────────────────────────────────────────────────
+interface JobComment {
+  id: string
+  job_id: string
+  author_name: string
+  body: string
+  created_at: string
+}
+
 interface CrewRow {
   _id: string
   employee_id: string
@@ -390,6 +398,16 @@ export default function JobForm({ jobId }: { jobId?: string }) {
   const [photoCategory, setPhotoCategory] = useState('inventory')
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [uploadError, setUploadError] = useState('')
+  const [comments, setComments] = useState<JobComment[]>([])
+  const [commentText, setCommentText] = useState('')
+  // Lazy-initialized from localStorage (client-only) instead of an effect —
+  // this app uses a single shared login, so there's no per-user auth
+  // identity to attribute comments to; remembering the typed name locally
+  // means the same person on the same browser doesn't retype it each time.
+  const [commentAuthor, setCommentAuthor] = useState(() =>
+    typeof window !== 'undefined' ? window.localStorage.getItem('jobCommentAuthor') ?? '' : ''
+  )
+  const [postingComment, setPostingComment] = useState(false)
   const pendingJobId = useRef(crypto.randomUUID())
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -455,12 +473,14 @@ export default function JobForm({ jobId }: { jobId?: string }) {
       } catch { /* migration not applied yet */ }
 
       if (isEdit && jobId) {
-        const [jobRes, photosRes, trucksRes] = await Promise.all([
+        const [jobRes, photosRes, trucksRes, commentsRes] = await Promise.all([
           supabase.from('jobs').select('*, job_crew(*), job_materials(*)').eq('id', jobId).single(),
           supabase.from('job_photos').select('*').eq('job_id', jobId).order('created_at'),
           supabase.from('job_trucks').select('fleet_id').eq('job_id', jobId),
+          supabase.from('job_comments').select('*').eq('job_id', jobId).order('created_at'),
         ])
         setJobTruckIds((trucksRes.data ?? []).map((r: { fleet_id: string }) => r.fleet_id))
+        setComments((commentsRes.data ?? []) as JobComment[])
 
         if (jobRes.data) {
           const j = jobRes.data as {
@@ -696,6 +716,49 @@ export default function JobForm({ jobId }: { jobId?: string }) {
     }
     load()
   }, [jobId])
+
+  // ── Comments: live updates via Supabase Realtime so comments posted from
+  // another device/tab (e.g. the office) show up immediately here, matching
+  // how this was used in Trello ("faz em tempo real nos comentários").
+  useEffect(() => {
+    if (!isEdit || !jobId) return
+    const channel = supabase
+      .channel(`job_comments:${jobId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'job_comments', filter: `job_id=eq.${jobId}` },
+        (payload) => {
+          const row = payload.new as JobComment
+          setComments((prev) => (prev.some((c) => c.id === row.id) ? prev : [...prev, row]))
+        }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEdit, jobId])
+
+  async function postComment() {
+    const body = commentText.trim()
+    const author = commentAuthor.trim()
+    if (!body || !author || !jobId) return
+    setPostingComment(true)
+    try {
+      window.localStorage.setItem('jobCommentAuthor', author)
+      const { data, error: insertErr } = await supabase
+        .from('job_comments')
+        .insert({ job_id: jobId, author_name: author, body })
+        .select()
+        .single()
+      if (insertErr) throw insertErr
+      const row = data as JobComment
+      setComments((prev) => (prev.some((c) => c.id === row.id) ? prev : [...prev, row]))
+      setCommentText('')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to post comment')
+    } finally {
+      setPostingComment(false)
+    }
+  }
 
   // ── Close dropdowns on outside click ──────────────────────────────────────
   useEffect(() => {
@@ -3942,6 +4005,64 @@ const filteredCustomers = useMemo(
             />
           </div>
         </Card>
+
+        {/* ── Comments ─────────────────────────────────────────────────── */}
+        {isEdit && (
+          <Card title="Comments">
+            <div className="space-y-3">
+              {comments.length === 0 && (
+                <p className="text-sm text-dim text-center py-2">No comments yet.</p>
+              )}
+              {comments.map((c) => (
+                <div key={c.id} className="flex gap-2">
+                  <div className="w-7 h-7 rounded-full bg-gold/15 text-gold text-xs font-semibold flex items-center justify-center shrink-0 mt-0.5">
+                    {c.author_name.trim().slice(0, 1).toUpperCase() || '?'}
+                  </div>
+                  <div className="flex-1 min-w-0 bg-panel rounded-lg px-3 py-2">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-sm font-semibold text-parchment truncate">{c.author_name}</span>
+                      <span className="text-xs text-dim shrink-0">
+                        {new Date(c.created_at).toLocaleString('en-AU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <p className="text-sm text-warm whitespace-pre-wrap break-words">{c.body}</p>
+                  </div>
+                </div>
+              ))}
+              <div className="pt-2 border-t border-wire space-y-2">
+                <input
+                  type="text"
+                  value={commentAuthor}
+                  onChange={(e) => setCommentAuthor(e.target.value)}
+                  placeholder="Your name"
+                  className="w-40 px-2 py-1.5 text-xs border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
+                />
+                <div className="flex gap-2">
+                  <textarea
+                    rows={2}
+                    value={commentText}
+                    onChange={(e) => setCommentText(e.target.value)}
+                    placeholder="Write a comment…"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        postComment()
+                      }
+                    }}
+                    className="flex-1 px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring resize-y"
+                  />
+                  <Button
+                    onClick={postComment}
+                    disabled={postingComment || !commentText.trim() || !commentAuthor.trim()}
+                    className="self-end"
+                  >
+                    {postingComment ? 'Posting…' : 'Post'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </Card>
+        )}
 
         {error && (
           <div className="bg-danger/10 border border-danger/30 text-danger text-sm px-4 py-3 rounded-lg">{error}</div>
