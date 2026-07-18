@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import {
   Briefcase, Users, Truck, UserCircle, LayoutDashboard, X, Menu, Plus,
   DollarSign, Building2, FileText, Tag, Palette, BadgeDollarSign, LogOut, Plug,
+  BookOpen,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import MalibuLogo from '@/components/ui/MalibuLogo'
@@ -31,6 +32,12 @@ const NAV_SECTIONS = [
       { href: '/settings/subcontractors', label: 'Subcontractors', icon: Truck },
       { href: '/settings/contracts', label: 'Contracts', icon: Building2 },
       { href: '/settings/customers', label: 'Customers', icon: UserCircle },
+    ],
+  },
+  {
+    label: 'RESOURCES',
+    items: [
+      { href: '/resources', label: 'Resources', icon: BookOpen },
     ],
   },
   {
