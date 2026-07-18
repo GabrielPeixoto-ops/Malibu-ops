@@ -132,6 +132,13 @@ interface CommissionRow {
   hours: string
 }
 
+interface ExtraAddressRow {
+  _id: string
+  dbId?: string
+  address_type: 'pickup' | 'dropoff'
+  address: string
+}
+
 interface ExpenseRow {
   _id: string
   dbId: string | null
@@ -392,6 +399,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
   const [commissions, setCommissions] = useState<CommissionRow[]>([])
   const [commissionTypes, setCommissionTypes] = useState<CommissionType[]>([])
   const [expenses, setExpenses] = useState<ExpenseRow[]>([])
+  const [extraAddresses, setExtraAddresses] = useState<ExtraAddressRow[]>([])
   const [materials, setMaterials] = useState<MaterialRow[]>([])
   const [photos, setPhotos] = useState<PhotoLocal[]>([])
   const [photoCaption, setPhotoCaption] = useState('')
@@ -673,6 +681,17 @@ export default function JobForm({ jobId }: { jobId?: string }) {
               hours: r.hours.toString(),
             })))
           } catch { /* migration not yet applied */ }
+
+          try {
+            const { data: addrData } = await supabase.from('job_addresses').select('*').eq('job_id', jobId).order('sort_order')
+            setExtraAddresses((addrData ?? []).map((r: { id: string; address_type: 'pickup' | 'dropoff'; address: string }) => ({
+              _id: r.id,
+              dbId: r.id,
+              address_type: r.address_type,
+              address: r.address,
+            })))
+          } catch { /* migration not yet applied */ }
+
           try {
             const { data: expData } = await supabase.from('job_expenses').select('*').eq('job_id', jobId).order('created_at')
             setExpenses((expData ?? []).map((r: { id: string; description: string; amount: number; is_client_expense: boolean }) => ({
@@ -1117,6 +1136,17 @@ const filteredCustomers = useMemo(
     }))
   }
   function removeCrew(_id: string) { setCrew((c) => c.filter((r) => r._id !== _id)) }
+
+  // ── Extra address helpers (informational-only extra pickup/dropoff stops) ──
+  function addExtraAddress(address_type: 'pickup' | 'dropoff') {
+    setExtraAddresses((rows) => [...rows, { _id: crypto.randomUUID(), address_type, address: '' }])
+  }
+  function updateExtraAddress(_id: string, value: string) {
+    setExtraAddresses((rows) => rows.map((r) => r._id === _id ? { ...r, address: value } : r))
+  }
+  function removeExtraAddress(_id: string) {
+    setExtraAddresses((rows) => rows.filter((r) => r._id !== _id))
+  }
 
   // ── Extra men helpers ──────────────────────────────────────────────────────
   function addExtraMan() {
@@ -1578,6 +1608,18 @@ const filteredCustomers = useMemo(
           })))
         }
       } catch { /* migration not yet applied */ }
+      try {
+        await supabase.from('job_addresses').delete().eq('job_id', jobId)
+        const addrRows = extraAddresses.filter((r) => r.address.trim())
+        if (addrRows.length) {
+          await supabase.from('job_addresses').insert(addrRows.map((r, i) => ({
+            job_id: jobId,
+            address_type: r.address_type,
+            address: r.address.trim(),
+            sort_order: i,
+          })))
+        }
+      } catch { /* migration not yet applied */ }
     } else {
       const { data: job, error: insErr } = await supabase.from('jobs').insert(payload).select().single()
       if (insErr || !job) throw insErr ?? new Error('Insert failed')
@@ -1652,6 +1694,17 @@ const filteredCustomers = useMemo(
             description: r.description.trim(),
             amount: parseFloat(r.amount) || 0,
             is_client_expense: r.is_client_expense,
+          })))
+        }
+      } catch { /* migration not yet applied */ }
+      try {
+        const addrRows = extraAddresses.filter((r) => r.address.trim())
+        if (addrRows.length) {
+          await supabase.from('job_addresses').insert(addrRows.map((r, i) => ({
+            job_id: newId,
+            address_type: r.address_type,
+            address: r.address.trim(),
+            sort_order: i,
           })))
         }
       } catch { /* migration not yet applied */ }
@@ -3912,6 +3965,42 @@ const filteredCustomers = useMemo(
             <AddressInput label="Pickup Address" value={form.pickup_address ?? ''} onValueChange={(v) => setField('pickup_address', v)} placeholder="123 Main St, Sydney" disabled={isReviewed} />
             <AddressInput label="Delivery Address" value={form.delivery_address ?? ''} onValueChange={(v) => setField('delivery_address', v)} placeholder="45 Park Ave, Sydney" disabled={isReviewed} />
           </div>
+
+          {/* Extra pickup/dropoff stops — informational only, no billing/distance impact */}
+          {extraAddresses.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-wire space-y-2">
+              {extraAddresses.map((row) => (
+                <div key={row._id} className="flex items-center gap-2">
+                  <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide px-2 py-1 rounded-full ${row.address_type === 'pickup' ? 'bg-blue-500/15 text-blue-300' : 'bg-orange-500/15 text-orange-300'}`}>
+                    {row.address_type === 'pickup' ? 'Pickup' : 'Drop-off'}
+                  </span>
+                  <input
+                    type="text"
+                    value={row.address}
+                    onChange={(e) => updateExtraAddress(row._id, e.target.value)}
+                    disabled={isReviewed}
+                    placeholder="Additional address…"
+                    className="flex-1 px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel disabled:text-dim"
+                  />
+                  {!isReviewed && (
+                    <button type="button" onClick={() => removeExtraAddress(row._id)} className="text-dim hover:text-danger shrink-0">
+                      <Trash2 size={15} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {!isReviewed && (
+            <div className="mt-3 flex items-center gap-4">
+              <button type="button" onClick={() => addExtraAddress('pickup')} className="flex items-center gap-1 text-xs text-gold hover:text-gold-bright font-medium">
+                <Plus size={13} /> Add pickup stop
+              </button>
+              <button type="button" onClick={() => addExtraAddress('dropoff')} className="flex items-center gap-1 text-xs text-gold hover:text-gold-bright font-medium">
+                <Plus size={13} /> Add drop-off stop
+              </button>
+            </div>
+          )}
         </Card>
 
         {/* ── Extra Men (in_progress only — completion shows inside Final Review) */}
