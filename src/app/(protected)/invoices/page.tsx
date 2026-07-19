@@ -81,6 +81,7 @@ interface InvoiceJob {
   job_extra_men: Array<{ employee_id: string | null; name: string | null; rate_per_hour: number | null; start_time: string | null; finish_time: string | null; cof_share: boolean; client_charge_amount: number }>
   job_materials: Array<{ quantity: number; cost_price: number; sale_price: number }>
   job_expenses: Array<{ amount: number; is_client_expense: boolean }>
+  job_employee_expenses: Array<{ employee_id: string | null; casual_worker_id: string | null; description: string | null; amount: number }>
 }
 
 const fmtAUD = (n: number) =>
@@ -342,7 +343,8 @@ function InvoicesPageContent() {
         job_commissions(employee_id, casual_worker_id, rate_per_hour, hours, commission_type:commission_types(name)),
         job_materials(quantity, cost_price, sale_price),
         job_expenses(amount, is_client_expense),
-        job_extra_men(employee_id, name, rate_per_hour, start_time, finish_time, cof_share, client_charge_amount)
+        job_extra_men(employee_id, name, rate_per_hour, start_time, finish_time, cof_share, client_charge_amount),
+        job_employee_expenses(employee_id, casual_worker_id, description, amount)
       `)
       .gte('date', dateFrom)
       .lte('date', dateTo)
@@ -558,6 +560,21 @@ function InvoicesPageContent() {
             })
           }
         }
+        // Money this employee paid out of pocket on the job (e.g. a parking
+        // ticket) — reimbursed via their invoice, tracked hours-free.
+        for (const rb of (job.job_employee_expenses ?? [])) {
+          if (rb.employee_id === emp.id && rb.amount > 0) {
+            entries.push({
+              job,
+              workedHours: 0,
+              cofHours: 0,
+              paidHours: 0,
+              pay: rb.amount,
+              googleReviewBonus: false,
+              label: rb.description?.trim() ? `Reimbursement: ${rb.description.trim()}` : 'Reimbursement',
+            })
+          }
+        }
       }
       const totalPaidHours = entries.reduce((s, e) => s + e.paidHours, 0)
       const totalPay = entries.reduce((s, e) => s + e.pay, 0)
@@ -628,6 +645,24 @@ function InvoicesPageContent() {
         byKey.get(key)!.entries.push({
           job, workedHours: com.hours, cofHours: 0, paidHours: com.hours, pay: com.hours * com.rate_per_hour,
           heavyItem: false, googleReviewBonus: false, label: com.commission_type?.name ?? 'Commission',
+        })
+      }
+
+      // Money a casual worker paid out of pocket on the job — reimbursed via
+      // their invoice, tracked hours-free. Resolved by casual_worker_id since
+      // the reimbursement row isn't tied to a specific job_casual_crew entry.
+      for (const rb of job.job_employee_expenses ?? []) {
+        if (!rb.casual_worker_id || rb.amount <= 0) continue
+        const linked = job.job_casual_crew?.find((r) => r.casual_worker_id === rb.casual_worker_id)
+        const cw = casualWorkers.find((c) => c.id === rb.casual_worker_id)
+        const name = (linked?.name?.trim() || cw?.name || '').trim()
+        if (!name) continue
+        const key = name.toLowerCase()
+        if (!byKey.has(key)) byKey.set(key, { name, entries: [] })
+        byKey.get(key)!.entries.push({
+          job, workedHours: 0, cofHours: 0, paidHours: 0, pay: rb.amount,
+          heavyItem: false, googleReviewBonus: false,
+          label: rb.description?.trim() ? `Reimbursement: ${rb.description.trim()}` : 'Reimbursement',
         })
       }
 
@@ -1160,7 +1195,11 @@ function InvoicesPageContent() {
                           <td className="px-4 py-2">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="font-mono text-parchment">#{job.job_number}</span>
-                              {label && <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-300 font-medium">Commission: {label}</span>}
+                              {label && (
+                                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${label.startsWith('Reimbursement') ? 'bg-emerald-500/15 text-emerald-300' : 'bg-purple-500/15 text-purple-300'}`}>
+                                  {label.startsWith('Reimbursement') ? label : `Commission: ${label}`}
+                                </span>
+                              )}
                               {STATUS_STYLE[job.status] && (
                                 <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${STATUS_STYLE[job.status]}`}>{job.status}</span>
                               )}
@@ -1237,7 +1276,11 @@ function InvoicesPageContent() {
                           <td className="px-4 py-2">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="font-mono text-parchment">#{job.job_number}</span>
-                              {label && <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-300 font-medium">Commission: {label}</span>}
+                              {label && (
+                                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${label.startsWith('Reimbursement') ? 'bg-emerald-500/15 text-emerald-300' : 'bg-purple-500/15 text-purple-300'}`}>
+                                  {label.startsWith('Reimbursement') ? label : `Commission: ${label}`}
+                                </span>
+                              )}
                               {STATUS_STYLE[job.status] && (
                                 <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${STATUS_STYLE[job.status]}`}>{job.status}</span>
                               )}

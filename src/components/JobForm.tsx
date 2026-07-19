@@ -102,6 +102,15 @@ interface ExtraManRow {
   client_charge: string
 }
 
+interface JobTruckRow {
+  fleet_id: string
+  // Amount charged to the client for this specific truck (e.g. a job that
+  // escalates mid-way and needs a second truck sent out) — same optional
+  // "client_charge" concept as Extra Man, purely informational/revenue,
+  // independent of any truck operating cost.
+  client_charge: string
+}
+
 interface PhotoLocal {
   _id: string
   dbId?: string
@@ -145,6 +154,19 @@ interface ExpenseRow {
   description: string
   amount: string
   is_client_expense: boolean
+}
+
+// Money an employee or casual worker spends out of pocket on the job (e.g. a
+// parking ticket) that must be reimbursed to them — surfaces as an extra pay
+// line on that specific person's invoice. Same dual-reference (staff/casual)
+// pattern as CommissionRow.
+interface EmployeeExpenseRow {
+  _id: string
+  dbId: string | null
+  employee_id: string
+  casual_worker_id: string
+  description: string
+  amount: string
 }
 
 interface FormState {
@@ -388,7 +410,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
   const [subRates, setSubRates] = useState<SubcontractorRate[]>([])
   const [contractRates, setContractRates] = useState<ContractRate[]>([])
   const [fleet, setFleet] = useState<Fleet[]>([])
-  const [jobTruckIds, setJobTruckIds] = useState<string[]>([])
+  const [jobTruckRows, setJobTruckRows] = useState<JobTruckRow[]>([])
   const [catalog, setCatalog] = useState<MaterialCatalog[]>([])
   const [showCatalogDrop, setShowCatalogDrop] = useState(false)
   const catalogRef = useRef<HTMLDivElement>(null)
@@ -399,6 +421,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
   const [commissions, setCommissions] = useState<CommissionRow[]>([])
   const [commissionTypes, setCommissionTypes] = useState<CommissionType[]>([])
   const [expenses, setExpenses] = useState<ExpenseRow[]>([])
+  const [employeeExpenses, setEmployeeExpenses] = useState<EmployeeExpenseRow[]>([])
   const [extraAddresses, setExtraAddresses] = useState<ExtraAddressRow[]>([])
   const [materials, setMaterials] = useState<MaterialRow[]>([])
   const [photos, setPhotos] = useState<PhotoLocal[]>([])
@@ -484,10 +507,13 @@ export default function JobForm({ jobId }: { jobId?: string }) {
         const [jobRes, photosRes, trucksRes, commentsRes] = await Promise.all([
           supabase.from('jobs').select('*, job_crew(*), job_materials(*)').eq('id', jobId).single(),
           supabase.from('job_photos').select('*').eq('job_id', jobId).order('created_at'),
-          supabase.from('job_trucks').select('fleet_id').eq('job_id', jobId),
+          supabase.from('job_trucks').select('fleet_id, client_charge_amount').eq('job_id', jobId),
           supabase.from('job_comments').select('*').eq('job_id', jobId).order('created_at'),
         ])
-        setJobTruckIds((trucksRes.data ?? []).map((r: { fleet_id: string }) => r.fleet_id))
+        setJobTruckRows((trucksRes.data ?? []).map((r: { fleet_id: string; client_charge_amount?: number }) => ({
+          fleet_id: r.fleet_id,
+          client_charge: r.client_charge_amount ? r.client_charge_amount.toString() : '',
+        })))
         setComments((commentsRes.data ?? []) as JobComment[])
 
         if (jobRes.data) {
@@ -700,6 +726,18 @@ export default function JobForm({ jobId }: { jobId?: string }) {
               description: r.description,
               amount: r.amount.toString(),
               is_client_expense: r.is_client_expense,
+            })))
+          } catch { /* migration not yet applied */ }
+
+          try {
+            const { data: empExpData } = await supabase.from('job_employee_expenses').select('*').eq('job_id', jobId).order('created_at')
+            setEmployeeExpenses((empExpData ?? []).map((r: { id: string; employee_id: string | null; casual_worker_id: string | null; description: string | null; amount: number }) => ({
+              _id: r.id,
+              dbId: r.id,
+              employee_id: r.employee_id ?? '',
+              casual_worker_id: r.casual_worker_id ?? '',
+              description: r.description ?? '',
+              amount: r.amount ? r.amount.toString() : '',
             })))
           } catch { /* migration not yet applied */ }
 
@@ -1226,6 +1264,15 @@ const filteredCustomers = useMemo(
   }
   function removeExpense(_id: string) { setExpenses((e) => e.filter((r) => r._id !== _id)) }
 
+  // ── Employee reimbursement helpers ──────────────────────────────────────────
+  function addEmployeeExpense() {
+    setEmployeeExpenses((e) => [...e, { _id: crypto.randomUUID(), dbId: null, employee_id: '', casual_worker_id: '', description: '', amount: '' }])
+  }
+  function updateEmployeeExpense(_id: string, field: 'employee_id' | 'casual_worker_id' | 'description' | 'amount', value: string) {
+    setEmployeeExpenses((e) => e.map((r) => r._id === _id ? { ...r, [field]: value } : r))
+  }
+  function removeEmployeeExpense(_id: string) { setEmployeeExpenses((e) => e.filter((r) => r._id !== _id)) }
+
   // ── Photo helpers ──────────────────────────────────────────────────────────
   // Core single-file upload — does not touch the shared uploading/caption
   // state, so it can be called in a loop by uploadPhotos below without each
@@ -1518,7 +1565,7 @@ const filteredCustomers = useMemo(
       sale_price: parseFloat(m.sale_price) || 0,
     }))
 
-    const truckFleetIds = jobTruckIds.filter(Boolean)
+    const truckPersistRows = jobTruckRows.filter((r) => r.fleet_id)
 
     if (isEdit && jobId) {
       const { error: updErr } = await supabase.from('jobs').update(payload).eq('id', jobId)
@@ -1530,7 +1577,7 @@ const filteredCustomers = useMemo(
       ])
       if (crewRows.length) await supabase.from('job_crew').insert(crewRows.map((r) => ({ ...r, job_id: jobId })))
       if (matRows.length) await supabase.from('job_materials').insert(matRows.map((m) => ({ ...m, job_id: jobId })))
-      if (truckFleetIds.length) await supabase.from('job_trucks').insert(truckFleetIds.map((fid) => ({ job_id: jobId, fleet_id: fid })))
+      if (truckPersistRows.length) await supabase.from('job_trucks').insert(truckPersistRows.map((r) => ({ job_id: jobId, fleet_id: r.fleet_id, client_charge_amount: parseFloat(r.client_charge) || 0 })))
       try {
         await supabase.from('job_extra_men').delete().eq('job_id', jobId)
         if (extraMenPersistRows.length) {
@@ -1609,6 +1656,23 @@ const filteredCustomers = useMemo(
         }
       } catch { /* migration not yet applied */ }
       try {
+        await supabase.from('job_employee_expenses').delete().eq('job_id', jobId)
+        // Only require a person to be selected — never gate on the amount/
+        // description fields being filled in yet (same lesson as Extra Men:
+        // don't silently drop a row from the delete+reinsert just because an
+        // optional field is still blank).
+        const empExpRows = employeeExpenses.filter((r) => r.employee_id || r.casual_worker_id)
+        if (empExpRows.length) {
+          await supabase.from('job_employee_expenses').insert(empExpRows.map((r) => ({
+            job_id: jobId,
+            employee_id: r.employee_id || null,
+            casual_worker_id: r.casual_worker_id || null,
+            description: r.description.trim() || null,
+            amount: parseFloat(r.amount) || 0,
+          })))
+        }
+      } catch { /* migration not yet applied */ }
+      try {
         await supabase.from('job_addresses').delete().eq('job_id', jobId)
         const addrRows = extraAddresses.filter((r) => r.address.trim())
         if (addrRows.length) {
@@ -1626,7 +1690,7 @@ const filteredCustomers = useMemo(
       const newId = (job as { id: string }).id
       if (crewRows.length) await supabase.from('job_crew').insert(crewRows.map((r) => ({ ...r, job_id: newId })))
       if (matRows.length) await supabase.from('job_materials').insert(matRows.map((m) => ({ ...m, job_id: newId })))
-      if (truckFleetIds.length) await supabase.from('job_trucks').insert(truckFleetIds.map((fid) => ({ job_id: newId, fleet_id: fid })))
+      if (truckPersistRows.length) await supabase.from('job_trucks').insert(truckPersistRows.map((r) => ({ job_id: newId, fleet_id: r.fleet_id, client_charge_amount: parseFloat(r.client_charge) || 0 })))
       if (photos.length) await supabase.from('job_photos').insert(photos.map((p) => ({ job_id: newId, url: p.url, caption: p.caption || null, category: p.category })))
       try {
         if (extraMenPersistRows.length) {
@@ -1694,6 +1758,18 @@ const filteredCustomers = useMemo(
             description: r.description.trim(),
             amount: parseFloat(r.amount) || 0,
             is_client_expense: r.is_client_expense,
+          })))
+        }
+      } catch { /* migration not yet applied */ }
+      try {
+        const empExpRows = employeeExpenses.filter((r) => r.employee_id || r.casual_worker_id)
+        if (empExpRows.length) {
+          await supabase.from('job_employee_expenses').insert(empExpRows.map((r) => ({
+            job_id: newId,
+            employee_id: r.employee_id || null,
+            casual_worker_id: r.casual_worker_id || null,
+            description: r.description.trim() || null,
+            amount: parseFloat(r.amount) || 0,
           })))
         }
       } catch { /* migration not yet applied */ }
@@ -2129,39 +2205,50 @@ const filteredCustomers = useMemo(
   }
 
   // ── Truck helpers ─────────────────────────────────────────────────────────
-  function addTruck() { setJobTruckIds((ids) => [...ids, '']) }
+  function addTruck() { setJobTruckRows((rows) => [...rows, { fleet_id: '', client_charge: '' }]) }
   function setTruckId(idx: number, fid: string) {
-    setJobTruckIds((ids) => ids.map((v, i) => (i === idx ? fid : v)))
+    setJobTruckRows((rows) => rows.map((r, i) => (i === idx ? { ...r, fleet_id: fid } : r)))
+  }
+  function setTruckCharge(idx: number, value: string) {
+    setJobTruckRows((rows) => rows.map((r, i) => (i === idx ? { ...r, client_charge: value } : r)))
   }
   function removeTruck(idx: number) {
-    setJobTruckIds((ids) => ids.filter((_, i) => i !== idx))
+    setJobTruckRows((rows) => rows.filter((_, i) => i !== idx))
   }
 
   // ── SHARED: Crew card ──────────────────────────────────────────────────────
   function renderCrewCard(showTimeInputs: boolean, locked = false) {
     return (
       <Card title="Crew" action={!locked ? <button type="button" onClick={addCrew} className="flex items-center gap-1 text-xs text-gold hover:text-gold-bright font-medium"><Plus size={14} /> Add</button> : undefined}>
-        {/* Truck selector — only for private and contract jobs */}
-        {(form.source === 'private' || form.source === 'contract') && <div className="mb-3 space-y-1.5">
+        {/* Truck — available for all job sources; supports multiple trucks per
+            job (e.g. a job that escalates mid-way needs a second truck sent
+            out) each with an optional value charged to the client. */}
+        <div className="mb-3 space-y-1.5">
           <label className="block text-xs font-semibold text-dim uppercase tracking-wide">Truck</label>
           {locked ? (
-            <p className="text-sm text-warm">
-              {jobTruckIds.length === 0
-                ? <span className="text-dim">—</span>
-                : jobTruckIds.map((fid) => fleet.find((t) => t.id === fid)).filter(Boolean).map((t, i) => (
-                    <span key={i}>
-                      {i > 0 && ' + '}
-                      <span className="font-mono font-semibold">{t!.registration ?? t!.name}</span>
-                    </span>
-                  ))
-              }
-            </p>
+            jobTruckRows.length === 0 ? (
+              <p className="text-sm text-dim">—</p>
+            ) : (
+              <div className="space-y-1">
+                {jobTruckRows.map((row, i) => {
+                  const t = fleet.find((f) => f.id === row.fleet_id)
+                  if (!t) return null
+                  const charge = parseFloat(row.client_charge) || 0
+                  return (
+                    <p key={i} className="text-sm text-warm">
+                      <span className="font-mono font-semibold">{t.registration ?? t.name}</span>
+                      {charge > 0 && <span className="text-success ml-2">+{fmt(charge)} charged</span>}
+                    </p>
+                  )
+                })}
+              </div>
+            )
           ) : (
             <>
-              {jobTruckIds.map((fid, idx) => (
+              {jobTruckRows.map((row, idx) => (
                 <div key={idx} className="flex items-center gap-2">
                   <select
-                    value={fid}
+                    value={row.fleet_id}
                     onChange={(e) => setTruckId(idx, e.target.value)}
                     className="flex-1 px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring bg-panel"
                   >
@@ -2172,6 +2259,19 @@ const filteredCustomers = useMemo(
                       </option>
                     ))}
                   </select>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="text-xs text-dim">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={row.client_charge}
+                      onChange={(e) => setTruckCharge(idx, e.target.value)}
+                      placeholder="Client charge"
+                      title="Value charged to client for this truck"
+                      className="w-28 px-2 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring bg-panel"
+                    />
+                  </div>
                   <button type="button" onClick={() => removeTruck(idx)} className="text-dim hover:text-danger shrink-0"><Trash2 size={15} /></button>
                 </div>
               ))}
@@ -2184,8 +2284,8 @@ const filteredCustomers = useMemo(
               </button>
             </>
           )}
-        </div>}
-        {(form.source === 'private' || form.source === 'contract') && <div className="border-t border-wire mb-3" />}
+        </div>
+        <div className="border-t border-wire mb-3" />
         <div>
         {crew.length === 0 && <p className="text-sm text-dim text-center py-2">No crew added yet.</p>}
         <div className="space-y-2">
@@ -3768,6 +3868,90 @@ const filteredCustomers = useMemo(
                       <span className="text-danger font-medium">−{fmt(expenses.filter((e) => !e.is_client_expense).reduce((s, e) => s + (parseFloat(e.amount) || 0), 0))}</span>
                     </div>
                   )}
+                </div>
+              )}
+            </div>
+
+            {/* Paid by Employee — out-of-pocket spend (e.g. a parking ticket)
+                that must be reimbursed to the crew member on their invoice/payroll */}
+            <div className="mb-3 pt-2 border-t border-wire">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium text-warm">Paid by Employee</label>
+                {!isReviewed && (
+                  <button type="button" onClick={addEmployeeExpense} className="flex items-center gap-1 text-xs text-gold hover:text-gold-bright font-medium">
+                    <Plus size={13} /> Add
+                  </button>
+                )}
+              </div>
+              {employeeExpenses.length === 0 && <p className="text-xs text-dim">No reimbursements added.</p>}
+              <div className="space-y-2">
+                {employeeExpenses.map((row) => (
+                  <div key={row._id} className="flex items-center gap-2 flex-wrap">
+                    <select
+                      value={row.casual_worker_id ? `casual:${row.casual_worker_id}` : row.employee_id ? `staff:${row.employee_id}` : ''}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        const [type, id] = val.split(':')
+                        setEmployeeExpenses((rows) => rows.map((r) => r._id === row._id ? {
+                          ...r,
+                          employee_id: type === 'staff' ? id : '',
+                          casual_worker_id: type === 'casual' ? id : '',
+                        } : r))
+                      }}
+                      disabled={isReviewed}
+                      className="flex-1 min-w-[120px] px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface disabled:text-dim"
+                    >
+                      <option value="">Select employee…</option>
+                      <optgroup label="Staff">
+                        {employees.map((e) => (
+                          <option key={e.id} value={`staff:${e.id}`}>{e.name}</option>
+                        ))}
+                      </optgroup>
+                      {casualWorkers.length > 0 && (
+                        <optgroup label="Casual Workers">
+                          {casualWorkers.map((cw) => (
+                            <option key={cw.id} value={`casual:${cw.id}`}>{cw.name}</option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                    <input
+                      type="text"
+                      placeholder="What was paid for (e.g. parking ticket)"
+                      value={row.description}
+                      onChange={(e) => updateEmployeeExpense(row._id, 'description', e.target.value)}
+                      disabled={isReviewed}
+                      className="flex-1 min-w-0 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface disabled:text-dim"
+                    />
+                    <div className="relative w-24 shrink-0">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-dim pointer-events-none">$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={row.amount}
+                        onChange={(e) => updateEmployeeExpense(row._id, 'amount', e.target.value)}
+                        disabled={isReviewed}
+                        className="w-full pl-5 pr-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface disabled:text-dim"
+                      />
+                    </div>
+                    {!isReviewed && (
+                      <button type="button" onClick={() => removeEmployeeExpense(row._id)} className="shrink-0 p-1 text-dim hover:text-danger transition-colors">
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {employeeExpenses.some((r) => (r.employee_id || r.casual_worker_id) && parseFloat(r.amount) > 0) && (
+                <div className="mt-2 pt-2 border-t border-wire/50">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-dim">Total to reimburse (added to their invoice)</span>
+                    <span className="text-success font-medium">
+                      +{fmt(employeeExpenses.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0))}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
