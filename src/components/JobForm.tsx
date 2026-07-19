@@ -96,10 +96,15 @@ interface ExtraManRow {
   start_time: string
   finish_time: string
   cof_share: boolean
-  // Amount charged to the client for bringing on this extra man — pure company
-  // revenue/profit, independent of what the extra man is actually paid (hours
-  // worked + COF + review bonus, computed separately for payroll).
+  // Legacy flat one-off amount charged to the client for this extra man —
+  // kept only for rows saved before client_rate_per_hour existed; no longer
+  // editable in the UI.
   client_charge: string
+  // Hourly rate charged to the client for this extra man — pure company
+  // revenue/profit, independent of what the extra man is actually paid (hours
+  // worked + COF + review bonus, computed separately for payroll). Total
+  // charged = hours × this rate, computed automatically instead of typed.
+  client_rate_per_hour: string
 }
 
 interface JobTruckRow {
@@ -109,6 +114,23 @@ interface JobTruckRow {
   // "client_charge" concept as Extra Man, purely informational/revenue,
   // independent of any truck operating cost.
   client_charge: string
+}
+
+// A Private/Contract job's crew or truck count can change mid-day (e.g.
+// starts 2 Men & 1 Truck, becomes 3 Men & 1 Truck, then 4 Men & 2 Trucks) —
+// the CLIENT rate must change for that segment too, not just the payroll
+// side. Each row is one segment of the day billed at its own rate; label/
+// rate_per_hour are the resolved values at save time (not just a foreign
+// key), same convention as Extra Man's free-text name/rate, so historical
+// jobs keep showing what was actually charged even if the rate card changes
+// later.
+interface RateBlockRow {
+  _id: string
+  dbId: string | null
+  label: string
+  rate_per_hour: string
+  start_time: string
+  finish_time: string
 }
 
 interface PhotoLocal {
@@ -411,6 +433,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
   const [contractRates, setContractRates] = useState<ContractRate[]>([])
   const [fleet, setFleet] = useState<Fleet[]>([])
   const [jobTruckRows, setJobTruckRows] = useState<JobTruckRow[]>([])
+  const [rateBlocks, setRateBlocks] = useState<RateBlockRow[]>([])
   const [catalog, setCatalog] = useState<MaterialCatalog[]>([])
   const [showCatalogDrop, setShowCatalogDrop] = useState(false)
   const catalogRef = useRef<HTMLDivElement>(null)
@@ -661,7 +684,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
 
           try {
             const { data: emData } = await supabase.from('job_extra_men').select('*').eq('job_id', jobId).order('created_at')
-            setExtraMan((emData ?? []).map((r: { id: string; employee_id: string | null; name?: string | null; rate_per_hour?: number | null; start_time: string | null; finish_time: string | null; cof_share?: boolean; client_charge_amount?: number }) => {
+            setExtraMan((emData ?? []).map((r: { id: string; employee_id: string | null; name?: string | null; rate_per_hour?: number | null; start_time: string | null; finish_time: string | null; cof_share?: boolean; client_charge_amount?: number; client_rate_per_hour?: number }) => {
               // Legacy rows (saved before the free-text name/rate columns existed)
               // only have employee_id — resolve a display name/rate from it.
               const staffEmp = r.employee_id ? loadedEmployees.find((e) => e.id === r.employee_id) : undefined
@@ -677,6 +700,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
                 finish_time: r.finish_time ?? '',
                 cof_share: r.cof_share ?? false,
                 client_charge: r.client_charge_amount ? r.client_charge_amount.toString() : '',
+                client_rate_per_hour: r.client_rate_per_hour ? r.client_rate_per_hour.toString() : '',
               }
             }))
           } catch { /* migration not yet applied */ }
@@ -738,6 +762,18 @@ export default function JobForm({ jobId }: { jobId?: string }) {
               casual_worker_id: r.casual_worker_id ?? '',
               description: r.description ?? '',
               amount: r.amount ? r.amount.toString() : '',
+            })))
+          } catch { /* migration not yet applied */ }
+
+          try {
+            const { data: rbData } = await supabase.from('job_rate_blocks').select('*').eq('job_id', jobId).order('sort_order')
+            setRateBlocks((rbData ?? []).map((r: { id: string; label: string | null; rate_per_hour: number; start_time: string | null; finish_time: string | null }) => ({
+              _id: r.id,
+              dbId: r.id,
+              label: r.label ?? '',
+              rate_per_hour: r.rate_per_hour ? r.rate_per_hour.toString() : '',
+              start_time: r.start_time ?? '',
+              finish_time: r.finish_time ?? '',
             })))
           } catch { /* migration not yet applied */ }
 
@@ -952,6 +988,7 @@ const filteredCustomers = useMemo(
           employee_name: r.name.trim(),
           cof_share: r.cof_share,
           client_charge: parseFloat(r.client_charge) || 0,
+          client_rate_per_hour: parseFloat(r.client_rate_per_hour) || 0,
         }
       })
       .filter((r) => r.hours > 0)
@@ -1077,6 +1114,17 @@ const filteredCustomers = useMemo(
       is_client_expense: e.is_client_expense,
     }))
 
+    // Rate Changes — a job whose crew/truck size changed mid-day bills each
+    // segment at its own rate instead of one flat rate for the whole job.
+    // Only used when the user has actually added segments; otherwise billing
+    // falls back to the single flat rate exactly as before.
+    const rateBlocksForBilling = rateBlocks
+      .filter((b) => (parseFloat(b.rate_per_hour) || 0) > 0 && b.start_time.length === 5 && b.finish_time.length === 5)
+      .map((b) => ({ rate_per_hour: parseFloat(b.rate_per_hour) || 0, hours: Math.max(0, calcCrewHours(b.start_time, b.finish_time)) }))
+    const rateBlocksInput = (form.source === 'private' || form.source === 'contract') && rateBlocksForBilling.length > 0
+      ? { blocks: rateBlocksForBilling, cofHours: effectiveClientCof }
+      : null
+
     return calculateJobSummary(
       jobData,
       form.source === 'subcontract' ? selectedSub : null,
@@ -1089,9 +1137,10 @@ const filteredCustomers = useMemo(
       extraMenForBilling,
       casualCrewForBilling,
       commissionsForBilling,
-      expensesForBilling
+      expensesForBilling,
+      rateBlocksInput
     )
-  }, [form, crew, extraMen, casualCrew, commissions, commissionTypes, materials, expenses, selectedSub, selectedEntity, selectedPrivateRateInput, employees, casualWorkers, overrideOpen, overrideBilling, subRates, contractRates])
+  }, [form, crew, extraMen, casualCrew, commissions, commissionTypes, materials, expenses, selectedSub, selectedEntity, selectedPrivateRateInput, employees, casualWorkers, overrideOpen, overrideBilling, subRates, contractRates, rateBlocks])
 
   // ── Worked hours from actual times (rounded to nearest 15 min) ──────────
   const workedHoursCalc = useMemo<number | null>(() => {
@@ -1188,11 +1237,11 @@ const filteredCustomers = useMemo(
 
   // ── Extra men helpers ──────────────────────────────────────────────────────
   function addExtraMan() {
-    setExtraMan((em) => [...em, { _id: crypto.randomUUID(), name: '', rate_per_hour: '', start_time: '', finish_time: '', cof_share: false, client_charge: '' }])
+    setExtraMan((em) => [...em, { _id: crypto.randomUUID(), name: '', rate_per_hour: '', start_time: '', finish_time: '', cof_share: false, client_charge: '', client_rate_per_hour: '' }])
   }
-  function updateExtraMan(_id: string, field: 'name' | 'rate_per_hour' | 'start_time' | 'finish_time' | 'client_charge', value: string): void
+  function updateExtraMan(_id: string, field: 'name' | 'rate_per_hour' | 'start_time' | 'finish_time' | 'client_charge' | 'client_rate_per_hour', value: string): void
   function updateExtraMan(_id: string, field: 'cof_share', value: boolean): void
-  function updateExtraMan(_id: string, field: 'name' | 'rate_per_hour' | 'start_time' | 'finish_time' | 'client_charge' | 'cof_share', value: string | boolean) {
+  function updateExtraMan(_id: string, field: 'name' | 'rate_per_hour' | 'start_time' | 'finish_time' | 'client_charge' | 'client_rate_per_hour' | 'cof_share', value: string | boolean) {
     setExtraMan((em) => em.map((r) => r._id === _id ? { ...r, [field]: value } : r))
   }
   function removeExtraMan(_id: string) {
@@ -1476,6 +1525,15 @@ const filteredCustomers = useMemo(
       return ratePerHour * (Math.max(2, workedHrsForSave) + saveEffectiveClientCof + additionalHrs) + extraMenRevenue
     })()
 
+    // Rate Changes — when the crew/truck size changed mid-day, the job was
+    // billed as several segments at different rates instead of one flat rate
+    // for the whole job. Takes priority over the single flat-rate calc above.
+    const rateBlocksPersistRows = rateBlocks.filter((b) => (parseFloat(b.rate_per_hour) || 0) > 0 && b.start_time.length === 5 && b.finish_time.length === 5)
+    const computedRateBlocksRevenue = (form.source === 'private' || form.source === 'contract') && rateBlocksPersistRows.length > 0
+      ? rateBlocksPersistRows.reduce((s, b) => s + Math.max(0, calcCrewHours(b.start_time, b.finish_time)) * (parseFloat(b.rate_per_hour) || 0), 0)
+        + saveEffectiveClientCof * (parseFloat(rateBlocksPersistRows[rateBlocksPersistRows.length - 1].rate_per_hour) || 0)
+      : null
+
     const payload = {
       job_number: form.job_number.trim(),
       date: form.date,
@@ -1533,7 +1591,7 @@ const filteredCustomers = useMemo(
       contract_rate_custom_price: form.source === 'contract' && form.contract_rate_custom ? (parseFloat(form.contract_rate_custom_price) || null) : null,
       contractor_job_id: form.source === 'subcontract' ? (form.contractor_job_id.trim() || null) : null,
       gross_job_value: isPercentSub ? (parseFloat(form.gross_job_value) || null) : null,
-      malibu_revenue: computedMalibuRevenue ?? computedPrivateRevenue ?? computedRatecardRevenue ?? computedContractRevenue ?? null,
+      malibu_revenue: computedMalibuRevenue ?? computedRateBlocksRevenue ?? computedPrivateRevenue ?? computedRatecardRevenue ?? computedContractRevenue ?? null,
       client_cof_override: form.client_cof_override,
       client_cof_hours: form.client_cof_override ? (parseFloat(form.client_cof_hours) || null) : null,
     }
@@ -1591,7 +1649,12 @@ const filteredCustomers = useMemo(
               start_time: r.start_time || null,
               finish_time: r.finish_time || null,
               cof_share: r.cof_share,
-              client_charge_amount: parseFloat(r.client_charge) || 0,
+              client_rate_per_hour: parseFloat(r.client_rate_per_hour) || 0,
+              client_charge_amount: (() => {
+                const rate = parseFloat(r.client_rate_per_hour) || 0
+                if (rate > 0) return rate * Math.max(0, calcCrewHours(r.start_time, r.finish_time))
+                return parseFloat(r.client_charge) || 0
+              })(),
             }
           }))
         }
@@ -1673,6 +1736,19 @@ const filteredCustomers = useMemo(
         }
       } catch { /* migration not yet applied */ }
       try {
+        await supabase.from('job_rate_blocks').delete().eq('job_id', jobId)
+        if (rateBlocksPersistRows.length) {
+          await supabase.from('job_rate_blocks').insert(rateBlocksPersistRows.map((r, i) => ({
+            job_id: jobId,
+            label: r.label.trim() || null,
+            rate_per_hour: parseFloat(r.rate_per_hour) || 0,
+            start_time: r.start_time || null,
+            finish_time: r.finish_time || null,
+            sort_order: i,
+          })))
+        }
+      } catch { /* migration not yet applied */ }
+      try {
         await supabase.from('job_addresses').delete().eq('job_id', jobId)
         const addrRows = extraAddresses.filter((r) => r.address.trim())
         if (addrRows.length) {
@@ -1704,7 +1780,12 @@ const filteredCustomers = useMemo(
               start_time: r.start_time || null,
               finish_time: r.finish_time || null,
               cof_share: r.cof_share,
-              client_charge_amount: parseFloat(r.client_charge) || 0,
+              client_rate_per_hour: parseFloat(r.client_rate_per_hour) || 0,
+              client_charge_amount: (() => {
+                const rate = parseFloat(r.client_rate_per_hour) || 0
+                if (rate > 0) return rate * Math.max(0, calcCrewHours(r.start_time, r.finish_time))
+                return parseFloat(r.client_charge) || 0
+              })(),
             }
           }))
         }
@@ -1770,6 +1851,18 @@ const filteredCustomers = useMemo(
             casual_worker_id: r.casual_worker_id || null,
             description: r.description.trim() || null,
             amount: parseFloat(r.amount) || 0,
+          })))
+        }
+      } catch { /* migration not yet applied */ }
+      try {
+        if (rateBlocksPersistRows.length) {
+          await supabase.from('job_rate_blocks').insert(rateBlocksPersistRows.map((r, i) => ({
+            job_id: newId,
+            label: r.label.trim() || null,
+            rate_per_hour: parseFloat(r.rate_per_hour) || 0,
+            start_time: r.start_time || null,
+            finish_time: r.finish_time || null,
+            sort_order: i,
           })))
         }
       } catch { /* migration not yet applied */ }
@@ -2007,6 +2100,13 @@ const filteredCustomers = useMemo(
                     : privateRates.find((r) => r.id === form.private_rate_id)?.name ?? '—'}
                 </p>
               )}
+              {rateBlocks.length > 0 && (
+                <div className="text-xs text-dim space-y-0.5">
+                  {rateBlocks.map((r) => (
+                    <p key={r._id}>{r.label || 'Custom'} — ${r.rate_per_hour}/hr ({r.start_time}–{r.finish_time})</p>
+                  ))}
+                </div>
+              )}
               {(parseFloat(form.deposit) || 0) > 0 && (
                 <p className="text-xs text-dim">Deposit: ${form.deposit}</p>
               )}
@@ -2106,6 +2206,78 @@ const filteredCustomers = useMemo(
                 </>
               )}
 
+              {/* Rate Changes — crew/truck size changed mid-job (e.g. starts
+                  2 Men & 1 Truck, becomes 4 Men & 2 Trucks): each segment is
+                  billed at its own rate instead of one flat rate for the
+                  whole day. Optional — leave empty for a normal flat-rate job. */}
+              <div className="pt-2 border-t border-wire space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-dim uppercase tracking-wide">Rate Changes (optional)</label>
+                  <button type="button" onClick={addRateBlock} className="flex items-center gap-1 text-xs text-gold hover:text-gold-bright font-medium">
+                    <Plus size={13} /> Add Rate Change
+                  </button>
+                </div>
+                {rateBlocks.map((row) => {
+                  const hours = row.start_time.length === 5 && row.finish_time.length === 5 ? Math.max(0, calcCrewHours(row.start_time, row.finish_time)) : null
+                  const rate = parseFloat(row.rate_per_hour) || 0
+                  return (
+                    <div key={row._id} className="flex items-center gap-1.5 flex-wrap p-2 bg-panel rounded-lg">
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          const val = e.target.value
+                          if (!val) return
+                          const [label, rateStr] = val.split('|')
+                          updateRateBlock(row._id, 'label', label)
+                          updateRateBlock(row._id, 'rate_per_hour', rateStr)
+                        }}
+                        className="text-xs px-2 py-1.5 border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring bg-panel"
+                      >
+                        <option value="">Quick-fill from rate…</option>
+                        {(['small', 'large'] as const).map((size) => {
+                          const sizeRates = privateRates.filter((r) => r.truck_size === size)
+                          if (!sizeRates.length) return null
+                          return (
+                            <optgroup key={size} label={size === 'small' ? '— Small Truck —' : '— Large Truck —'}>
+                              {sizeRates.map((r) => (
+                                <option key={r.id} value={`${r.name}|${r.rate_per_hour}`}>{r.name} — ${r.rate_per_hour}/hr</option>
+                              ))}
+                            </optgroup>
+                          )
+                        })}
+                      </select>
+                      <input
+                        type="text"
+                        value={row.label}
+                        onChange={(e) => updateRateBlock(row._id, 'label', e.target.value)}
+                        placeholder="e.g. 3 Men & 1 Truck"
+                        className="flex-1 min-w-[110px] px-2 py-1.5 text-xs border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
+                      />
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-xs text-dim">$</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={row.rate_per_hour}
+                          onChange={(e) => updateRateBlock(row._id, 'rate_per_hour', e.target.value)}
+                          placeholder="0.00"
+                          className="w-16 px-2 py-1.5 text-xs border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
+                        />
+                        <span className="text-xs text-dim">/hr</span>
+                      </div>
+                      <input type="time" value={row.start_time} onChange={(e) => updateRateBlock(row._id, 'start_time', e.target.value)} className="w-24 px-1.5 py-1.5 text-xs border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring" />
+                      <span className="text-dim text-xs">–</span>
+                      <input type="time" value={row.finish_time} onChange={(e) => updateRateBlock(row._id, 'finish_time', e.target.value)} className="w-24 px-1.5 py-1.5 text-xs border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring" />
+                      {hours !== null && rate > 0 && (
+                        <span className="text-xs font-medium text-success whitespace-nowrap">{hours}h = {fmt(hours * rate)}</span>
+                      )}
+                      <button type="button" onClick={() => removeRateBlock(row._id)} className="text-dim hover:text-danger shrink-0"><Trash2 size={14} /></button>
+                    </div>
+                  )
+                })}
+              </div>
+
               <Input
                 id="main-deposit"
                 label="Deposit ($)"
@@ -2134,6 +2306,13 @@ const filteredCustomers = useMemo(
                     ? <p className="text-xs text-dim">Rate: {form.rate_card_key}</p>
                     : null
               }
+              {rateBlocks.length > 0 && (
+                <div className="text-xs text-dim space-y-0.5">
+                  {rateBlocks.map((r) => (
+                    <p key={r._id}>{r.label || 'Custom'} — ${r.rate_per_hour}/hr ({r.start_time}–{r.finish_time})</p>
+                  ))}
+                </div>
+              )}
               {form.reference_number && <p className="text-xs text-dim">Job ID: {form.reference_number}</p>}
             </div>
           ) : (
@@ -2196,6 +2375,72 @@ const filteredCustomers = useMemo(
                   <Input label="Addtl Rate ($/hr)" type="number" min="0" step="0.01" value={form.additional_rate ?? ''} onChange={(e) => setField('additional_rate', e.target.value)} placeholder="0.00" />
                 </div>
               )}
+
+              {/* Rate Changes — crew/truck size changed mid-job: each segment
+                  is billed at its own rate instead of one flat rate for the
+                  whole day. Optional — leave empty for a normal flat-rate job. */}
+              {form.contract_id && (
+                <div className="pt-2 border-t border-wire space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-dim uppercase tracking-wide">Rate Changes (optional)</label>
+                    <button type="button" onClick={addRateBlock} className="flex items-center gap-1 text-xs text-gold hover:text-gold-bright font-medium">
+                      <Plus size={13} /> Add Rate Change
+                    </button>
+                  </div>
+                  {rateBlocks.map((row) => {
+                    const hours = row.start_time.length === 5 && row.finish_time.length === 5 ? Math.max(0, calcCrewHours(row.start_time, row.finish_time)) : null
+                    const rate = parseFloat(row.rate_per_hour) || 0
+                    return (
+                      <div key={row._id} className="flex items-center gap-1.5 flex-wrap p-2 bg-panel rounded-lg">
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            const val = e.target.value
+                            if (!val) return
+                            const [label, rateStr] = val.split('|')
+                            updateRateBlock(row._id, 'label', label)
+                            updateRateBlock(row._id, 'rate_per_hour', rateStr)
+                          }}
+                          className="text-xs px-2 py-1.5 border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring bg-panel"
+                        >
+                          <option value="">Quick-fill from rate…</option>
+                          {contractRates.filter((r) => r.contract_id === form.contract_id).map((r) => (
+                            <option key={r.id} value={`${r.name}|${r.rate_per_hour}`}>{r.name} — ${r.rate_per_hour}/hr</option>
+                          ))}
+                        </select>
+                        <input
+                          type="text"
+                          value={row.label}
+                          onChange={(e) => updateRateBlock(row._id, 'label', e.target.value)}
+                          placeholder="e.g. 3 Men & 1 Truck"
+                          className="flex-1 min-w-[110px] px-2 py-1.5 text-xs border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
+                        />
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-xs text-dim">$</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={row.rate_per_hour}
+                            onChange={(e) => updateRateBlock(row._id, 'rate_per_hour', e.target.value)}
+                            placeholder="0.00"
+                            className="w-16 px-2 py-1.5 text-xs border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
+                          />
+                          <span className="text-xs text-dim">/hr</span>
+                        </div>
+                        <input type="time" value={row.start_time} onChange={(e) => updateRateBlock(row._id, 'start_time', e.target.value)} className="w-24 px-1.5 py-1.5 text-xs border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring" />
+                        <span className="text-dim text-xs">–</span>
+                        <input type="time" value={row.finish_time} onChange={(e) => updateRateBlock(row._id, 'finish_time', e.target.value)} className="w-24 px-1.5 py-1.5 text-xs border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring" />
+                        {hours !== null && rate > 0 && (
+                          <span className="text-xs font-medium text-success whitespace-nowrap">{hours}h = {fmt(hours * rate)}</span>
+                        )}
+                        <button type="button" onClick={() => removeRateBlock(row._id)} className="text-dim hover:text-danger shrink-0"><Trash2 size={14} /></button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
               <Input label="COF (hrs)" type="number" min="0" step="0.25" value={form.cof ?? ''} onChange={(e) => setField('cof', e.target.value)} placeholder="0.5" />
             </div>
           )
@@ -2214,6 +2459,17 @@ const filteredCustomers = useMemo(
   }
   function removeTruck(idx: number) {
     setJobTruckRows((rows) => rows.filter((_, i) => i !== idx))
+  }
+
+  // ── Rate Change (billing segment) helpers ───────────────────────────────────
+  function addRateBlock() {
+    setRateBlocks((rows) => [...rows, { _id: crypto.randomUUID(), dbId: null, label: '', rate_per_hour: '', start_time: '', finish_time: '' }])
+  }
+  function updateRateBlock(_id: string, field: 'label' | 'rate_per_hour' | 'start_time' | 'finish_time', value: string) {
+    setRateBlocks((rows) => rows.map((r) => r._id === _id ? { ...r, [field]: value } : r))
+  }
+  function removeRateBlock(_id: string) {
+    setRateBlocks((rows) => rows.filter((r) => r._id !== _id))
   }
 
   // ── SHARED: Crew card ──────────────────────────────────────────────────────
@@ -3634,17 +3890,22 @@ const filteredCustomers = useMemo(
                       </label>
                       {computedLabel && <span className="text-xs font-mono text-warm tabular-nums whitespace-nowrap">{computedLabel}</span>}
                       <div className="flex items-center gap-1 shrink-0">
-                        <span className="text-xs text-dim whitespace-nowrap">Charge client $</span>
+                        <span className="text-xs text-dim whitespace-nowrap">Client rate $</span>
                         <input
                           type="number"
                           min="0"
                           step="0.01"
-                          value={row.client_charge}
-                          onChange={(e) => updateExtraMan(row._id, 'client_charge', e.target.value)}
+                          value={row.client_rate_per_hour}
+                          onChange={(e) => updateExtraMan(row._id, 'client_rate_per_hour', e.target.value)}
                           disabled={isReviewed}
                           placeholder="0.00"
+                          title="Hourly rate charged to the client for this extra man — total = hours × rate"
                           className="w-20 px-2 py-1 text-xs border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface"
                         />
+                        <span className="text-xs text-dim">/hr</span>
+                        {baseHrs !== null && (parseFloat(row.client_rate_per_hour) || 0) > 0 && (
+                          <span className="text-xs text-success font-medium whitespace-nowrap">= {fmt(baseHrs * (parseFloat(row.client_rate_per_hour) || 0))}</span>
+                        )}
                       </div>
                       {!isReviewed && (
                         <button type="button" onClick={() => removeExtraMan(row._id)} className="text-dim hover:text-danger">
@@ -4252,16 +4513,21 @@ const filteredCustomers = useMemo(
                       <span className="text-xs text-dim">COF</span>
                     </label>
                     <div className="flex items-center gap-1 shrink-0">
-                      <span className="text-xs text-dim whitespace-nowrap">Charge client $</span>
+                      <span className="text-xs text-dim whitespace-nowrap">Client rate $</span>
                       <input
                         type="number"
                         min="0"
                         step="0.01"
-                        value={row.client_charge}
-                        onChange={(e) => updateExtraMan(row._id, 'client_charge', e.target.value)}
+                        value={row.client_rate_per_hour}
+                        onChange={(e) => updateExtraMan(row._id, 'client_rate_per_hour', e.target.value)}
                         placeholder="0.00"
+                        title="Hourly rate charged to the client for this extra man — total = hours × rate"
                         className="w-20 px-2 py-1 text-xs border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
                       />
+                      <span className="text-xs text-dim">/hr</span>
+                      {computed !== null && (parseFloat(row.client_rate_per_hour) || 0) > 0 && (
+                        <span className="text-xs text-success font-medium whitespace-nowrap">= {fmt(computed * (parseFloat(row.client_rate_per_hour) || 0))}</span>
+                      )}
                     </div>
                     <button type="button" onClick={() => removeExtraMan(row._id)} className="text-dim hover:text-danger">
                       <Trash2 size={15} />

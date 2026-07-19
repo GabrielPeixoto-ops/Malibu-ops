@@ -244,6 +244,18 @@ export interface PrivateRateInput {
   cofHours: number
 }
 
+// A job whose crew/truck size changes mid-way (e.g. starts 1 truck + 3 men,
+// ends 2 trucks + 4 men) needs the CLIENT rate to change for that portion too
+// — not just an extra flat charge bolted onto a single flat rate for the
+// whole job. Each block is one segment of the day billed at its own rate
+// (matching a Private/Contract rate tier or a custom price); revenue is the
+// sum of hours × rate per block, plus any client Call Out Fee hours billed
+// at the last (most recent) block's rate.
+export interface RateBlocksInput {
+  blocks: Array<{ rate_per_hour: number; hours: number }>
+  cofHours: number
+}
+
 export interface JobSummary {
   subRevenue: number
   materialsRevenue: number
@@ -281,15 +293,25 @@ export function calculateJobSummary(
   clientEntity?: { billing_type: string; billing_config: SubcontractorConfig } | null,
   privateRate?: PrivateRateInput | null,
   rateOptions?: { subcontractorRatePerHour?: number | null; contractRatePerHour?: number | null },
-  extraMen?: Array<{ employee_id: string; hours: number; hourly_rate?: number; employee_name?: string; cof_share?: boolean; client_charge?: number }>,
+  extraMen?: Array<{ employee_id: string; hours: number; hourly_rate?: number; employee_name?: string; cof_share?: boolean; client_charge?: number; client_rate_per_hour?: number }>,
   casualCrew?: Array<{ name: string; rate_per_hour: number; hours: number; heavy_item?: boolean; casual_worker_id?: string | null }>,
   commissions?: Array<{ employee_id: string | null; rate_per_hour: number; hours: number; label?: string }>,
-  expenses?: Array<{ amount: number; is_client_expense: boolean }>
+  expenses?: Array<{ amount: number; is_client_expense: boolean }>,
+  rateBlocksInput?: RateBlocksInput | null
 ): JobSummary {
   const source = job.source ?? 'subcontract'
 
   let subRevenue = 0
-  if (source === 'subcontract') {
+  const useRateBlocks = (source === 'private' || source === 'contract') && rateBlocksInput && rateBlocksInput.blocks.length > 0
+  if (useRateBlocks) {
+    // Crew/truck size changed mid-job — bill each segment at its own rate
+    // instead of one flat rate for the whole day, then add any client Call
+    // Out Fee hours at the last (most recent) segment's rate.
+    const blocks = rateBlocksInput!.blocks
+    const blocksRevenue = blocks.reduce((s, b) => s + b.hours * b.rate_per_hour, 0)
+    const lastRate = blocks[blocks.length - 1].rate_per_hour
+    subRevenue = blocksRevenue + rateBlocksInput!.cofHours * lastRate
+  } else if (source === 'subcontract') {
     subRevenue = sub ? calculateJobRevenue(job, sub, rateOptions?.subcontractorRatePerHour) : 0
   } else if (source === 'private' && privateRate) {
     subRevenue = privateRate.rate_per_hour * privateRate.cofHours
@@ -311,8 +333,14 @@ export function calculateJobSummary(
   const heavyItemCharge = Number(job.heavy_item_charge) || 0
   // What we charge the client for bringing on an extra man is company revenue —
   // it's independent of what the extra man is actually paid (hours + COF +
-  // review bonus, computed separately in calculatePayroll below).
-  const extraMenRevenue = (extraMen ?? []).reduce((s, em) => s + (Number(em.client_charge) || 0), 0)
+  // review bonus, computed separately in calculatePayroll below). Prefer an
+  // hourly client rate (hours × rate) when set — falls back to the legacy
+  // flat one-off amount for rows saved before the hourly rate field existed.
+  const extraMenRevenue = (extraMen ?? []).reduce((s, em) => {
+    const rate = Number(em.client_rate_per_hour) || 0
+    if (rate > 0) return s + rate * (Number(em.hours) || 0)
+    return s + (Number(em.client_charge) || 0)
+  }, 0)
   const totalRevenue = subRevenue + materialsRevenue + clientExpensesTotal + heavyItemCharge + extraMenRevenue - discount
   const cofHours = Number(job.cof_final ?? job.cof) || 0
   const reviewIds = job.google_review ? (job.google_review_employee_ids ?? []) : []
