@@ -399,9 +399,10 @@ function InvoicesPageContent() {
     return reviews.find((r) => r.subject_type === subjectType && r.subject_id === subjectId)
   }
 
-  // A period is only "closed" once its last day is in the past — reviewing an
-  // in-progress week risks marking hours that can still change.
-  const periodClosed = dateTo < today()
+  // A period is "closed" once its last day has arrived (today counts too) —
+  // reviewing a week that's still genuinely in progress risks marking hours
+  // that can still change, but by the last day itself work is normally done.
+  const periodClosed = dateTo <= today()
   const [uploadingNote, setUploadingNote] = useState<string | null>(null)
 
   async function upsertReview(
