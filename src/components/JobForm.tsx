@@ -1110,7 +1110,7 @@ const filteredCustomers = useMemo(
       .filter((r) => r.hours > 0 && r.rate_per_hour > 0)
 
     const commissionsForBilling = commissions
-      .filter((r) => (r.employee_id || r.casual_worker_id) && (parseFloat(r.hours) || 0) > 0 && (parseFloat(r.rate_per_hour) || 0) > 0)
+      .filter((r) => (r.employee_id || r.casual_worker_id) && (parseFloat(r.rate_per_hour) || 0) > 0)
       .map((r) => {
         const type = commissionTypes.find((t) => t.id === r.commission_type_id)
         const casualWorker = r.casual_worker_id ? casualWorkers.find((cw) => cw.id === r.casual_worker_id) : null
@@ -1119,10 +1119,14 @@ const filteredCustomers = useMemo(
           casual_worker_id: r.casual_worker_id || null,
           casual_worker_name: casualWorker?.name,
           rate_per_hour: parseFloat(r.rate_per_hour) || 0,
-          hours: parseFloat(r.hours) || 0,
+          // Hours worked on THIS job by the selected person — never typed
+          // manually, always derived from Crew / Casual Crew (see
+          // commissionWorkedHours for why).
+          hours: commissionWorkedHours(r.employee_id, r.casual_worker_id),
           label: type ? `Commission: ${type.name}` : 'Commission',
         }
       })
+      .filter((r) => r.hours > 0)
 
     const expensesForBilling = expenses.map((e) => ({
       amount: parseFloat(e.amount) || 0,
@@ -1303,6 +1307,57 @@ const filteredCustomers = useMemo(
   function removeCasualCrew(_id: string) { setCasualCrew((c) => c.filter((r) => r._id !== _id)) }
 
   // ── Commission helpers ─────────────────────────────────────────────────────
+  // Commission hours are never typed manually — that's the whole reason the
+  // row has a "Person" picker at all. Whoever is selected there, their
+  // commission is based on the hours THEY worked on this job: exactly the
+  // same total shown in "Individual Crew Hours" below (worked hours + their
+  // COF share + heavy-item/review bonuses). If the selected person isn't in
+  // Crew or Casual Crew for this job, hours is 0 — no commission.
+  function commissionWorkedHours(employeeId: string, casualWorkerId: string): number {
+    const cofFinalDisplay = form.cof_final.trim() ? (parseFloat(form.cof_final) || 0) : 0
+    const billingWorkedHrs = (() => {
+      if (!form.actual_start_time || !form.actual_finish_time) return null
+      const [sh, sm] = form.actual_start_time.split(':').map(Number)
+      const [eh, em] = form.actual_finish_time.split(':').map(Number)
+      const rawMins = (eh * 60 + em) - (sh * 60 + sm) - (parseFloat(form.break_minutes) || 0)
+      if (rawMins <= 0) return null
+      return Math.ceil(rawMins / 15) * 15 / 60
+    })()
+    if (employeeId) {
+      const r = crew.find((c) => c.employee_id === employeeId)
+      if (!r) return 0
+      const baseHrs = (() => {
+        const rawC = crewHasTime(r) ? calcCrewHours(r.start_time, r.end_time) : null
+        if (rawC !== null && rawC > 0) return Math.max(2, rawC)
+        if (billingWorkedHrs !== null) return Math.max(2, billingWorkedHrs)
+        const manual = parseFloat(r.hours) || 0
+        return manual > 0 ? Math.max(2, manual) : 0
+      })()
+      const cofHrs = r.cof_share ? cofFinalDisplay : 0
+      const hiHrs = r.heavy_item ? 0.5 : 0
+      const reviewHrs = (form.google_review && form.google_review_employee_ids.includes(employeeId)) ? 0.5 : 0
+      return baseHrs + cofHrs + hiHrs + reviewHrs
+    }
+    if (casualWorkerId) {
+      const r = casualCrew.find((c) => {
+        const cw = casualWorkers.find((w) => w.name.toLowerCase() === c.name.trim().toLowerCase())
+        return cw?.id === casualWorkerId
+      })
+      if (!r) return 0
+      const hasTime = r.start_time.length === 5 && r.finish_time.length === 5
+      const baseHrs = (() => {
+        const rawC = hasTime ? calcCrewHours(r.start_time, r.finish_time) : null
+        if (rawC !== null && rawC > 0) return Math.max(2, rawC)
+        if (billingWorkedHrs !== null) return Math.max(2, billingWorkedHrs)
+        return 0
+      })()
+      const cofHrs = r.cof_share ? cofFinalDisplay : 0
+      const hiHrs = r.heavy_item ? 0.5 : 0
+      const reviewHrs = (form.google_review && form.google_review_employee_ids.includes(casualWorkerId)) ? 0.5 : 0
+      return baseHrs + cofHrs + hiHrs + reviewHrs
+    }
+    return 0
+  }
   function addCommission() {
     setCommissions((c) => [...c, { _id: crypto.randomUUID(), commission_type_id: '', employee_id: '', casual_worker_id: '', rate_per_hour: '', hours: '' }])
   }
@@ -1709,7 +1764,7 @@ const filteredCustomers = useMemo(
       } catch { /* migration not yet applied */ }
       try {
         await supabase.from('job_commissions').delete().eq('job_id', jobId)
-        const comRows = commissions.filter((r) => r.employee_id || r.casual_worker_id)
+        const comRows = commissions.filter((r) => (r.employee_id || r.casual_worker_id) && commissionWorkedHours(r.employee_id, r.casual_worker_id) > 0)
         if (comRows.length) {
           await supabase.from('job_commissions').insert(comRows.map((r) => ({
             job_id: jobId,
@@ -1717,7 +1772,7 @@ const filteredCustomers = useMemo(
             employee_id: r.employee_id || null,
             casual_worker_id: r.casual_worker_id || null,
             rate_per_hour: parseFloat(r.rate_per_hour) || 0,
-            hours: parseFloat(r.hours) || 0,
+            hours: commissionWorkedHours(r.employee_id, r.casual_worker_id),
           })))
         }
       } catch { /* migration not yet applied */ }
@@ -1834,7 +1889,7 @@ const filteredCustomers = useMemo(
         }
       } catch { /* migration not yet applied */ }
       try {
-        const comRows = commissions.filter((r) => r.employee_id || r.casual_worker_id)
+        const comRows = commissions.filter((r) => (r.employee_id || r.casual_worker_id) && commissionWorkedHours(r.employee_id, r.casual_worker_id) > 0)
         if (comRows.length) {
           await supabase.from('job_commissions').insert(comRows.map((r) => ({
             job_id: newId,
@@ -1842,7 +1897,7 @@ const filteredCustomers = useMemo(
             employee_id: r.employee_id || null,
             casual_worker_id: r.casual_worker_id || null,
             rate_per_hour: parseFloat(r.rate_per_hour) || 0,
-            hours: parseFloat(r.hours) || 0,
+            hours: commissionWorkedHours(r.employee_id, r.casual_worker_id),
           })))
         }
       } catch { /* migration not yet applied */ }
@@ -2961,7 +3016,10 @@ const filteredCustomers = useMemo(
         {commissions.length === 0 && <p className="text-sm text-dim text-center py-2">No commissions.</p>}
         <div className="space-y-2">
           {commissions.map((row) => {
-            const total = (parseFloat(row.rate_per_hour) || 0) * (parseFloat(row.hours) || 0)
+            // Hours are always the hours the selected person actually worked
+            // on this job (from Crew / Casual Crew) — never manually typed.
+            const workedHours = commissionWorkedHours(row.employee_id, row.casual_worker_id)
+            const total = (parseFloat(row.rate_per_hour) || 0) * workedHours
             return (
               <div key={row._id} className="flex items-center gap-2 flex-wrap">
                 <select
@@ -3017,22 +3075,20 @@ const filteredCustomers = useMemo(
                   />
                   <span className="text-xs text-dim">/hr</span>
                 </div>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    value={row.hours}
-                    onChange={(e) => updateCommission(row._id, 'hours', e.target.value)}
-                    disabled={locked}
-                    placeholder="hrs"
-                    className="w-16 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-panel"
-                  />
-                  <span className="text-xs text-dim">h</span>
+                <div
+                  className="flex items-center gap-1 px-2 py-1.5 text-sm rounded-lg bg-panel text-dim"
+                  title="Hours worked by this person on this job — from Crew / Casual Crew, not editable here"
+                >
+                  <span className="font-mono tabular-nums">{workedHours.toFixed(2)}</span>
+                  <span className="text-xs">h worked</span>
                 </div>
-                {total > 0 && (
-                  <span className="text-xs font-medium text-warm tabular-nums">{fmt(total)}</span>
-                )}
+                {row.employee_id || row.casual_worker_id ? (
+                  workedHours > 0 ? (
+                    <span className="text-xs font-medium text-warm tabular-nums">{fmt(total)}</span>
+                  ) : (
+                    <span className="text-xs text-danger">not in crew for this job</span>
+                  )
+                ) : null}
                 {!locked && (
                   <button type="button" onClick={() => removeCommission(row._id)} className="text-dim hover:text-danger">
                     <Trash2 size={15} />
@@ -3793,14 +3849,14 @@ const filteredCustomers = useMemo(
                       ? employees.find((e) => e.id === r.employee_id)?.name
                       : casualWorkers.find((cw) => cw.id === r.casual_worker_id)?.name
                     const type = commissionTypes.find((t) => t.id === r.commission_type_id)
-                    const hours = parseFloat(r.hours) || 0
+                    const hours = commissionWorkedHours(r.employee_id, r.casual_worker_id)
                     const rate = parseFloat(r.rate_per_hour) || 0
                     const total = rate * hours
                     return (
                       <div key={r._id} className="flex items-center justify-between text-xs flex-wrap gap-1">
                         <span className="text-dim truncate">
                           {person ?? '—'}{type ? ` · ${type.name}` : ''}
-                          {hours > 0 && <span className="text-dim/70"> ({hours}h × {fmt(rate)})</span>}
+                          {hours > 0 && <span className="text-dim/70"> ({hours.toFixed(2)}h × {fmt(rate)})</span>}
                         </span>
                         <span className="font-mono text-gold">{fmt(total)}</span>
                       </div>
