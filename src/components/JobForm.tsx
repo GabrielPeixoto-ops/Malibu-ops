@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Plus, Trash2, ChevronLeft, ImagePlus, CheckCircle, Lock,
-  X, Star, Banknote, FileText, XCircle, FilePlus,
+  X, Star, Banknote, FileText, XCircle, FilePlus, Paperclip,
 } from 'lucide-react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
@@ -42,6 +42,12 @@ interface JobComment {
   author_name: string
   body: string
   created_at: string
+  attachment_url?: string | null
+  attachment_name?: string | null
+}
+
+function isImageAttachment(name?: string | null): boolean {
+  return /\.(png|jpe?g|gif|webp|heic|heif)$/i.test(name ?? '')
 }
 
 interface CrewRow {
@@ -462,6 +468,11 @@ export default function JobForm({ jobId }: { jobId?: string }) {
     typeof window !== 'undefined' ? window.localStorage.getItem('jobCommentAuthor') ?? '' : ''
   )
   const [postingComment, setPostingComment] = useState(false)
+  // Staged image/file for the comment currently being composed — uploaded to
+  // storage as soon as it's picked (same 'job-photos' bucket as job photos),
+  // then attached to whatever comment gets posted next.
+  const [commentAttachment, setCommentAttachment] = useState<{ url: string; name: string } | null>(null)
+  const [uploadingCommentAttachment, setUploadingCommentAttachment] = useState(false)
   const pendingJobId = useRef(crypto.randomUUID())
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -833,7 +844,8 @@ export default function JobForm({ jobId }: { jobId?: string }) {
   async function postComment() {
     const body = commentText.trim()
     const author = commentAuthor.trim()
-    if (!body || !author) return
+    const attachment = commentAttachment
+    if ((!body && !attachment) || !author) return
     setPostingComment(true)
     try {
       window.localStorage.setItem('jobCommentAuthor', author)
@@ -847,20 +859,30 @@ export default function JobForm({ jobId }: { jobId?: string }) {
           author_name: author,
           body,
           created_at: new Date().toISOString(),
+          attachment_url: attachment?.url ?? null,
+          attachment_name: attachment?.name ?? null,
         }
         setComments((prev) => [...prev, row])
         setCommentText('')
+        setCommentAttachment(null)
         return
       }
       const { data, error: insertErr } = await supabase
         .from('job_comments')
-        .insert({ job_id: jobId, author_name: author, body })
+        .insert({
+          job_id: jobId,
+          author_name: author,
+          body,
+          attachment_url: attachment?.url ?? null,
+          attachment_name: attachment?.name ?? null,
+        })
         .select()
         .single()
       if (insertErr) throw insertErr
       const row = data as JobComment
       setComments((prev) => (prev.some((c) => c.id === row.id) ? prev : [...prev, row]))
       setCommentText('')
+      setCommentAttachment(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to post comment')
     } finally {
@@ -1427,6 +1449,27 @@ const filteredCustomers = useMemo(
     }
   }
 
+  // Comment attachments reuse the same 'job-photos' bucket, under their own
+  // prefix, and use pendingJobId the same way photos do for jobs that don't
+  // exist yet (new-job comments composed before Save/Book).
+  async function uploadCommentAttachment(file: File) {
+    setUploadingCommentAttachment(true)
+    try {
+      const ts = Date.now()
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+      const folder = isEdit && jobId ? jobId : pendingJobId.current
+      const path = `job-comments/${folder}/${ts}-${safeName}`
+      const { error: upErr } = await supabase.storage.from('job-photos').upload(path, file)
+      if (upErr) throw upErr
+      const { data: urlData } = supabase.storage.from('job-photos').getPublicUrl(path)
+      setCommentAttachment({ url: urlData.publicUrl, name: file.name })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to upload attachment')
+    } finally {
+      setUploadingCommentAttachment(false)
+    }
+  }
+
   async function uploadPhoto(file: File, category = photoCategory) {
     setUploadingPhoto(true)
     setUploadError('')
@@ -1950,13 +1993,15 @@ const filteredCustomers = useMemo(
       try {
         // Comments typed in before the job existed (no job_id yet) — flush
         // them to job_comments now that the job row is created.
-        const commentRows = comments.filter((c) => c.body.trim() && c.author_name.trim())
+        const commentRows = comments.filter((c) => (c.body.trim() || c.attachment_url) && c.author_name.trim())
         if (commentRows.length) {
           await supabase.from('job_comments').insert(commentRows.map((c) => ({
             job_id: newId,
             author_name: c.author_name.trim(),
             body: c.body.trim(),
             created_at: c.created_at,
+            attachment_url: c.attachment_url ?? null,
+            attachment_name: c.attachment_name ?? null,
           })))
         }
       } catch { /* migration not yet applied */ }
@@ -4683,7 +4728,25 @@ const filteredCustomers = useMemo(
                         {new Date(c.created_at).toLocaleString('en-AU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </div>
-                    <p className="text-sm text-warm whitespace-pre-wrap break-words">{c.body}</p>
+                    {c.body && (
+                      <p className="text-sm text-warm whitespace-pre-wrap break-words">{c.body}</p>
+                    )}
+                    {c.attachment_url && (
+                      isImageAttachment(c.attachment_name) ? (
+                        <a href={c.attachment_url} target="_blank" rel="noopener noreferrer" className="block mt-2">
+                          <img src={c.attachment_url} alt={c.attachment_name ?? 'Attachment'} className="max-h-48 rounded-lg border border-wire" />
+                        </a>
+                      ) : (
+                        <a
+                          href={c.attachment_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-2 inline-flex items-center gap-1 text-xs text-gold hover:text-gold-bright underline"
+                        >
+                          <Paperclip size={12} /> {c.attachment_name ?? 'Attachment'}
+                        </a>
+                      )
+                    )}
                   </div>
                 </div>
               ))}
@@ -4695,6 +4758,15 @@ const filteredCustomers = useMemo(
                   placeholder="Your name"
                   className="w-40 px-2 py-1.5 text-xs border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
                 />
+                {commentAttachment && (
+                  <div className="flex items-center gap-2 text-xs text-dim bg-panel rounded-lg px-2 py-1.5 w-fit">
+                    <Paperclip size={12} />
+                    <span className="truncate max-w-[200px]">{commentAttachment.name}</span>
+                    <button type="button" onClick={() => setCommentAttachment(null)} className="text-dim hover:text-danger">
+                      <X size={12} />
+                    </button>
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <textarea
                     rows={2}
@@ -4709,13 +4781,35 @@ const filteredCustomers = useMemo(
                     }}
                     className="flex-1 px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring resize-y"
                   />
-                  <Button
-                    onClick={postComment}
-                    disabled={postingComment || !commentText.trim() || !commentAuthor.trim()}
-                    className="self-end"
-                  >
-                    {postingComment ? 'Posting…' : 'Post'}
-                  </Button>
+                  <div className="flex flex-col gap-1 self-end">
+                    <label
+                      className="flex items-center justify-center w-9 h-9 border border-wire rounded-lg cursor-pointer text-dim hover:text-gold hover:border-gold-ring transition-colors"
+                      title="Attach image or file"
+                    >
+                      {uploadingCommentAttachment ? (
+                        <span className="text-xs">…</span>
+                      ) : (
+                        <Paperclip size={16} />
+                      )}
+                      <input
+                        type="file"
+                        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+                        className="hidden"
+                        disabled={uploadingCommentAttachment}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) uploadCommentAttachment(file)
+                          e.target.value = ''
+                        }}
+                      />
+                    </label>
+                    <Button
+                      onClick={postComment}
+                      disabled={postingComment || uploadingCommentAttachment || (!commentText.trim() && !commentAttachment) || !commentAuthor.trim()}
+                    >
+                      {postingComment ? 'Posting…' : 'Post'}
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
