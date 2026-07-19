@@ -833,10 +833,25 @@ export default function JobForm({ jobId }: { jobId?: string }) {
   async function postComment() {
     const body = commentText.trim()
     const author = commentAuthor.trim()
-    if (!body || !author || !jobId) return
+    if (!body || !author) return
     setPostingComment(true)
     try {
       window.localStorage.setItem('jobCommentAuthor', author)
+      // New job (not saved yet): no job_id exists to satisfy the FK, so keep
+      // the comment in memory — it's persisted to job_comments once the job
+      // is actually created (see the insert branch in the save function).
+      if (!isEdit || !jobId) {
+        const row: JobComment = {
+          id: crypto.randomUUID(),
+          job_id: pendingJobId.current,
+          author_name: author,
+          body,
+          created_at: new Date().toISOString(),
+        }
+        setComments((prev) => [...prev, row])
+        setCommentText('')
+        return
+      }
       const { data, error: insertErr } = await supabase
         .from('job_comments')
         .insert({ job_id: jobId, author_name: author, body })
@@ -1874,6 +1889,19 @@ const filteredCustomers = useMemo(
             address_type: r.address_type,
             address: r.address.trim(),
             sort_order: i,
+          })))
+        }
+      } catch { /* migration not yet applied */ }
+      try {
+        // Comments typed in before the job existed (no job_id yet) — flush
+        // them to job_comments now that the job row is created.
+        const commentRows = comments.filter((c) => c.body.trim() && c.author_name.trim())
+        if (commentRows.length) {
+          await supabase.from('job_comments').insert(commentRows.map((c) => ({
+            job_id: newId,
+            author_name: c.author_name.trim(),
+            body: c.body.trim(),
+            created_at: c.created_at,
           })))
         }
       } catch { /* migration not yet applied */ }
@@ -4580,11 +4608,12 @@ const filteredCustomers = useMemo(
         </Card>
 
         {/* ── Comments ─────────────────────────────────────────────────── */}
-        {isEdit && (
-          <Card title="Comments">
+        <Card title="Comments">
             <div className="space-y-3">
               {comments.length === 0 && (
-                <p className="text-sm text-dim text-center py-2">No comments yet.</p>
+                <p className="text-sm text-dim text-center py-2">
+                  {isEdit ? 'No comments yet.' : 'No comments yet. Anything you add here is saved once the job is booked/scheduled/saved.'}
+                </p>
               )}
               {comments.map((c) => (
                 <div key={c.id} className="flex gap-2">
@@ -4634,8 +4663,7 @@ const filteredCustomers = useMemo(
                 </div>
               </div>
             </div>
-          </Card>
-        )}
+        </Card>
 
         {error && (
           <div className="bg-danger/10 border border-danger/30 text-danger text-sm px-4 py-3 rounded-lg">{error}</div>
