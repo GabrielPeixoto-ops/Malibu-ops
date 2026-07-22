@@ -309,6 +309,7 @@ export interface CasualWorker {
   notes: string | null
   referrer_id: string | null
   referrer_commission_per_hour: number
+  role: string | null
   created_at?: string
 }
 
