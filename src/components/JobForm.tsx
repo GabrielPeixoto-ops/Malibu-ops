@@ -230,6 +230,11 @@ interface FormState {
   private_rate_custom: boolean
   private_rate_custom_desc: string
   private_rate_custom_price: string
+  // When true, private_rate_custom_price was entered as the pre-GST rate
+  // (client is charged rate + 10% on top) instead of already GST-inclusive —
+  // the effective inclusive rate used everywhere downstream is price × 1.1,
+  // so GST is applied once here and never subtracted twice at Net Revenue.
+  private_rate_custom_gst_exclusive: boolean
   google_review: boolean
   google_review_employee_ids: string[]
   // Payment
@@ -251,6 +256,9 @@ interface FormState {
   contract_rate_id: string
   contract_rate_custom: boolean
   contract_rate_custom_price: string
+  // Same GST semantics as private_rate_custom_gst_exclusive, for the
+  // Contract source's custom rate field.
+  contract_rate_custom_gst_exclusive: boolean
   contract_client_name: string
   contractor_job_id: string
   gross_job_value: string
@@ -344,6 +352,7 @@ function defaultForm(): FormState {
     private_rate_custom: false,
     private_rate_custom_desc: '',
     private_rate_custom_price: '',
+    private_rate_custom_gst_exclusive: false,
     google_review: false,
     google_review_employee_ids: [],
     payment_date: '',
@@ -362,6 +371,7 @@ function defaultForm(): FormState {
     contract_rate_id: '',
     contract_rate_custom: false,
     contract_rate_custom_price: '',
+    contract_rate_custom_gst_exclusive: false,
     contract_client_name: '',
     contractor_job_id: '',
     gross_job_value: '',
@@ -572,6 +582,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             scheduled_time: string | null; scheduled_finish_time: string | null; reference_number: string | null
             private_rate_id: string | null; private_rate_custom: boolean
             private_rate_custom_desc: string | null; private_rate_custom_price: number | null
+            private_rate_custom_gst_exclusive: boolean | null
             google_review: boolean; google_review_employee_ids: string[]
             payment_date: string | null; payment_methods: string[]
             payment_cash_amount: number; payment_transfer_amount: number; payment_card_amount: number
@@ -584,6 +595,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             subcontractor_rate_id: string | null
             contract_rate_id: string | null
             contract_rate_custom_price: number | null
+            contract_rate_custom_gst_exclusive: boolean | null
             contract_client_name: string | null
             contractor_job_id: string | null
             gross_job_value: number | null
@@ -648,6 +660,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             private_rate_custom: j.private_rate_custom ?? false,
             private_rate_custom_desc: j.private_rate_custom_desc ?? '',
             private_rate_custom_price: j.private_rate_custom_price != null ? j.private_rate_custom_price.toString() : '',
+            private_rate_custom_gst_exclusive: j.private_rate_custom_gst_exclusive ?? false,
             google_review: j.google_review ?? false,
             google_review_employee_ids: j.google_review_employee_ids ?? [],
             payment_date: j.payment_date ?? '',
@@ -666,6 +679,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             contract_rate_id: j.contract_rate_id ?? '',
             contract_rate_custom: j.contract_rate_id == null && j.contract_rate_custom_price != null,
             contract_rate_custom_price: j.contract_rate_custom_price != null ? j.contract_rate_custom_price.toString() : '',
+            contract_rate_custom_gst_exclusive: j.contract_rate_custom_gst_exclusive ?? false,
             contract_client_name: j.contract_client_name
               ?? (j.contract_client_id
                 ? loadedContracts.find((c) => c.id === j.contract_id)?.contract_clients?.find((cc) => cc.id === j.contract_client_id)?.name ?? ''
@@ -1044,12 +1058,17 @@ const filteredCustomers = useMemo(
     if (form.private_rate_custom) {
       const price = parseFloat(form.private_rate_custom_price)
       if (!price) return null
-      return { rate_per_hour: price, cofHours }
+      // If the rate was entered pre-GST ("+GST" ticked), apply the 10% once
+      // here so the rate flowing into calculateJobSummary is always
+      // GST-inclusive, same as every other rate source — this is the only
+      // place GST is added, so it's never subtracted twice at Net Revenue.
+      const effectiveRate = form.private_rate_custom_gst_exclusive ? price * 1.1 : price
+      return { rate_per_hour: effectiveRate, cofHours }
     }
     const rate = privateRates.find((r) => r.id === form.private_rate_id)
     if (!rate) return null
     return { rate_per_hour: rate.rate_per_hour, cofHours }
-  }, [form.source, form.private_rate_custom, form.private_rate_custom_price, form.private_rate_id, form.cof_final, form.cof, form.client_cof_override, form.client_cof_hours, form.actual_start_time, form.actual_finish_time, form.break_minutes, privateRates])
+  }, [form.source, form.private_rate_custom, form.private_rate_custom_price, form.private_rate_custom_gst_exclusive, form.private_rate_id, form.cof_final, form.cof, form.client_cof_override, form.client_cof_hours, form.actual_start_time, form.actual_finish_time, form.break_minutes, privateRates])
 
   const summary = useMemo<JobSummary | null>(() => {
     if (form.source === 'subcontract' && !selectedSub) return null
@@ -1091,7 +1110,7 @@ const filteredCustomers = useMemo(
       : null
     const selectedContractRatePH = form.source === 'contract'
       ? (form.contract_rate_custom && parseFloat(form.contract_rate_custom_price) > 0
-          ? parseFloat(form.contract_rate_custom_price)
+          ? parseFloat(form.contract_rate_custom_price) * (form.contract_rate_custom_gst_exclusive ? 1.1 : 1)
           : (contractRates.find((r) => r.id === form.contract_rate_id)?.rate_per_hour ?? null))
       : null
 
@@ -1643,8 +1662,8 @@ const filteredCustomers = useMemo(
       : (parseFloat(form.cof_final) || 0)
     const computedPrivateRevenue = (() => {
       if (form.source !== 'private') return null
-      const ratePerHour = form.private_rate_custom
-        ? (parseFloat(form.private_rate_custom_price) || null)
+      const ratePerHour = form.private_rate_custom && parseFloat(form.private_rate_custom_price) > 0
+        ? parseFloat(form.private_rate_custom_price) * (form.private_rate_custom_gst_exclusive ? 1.1 : 1)
         : (privateRates.find((r) => r.id === form.private_rate_id)?.rate_per_hour ?? null)
       if (!ratePerHour) return null
       const totalHours = workedHrsForSave !== null
@@ -1672,7 +1691,7 @@ const filteredCustomers = useMemo(
     const computedContractRevenue = (() => {
       if (form.source !== 'contract' || workedHrsForSave === null) return null
       const ratePerHour = form.contract_rate_custom && parseFloat(form.contract_rate_custom_price) > 0
-        ? parseFloat(form.contract_rate_custom_price)
+        ? parseFloat(form.contract_rate_custom_price) * (form.contract_rate_custom_gst_exclusive ? 1.1 : 1)
         : (contractRates.find((r) => r.id === form.contract_rate_id)?.rate_per_hour ?? null)
       if (!ratePerHour) return null
       const additionalHrs = parseFloat(form.additional_hours) || 0
@@ -1727,6 +1746,7 @@ const filteredCustomers = useMemo(
       private_rate_custom: form.source === 'private' ? form.private_rate_custom : false,
       private_rate_custom_desc: form.source === 'private' && form.private_rate_custom ? (form.private_rate_custom_desc.trim() || null) : null,
       private_rate_custom_price: form.source === 'private' && form.private_rate_custom ? (parseFloat(form.private_rate_custom_price) || null) : null,
+      private_rate_custom_gst_exclusive: form.source === 'private' && form.private_rate_custom ? form.private_rate_custom_gst_exclusive : false,
       google_review: form.google_review,
       google_review_employee_ids: form.google_review_employee_ids,
       payment_date: form.payment_date || null,
@@ -1744,6 +1764,7 @@ const filteredCustomers = useMemo(
       subcontractor_rate_id: form.source === 'subcontract' ? (form.subcontractor_rate_id || null) : null,
       contract_rate_id: form.source === 'contract' && !form.contract_rate_custom ? (form.contract_rate_id || null) : null,
       contract_rate_custom_price: form.source === 'contract' && form.contract_rate_custom ? (parseFloat(form.contract_rate_custom_price) || null) : null,
+      contract_rate_custom_gst_exclusive: form.source === 'contract' && form.contract_rate_custom ? form.contract_rate_custom_gst_exclusive : false,
       contractor_job_id: form.source === 'subcontract' ? (form.contractor_job_id.trim() || null) : null,
       gross_job_value: isPercentSub ? (parseFloat(form.gross_job_value) || null) : null,
       malibu_revenue: computedMalibuRevenue ?? computedRateBlocksRevenue ?? computedPrivateRevenue ?? computedRatecardRevenue ?? computedContractRevenue ?? null,
@@ -2266,7 +2287,7 @@ const filteredCustomers = useMemo(
               {(form.private_rate_id || form.private_rate_custom) && (
                 <p className="text-xs text-dim">
                   {form.private_rate_custom
-                    ? `Custom — $${form.private_rate_custom_price}/hr${form.private_rate_custom_desc ? ` (${form.private_rate_custom_desc})` : ''}`
+                    ? `Custom — $${form.private_rate_custom_price}/hr${form.private_rate_custom_gst_exclusive ? ' + GST' : ' incl. GST'}${form.private_rate_custom_desc ? ` (${form.private_rate_custom_desc})` : ''}`
                     : privateRates.find((r) => r.id === form.private_rate_id)?.name ?? '—'}
                 </p>
               )}
@@ -2333,6 +2354,7 @@ const filteredCustomers = useMemo(
                     } else {
                       setField('private_rate_custom', false)
                       setField('private_rate_id', e.target.value)
+                      setField('private_rate_custom_gst_exclusive', false)
                     }
                   }}
                   className="w-full px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring bg-panel"
@@ -2373,6 +2395,21 @@ const filteredCustomers = useMemo(
                     onChange={(e) => setField('private_rate_custom_price', e.target.value)}
                     placeholder="0.00"
                   />
+                  <label className="flex items-center gap-2 text-sm text-warm">
+                    <input
+                      type="checkbox"
+                      checked={form.private_rate_custom_gst_exclusive}
+                      onChange={(e) => setField('private_rate_custom_gst_exclusive', e.target.checked)}
+                    />
+                    + GST (rate above is before GST — 10% is added on top)
+                  </label>
+                  {form.private_rate_custom_price && (
+                    <p className="text-xs text-dim">
+                      {form.private_rate_custom_gst_exclusive
+                        ? `= $${(parseFloat(form.private_rate_custom_price) * 1.1).toFixed(2)}/hr incl. GST`
+                        : `$${form.private_rate_custom_price}/hr already includes GST`}
+                    </p>
+                  )}
                 </>
               )}
 
@@ -2469,7 +2506,7 @@ const filteredCustomers = useMemo(
             <div className="space-y-1">
               <p className="text-sm font-medium text-parchment">{entityDisplayName}</p>
               {form.contract_rate_custom && form.contract_rate_custom_price
-                ? <p className="text-xs text-dim">Rate: Custom — ${form.contract_rate_custom_price}/hr</p>
+                ? <p className="text-xs text-dim">Rate: Custom — ${form.contract_rate_custom_price}/hr{form.contract_rate_custom_gst_exclusive ? ' + GST' : ' incl. GST'}</p>
                 : form.contract_rate_id
                   ? <p className="text-xs text-dim">Rate: {contractRates.find((r) => r.id === form.contract_rate_id)?.name ?? '—'}</p>
                   : form.rate_card_key
@@ -2510,9 +2547,9 @@ const filteredCustomers = useMemo(
                     value={form.contract_rate_custom ? 'custom' : (form.contract_rate_id ?? '')}
                     onChange={(e) => {
                       if (e.target.value === 'custom') {
-                        setForm((f) => ({ ...f, contract_rate_custom: true, contract_rate_id: '', contract_rate_custom_price: '' }))
+                        setForm((f) => ({ ...f, contract_rate_custom: true, contract_rate_id: '', contract_rate_custom_price: '', contract_rate_custom_gst_exclusive: false }))
                       } else {
-                        setForm((f) => ({ ...f, contract_rate_custom: false, contract_rate_id: e.target.value, contract_rate_custom_price: '' }))
+                        setForm((f) => ({ ...f, contract_rate_custom: false, contract_rate_id: e.target.value, contract_rate_custom_price: '', contract_rate_custom_gst_exclusive: false }))
                       }
                     }}
                     className="w-full px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring bg-panel"
@@ -2528,15 +2565,32 @@ const filteredCustomers = useMemo(
                 </div>
               )}
               {form.contract_rate_custom && (
-                <Input
-                  label="Rate ($/hr)"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={form.contract_rate_custom_price}
-                  onChange={(e) => setField('contract_rate_custom_price', e.target.value)}
-                  placeholder="0.00"
-                />
+                <>
+                  <Input
+                    label="Rate ($/hr)"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.contract_rate_custom_price}
+                    onChange={(e) => setField('contract_rate_custom_price', e.target.value)}
+                    placeholder="0.00"
+                  />
+                  <label className="flex items-center gap-2 text-sm text-warm">
+                    <input
+                      type="checkbox"
+                      checked={form.contract_rate_custom_gst_exclusive}
+                      onChange={(e) => setField('contract_rate_custom_gst_exclusive', e.target.checked)}
+                    />
+                    + GST (rate above is before GST — 10% is added on top)
+                  </label>
+                  {form.contract_rate_custom_price && (
+                    <p className="text-xs text-dim">
+                      {form.contract_rate_custom_gst_exclusive
+                        ? `= $${(parseFloat(form.contract_rate_custom_price) * 1.1).toFixed(2)}/hr incl. GST`
+                        : `$${form.contract_rate_custom_price}/hr already includes GST`}
+                    </p>
+                  )}
+                </>
               )}
               {/* Additional hours/rate when contract_rate selected */}
               {form.contract_id && form.contract_rate_id && (
