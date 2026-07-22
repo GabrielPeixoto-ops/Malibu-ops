@@ -174,7 +174,7 @@ export default function PayrollPage() {
               return raw > 0 ? raw : null
             })()
             const workedHours = hasTime
-              ? calcHoursFromTimes(row.start_time!, row.end_time!)
+              ? calcHoursFromTimes(row.start_time!, row.end_time!, Number(job.break_minutes) || 0)
               : (jobLevelHours ?? row.hours)
             const cofHours = row.cof_share ? (row.cof_hours > 0 ? row.cof_hours : Number(job.cof_final ?? job.cof ?? 0)) : 0
             const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
@@ -192,7 +192,7 @@ export default function PayrollPage() {
               const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0)
               return raw > 0 ? raw : null
             })()
-            const workedHours = hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!) : (jobLevelHours ?? 0)
+            const workedHours = hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0) : (jobLevelHours ?? 0)
             if (workedHours <= 0) continue
             const cofHours = em.cof_share ? Number(job.cof_final ?? job.cof ?? 0) : 0
             const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
