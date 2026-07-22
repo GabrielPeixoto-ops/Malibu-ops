@@ -516,7 +516,7 @@ function InvoicesPageContent() {
             return raw > 0 ? raw : null
           })()
           const workedHours = hasTime
-            ? calcHoursFromTimes(row.start_time!, row.end_time!)
+            ? calcHoursFromTimes(row.start_time!, row.end_time!, Number(job.break_minutes) || 0)
             : (jobLevelHours ?? row.hours)
           const cofHours = row.cof_share ? (row.cof_hours > 0 ? row.cof_hours : Number(job.cof_final ?? job.cof ?? 0)) : 0
           const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
@@ -535,7 +535,7 @@ function InvoicesPageContent() {
             const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0)
             return raw > 0 ? raw : null
           })()
-          const workedHours = hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!) : (jobLevelHours ?? 0)
+          const workedHours = hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0) : (jobLevelHours ?? 0)
           if (workedHours <= 0) continue
           const cofHours = em.cof_share ? Number(job.cof_final ?? job.cof ?? 0) : 0
           const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
@@ -617,7 +617,7 @@ function InvoicesPageContent() {
         const hasTime = row.start_time?.length === 5 && row.finish_time?.length === 5
         let rawHours: number
         if (hasTime) {
-          rawHours = calcHoursFromTimes(row.start_time!, row.finish_time!)
+          rawHours = calcHoursFromTimes(row.start_time!, row.finish_time!, Number(job.break_minutes) || 0)
         } else if (jobLevelHours !== null) {
           rawHours = jobLevelHours
         } else {
@@ -680,7 +680,7 @@ function InvoicesPageContent() {
         const rate = em.rate_per_hour || cw?.rate_per_hour || 0
         if (rate <= 0) continue
         const hasTime = em.start_time?.length === 5 && em.finish_time?.length === 5
-        const rawHours = hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!) : (jobLevelHours ?? 0)
+        const rawHours = hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0) : (jobLevelHours ?? 0)
         const workedHours = rawHours > 0 ? Math.max(MIN_CALL, rawHours) : 0
         const cofHours = em.cof_share ? cofFinalHrs : 0
         const hasReviewBonus = cw ? reviewSet.has(cw.id) : false
