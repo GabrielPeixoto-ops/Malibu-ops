@@ -28,6 +28,23 @@ const PHONE_OPTIONS = [
   { value: 'iphone', label: 'iPhone' },
 ]
 
+// ─── Casual worker role options ───────────────────────────────────────────────
+
+const CASUAL_ROLE_OPTIONS = [
+  { value: 'offsider', label: 'Offsider' },
+  { value: 'driver', label: 'Driver' },
+  { value: 'packer', label: 'Packer' },
+]
+function roleLabel(r: string | null) {
+  return CASUAL_ROLE_OPTIONS.find((o) => o.value === r)?.label ?? '—'
+}
+function roleBadgeClass(r: string | null) {
+  if (r === 'driver') return 'bg-blue-500/10 text-blue-300'
+  if (r === 'packer') return 'bg-purple-500/10 text-purple-300'
+  if (r === 'offsider') return 'bg-amber-500/10 text-amber-300'
+  return 'bg-wire/50 text-dim'
+}
+
 type EmpForm = {
   name: string; hourly_rate: string; active: boolean; age: string
   visa_type: string; english_level: string; phone_type: string
@@ -73,6 +90,7 @@ interface CasualWorker {
   referrer_id: string | null
   referrer_commission_per_hour: number
   referrer: { id: string; name: string } | null
+  role: string | null
   created_at: string
 }
 
@@ -96,10 +114,11 @@ type CasualForm = {
   notes: string
   referrer_id: string
   referrer_commission_per_hour: string
+  role: string
 }
 
 function emptyCasualForm(): CasualForm {
-  return { name: '', rate_per_hour: '', phone: '', notes: '', referrer_id: '', referrer_commission_per_hour: '0' }
+  return { name: '', rate_per_hour: '', phone: '', notes: '', referrer_id: '', referrer_commission_per_hour: '0', role: '' }
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -148,6 +167,7 @@ export default function EmployeesPage() {
   const [casualForm, setCasualForm] = useState<CasualForm>(emptyCasualForm())
   const [savingCasual, setSavingCasual] = useState(false)
   const [casualError, setCasualError] = useState('')
+  const [casualRoleFilter, setCasualRoleFilter] = useState<string>('all')
 
   // ── Load staff ──────────────────────────────────────────────────────────────
   async function loadStaff() {
@@ -163,7 +183,7 @@ export default function EmployeesPage() {
     setCasualLoading(true)
     const [cwRes, statsRes] = await Promise.all([
       supabase.from('casual_workers')
-        .select('id, name, rate_per_hour, phone, notes, referrer_id, referrer_commission_per_hour, created_at, referrer:employees(id, name)')
+        .select('id, name, rate_per_hour, phone, notes, referrer_id, referrer_commission_per_hour, role, created_at, referrer:employees(id, name)')
         .order('name'),
       supabase.from('job_casual_crew')
         .select('casual_worker_id, hours, rate_per_hour, job_id')
@@ -290,6 +310,7 @@ export default function EmployeesPage() {
       notes: cw.notes ?? '',
       referrer_id: cw.referrer_id ?? '',
       referrer_commission_per_hour: String(cw.referrer_commission_per_hour),
+      role: cw.role ?? '',
     })
     setCasualError('')
     setCasualModalOpen(true)
@@ -305,6 +326,7 @@ export default function EmployeesPage() {
       notes: casualForm.notes.trim() || null,
       referrer_id: casualForm.referrer_id || null,
       referrer_commission_per_hour: parseFloat(casualForm.referrer_commission_per_hour) || 0,
+      role: casualForm.role || null,
     }
     if (editingCasual) {
       await supabase.from('casual_workers').update(payload).eq('id', editingCasual.id)
@@ -501,13 +523,38 @@ export default function EmployeesPage() {
       {/* ── Casual Workers tab ── */}
       {tab === 'casual' && (
         <>
+          {/* Role filter */}
+          {!casualLoading && casualWorkers.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-4">
+              {(['all', ...CASUAL_ROLE_OPTIONS.map((o) => o.value)] as const).map((r) => {
+                const count = r === 'all' ? casualWorkers.length : casualWorkers.filter((w) => w.role === r).length
+                const label = r === 'all' ? 'All' : roleLabel(r)
+                return (
+                  <button
+                    key={r}
+                    onClick={() => setCasualRoleFilter(r)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                      casualRoleFilter === r
+                        ? 'border-gold text-gold bg-gold/10'
+                        : 'border-wire text-dim hover:text-warm'
+                    }`}
+                  >
+                    {label} <span className="opacity-60">({count})</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
           {casualLoading ? (
             <p className="text-warm text-sm py-12 text-center">Loading…</p>
           ) : casualWorkers.length === 0 ? (
             <div className="bg-surface rounded-xl border border-wire p-12 text-center text-dim">No casual workers registered yet.</div>
           ) : (
             <div className="space-y-2">
-              {casualWorkers.map((cw) => {
+              {casualWorkers
+                .filter((cw) => casualRoleFilter === 'all' || cw.role === casualRoleFilter)
+                .map((cw) => {
                 const stats = casualStats[cw.id]
                 const open = expandedCasual.has(cw.id)
                 const history = casualHistory[cw.id]
@@ -517,6 +564,11 @@ export default function EmployeesPage() {
                       <button className="text-dim shrink-0" tabIndex={-1}>{open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
                       <div className="flex-1 min-w-0">
                         <span className="font-medium text-parchment">{cw.name}</span>
+                        {cw.role && (
+                          <span className={`ml-2 inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${roleBadgeClass(cw.role)}`}>
+                            {roleLabel(cw.role)}
+                          </span>
+                        )}
                         {cw.referrer && (
                           <span className="ml-2 text-xs text-dim">
                             ref: <span className="text-warm">{cw.referrer.name}</span>
@@ -548,6 +600,10 @@ export default function EmployeesPage() {
                           <div>
                             <p className="text-xs text-dim mb-0.5">Rate</p>
                             <p className="font-mono font-semibold text-parchment">${cw.rate_per_hour}/hr</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-dim mb-0.5">Role</p>
+                            <p className="text-warm">{roleLabel(cw.role)}</p>
                           </div>
                           {cw.phone && <div><p className="text-xs text-dim mb-0.5">Phone</p><p className="text-warm">{cw.phone}</p></div>}
                           {stats && (
@@ -608,6 +664,17 @@ export default function EmployeesPage() {
               <div className="grid grid-cols-2 gap-3">
                 <Input label="Name" value={casualForm.name} onChange={(e) => setCF('name', e.target.value)} placeholder="e.g. Luciana" />
                 <Input label="Rate ($/hr)" type="number" min="0" step="0.50" value={casualForm.rate_per_hour} onChange={(e) => setCF('rate_per_hour', e.target.value)} placeholder="0.00" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-warm mb-1">Role</label>
+                <select
+                  value={casualForm.role}
+                  onChange={(e) => setCF('role', e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-wire rounded-lg bg-surface text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
+                >
+                  <option value="">No role set</option>
+                  {CASUAL_ROLE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
               </div>
               <Input label="Phone (optional)" value={casualForm.phone} onChange={(e) => setCF('phone', e.target.value)} placeholder="0412 345 678" />
               <Input label="Notes (optional)" value={casualForm.notes} onChange={(e) => setCF('notes', e.target.value)} placeholder="Any notes…" />
