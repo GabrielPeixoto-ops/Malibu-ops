@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Plus, Trash2, ChevronLeft, ImagePlus, CheckCircle, Lock,
-  X, Star, Banknote, FileText, XCircle, FilePlus, Paperclip,
+  X, Star, Banknote, FileText, XCircle, FilePlus, Paperclip, Pencil,
 } from 'lucide-react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
@@ -473,6 +473,11 @@ export default function JobForm({ jobId }: { jobId?: string }) {
   // then attached to whatever comment gets posted next.
   const [commentAttachment, setCommentAttachment] = useState<{ url: string; name: string } | null>(null)
   const [uploadingCommentAttachment, setUploadingCommentAttachment] = useState(false)
+  // Editing an already-posted comment: id of the comment being edited (or
+  // null when none is), and the text staged for it while editing.
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null)
+  const [editCommentText, setEditCommentText] = useState('')
+  const [savingCommentEdit, setSavingCommentEdit] = useState(false)
   const pendingJobId = useRef(crypto.randomUUID())
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -887,6 +892,43 @@ export default function JobForm({ jobId }: { jobId?: string }) {
       setError(e instanceof Error ? e.message : 'Failed to post comment')
     } finally {
       setPostingComment(false)
+    }
+  }
+
+  function startEditComment(c: JobComment) {
+    setEditingCommentId(c.id)
+    setEditCommentText(c.body)
+  }
+
+  function cancelEditComment() {
+    setEditingCommentId(null)
+    setEditCommentText('')
+  }
+
+  // Saves an edited comment. Comments on a job that hasn't been created yet
+  // only live in local state (no job_comments row exists), so those are
+  // updated in place; comments on an existing job are updated in the DB too.
+  async function saveCommentEdit(commentId: string) {
+    const newBody = editCommentText.trim()
+    const comment = comments.find((c) => c.id === commentId)
+    if (!comment) return
+    if (!newBody && !comment.attachment_url) return
+    setSavingCommentEdit(true)
+    try {
+      if (isEdit && jobId) {
+        const { error: updateErr } = await supabase
+          .from('job_comments')
+          .update({ body: newBody })
+          .eq('id', commentId)
+        if (updateErr) throw updateErr
+      }
+      setComments((prev) => prev.map((c) => (c.id === commentId ? { ...c, body: newBody } : c)))
+      setEditingCommentId(null)
+      setEditCommentText('')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to update comment')
+    } finally {
+      setSavingCommentEdit(false)
     }
   }
 
@@ -4724,28 +4766,73 @@ const filteredCustomers = useMemo(
                   <div className="flex-1 min-w-0 bg-panel rounded-lg px-3 py-2">
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="text-sm font-semibold text-parchment truncate">{c.author_name}</span>
-                      <span className="text-xs text-dim shrink-0">
-                        {new Date(c.created_at).toLocaleString('en-AU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                      </span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs text-dim">
+                          {new Date(c.created_at).toLocaleString('en-AU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                        {editingCommentId !== c.id && (
+                          <button
+                            type="button"
+                            onClick={() => startEditComment(c)}
+                            className="text-dim hover:text-gold"
+                            title="Edit comment"
+                          >
+                            <Pencil size={12} />
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    {c.body && (
-                      <p className="text-sm text-warm whitespace-pre-wrap break-words">{c.body}</p>
-                    )}
-                    {c.attachment_url && (
-                      isImageAttachment(c.attachment_name) ? (
-                        <a href={c.attachment_url} target="_blank" rel="noopener noreferrer" className="block mt-2">
-                          <img src={c.attachment_url} alt={c.attachment_name ?? 'Attachment'} className="max-h-48 rounded-lg border border-wire" />
-                        </a>
-                      ) : (
-                        <a
-                          href={c.attachment_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="mt-2 inline-flex items-center gap-1 text-xs text-gold hover:text-gold-bright underline"
-                        >
-                          <Paperclip size={12} /> {c.attachment_name ?? 'Attachment'}
-                        </a>
-                      )
+                    {editingCommentId === c.id ? (
+                      <div className="mt-1 space-y-2">
+                        <textarea
+                          rows={2}
+                          autoFocus
+                          value={editCommentText}
+                          onChange={(e) => setEditCommentText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault()
+                              saveCommentEdit(c.id)
+                            } else if (e.key === 'Escape') {
+                              cancelEditComment()
+                            }
+                          }}
+                          className="w-full px-3 py-2 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring resize-y"
+                        />
+                        <div className="flex gap-2">
+                          <Button
+                            onClick={() => saveCommentEdit(c.id)}
+                            disabled={savingCommentEdit || (!editCommentText.trim() && !c.attachment_url)}
+                          >
+                            {savingCommentEdit ? 'Saving…' : 'Save'}
+                          </Button>
+                          <Button variant="secondary" onClick={cancelEditComment} disabled={savingCommentEdit}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {c.body && (
+                          <p className="text-sm text-warm whitespace-pre-wrap break-words">{c.body}</p>
+                        )}
+                        {c.attachment_url && (
+                          isImageAttachment(c.attachment_name) ? (
+                            <a href={c.attachment_url} target="_blank" rel="noopener noreferrer" className="block mt-2">
+                              <img src={c.attachment_url} alt={c.attachment_name ?? 'Attachment'} className="max-h-48 rounded-lg border border-wire" />
+                            </a>
+                          ) : (
+                            <a
+                              href={c.attachment_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-2 inline-flex items-center gap-1 text-xs text-gold hover:text-gold-bright underline"
+                            >
+                              <Paperclip size={12} /> {c.attachment_name ?? 'Attachment'}
+                            </a>
+                          )
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
