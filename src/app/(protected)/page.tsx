@@ -227,7 +227,7 @@ function buildStaffPayrollCrew(job: CalendarJob, crew: CrewRow[]): Array<{ emplo
       // Individual times: recompute live from start/end, same rounding rule
       // as job-level. Don't trust the stored `hours` column — it may have
       // been saved before this rounding rule existed.
-      hours = calcHoursFromTimes(r.start_time!, r.end_time!)
+      hours = calcHoursFromTimes(r.start_time!, r.end_time!, Number(job.break_minutes) || 0)
     } else if (liveWorkedHrs !== null) {
       // Job-level times: recompute live, same as job page does
       hours = Math.max(2, liveWorkedHrs)
@@ -256,7 +256,7 @@ function buildCasualPayroll(job: CalendarJob): Array<{ name: string; rate_per_ho
       const hasTime = r.start_time?.length === 5 && r.finish_time?.length === 5
       let hours: number
       if (hasTime) {
-        const rawHours = calcHoursFromTimes(r.start_time!, r.finish_time!)
+        const rawHours = calcHoursFromTimes(r.start_time!, r.finish_time!, Number(job.break_minutes) || 0)
         hours = (rawHours > 0 ? Math.max(MIN_CALL, rawHours) : 0) + (r.cof_share ? cofFinalHrs : 0)
       } else if (billingWorkedHrs !== null) {
         hours = Math.max(MIN_CALL, billingWorkedHrs) + (r.cof_share ? cofFinalHrs : 0)
@@ -289,7 +289,7 @@ function buildExtraMenPayroll(
       const hasTime = r.start_time?.length === 5 && r.finish_time?.length === 5
       let hours: number
       if (hasTime) {
-        hours = calcHoursFromTimes(r.start_time!, r.finish_time!)
+        hours = calcHoursFromTimes(r.start_time!, r.finish_time!, Number(job.break_minutes) || 0)
       } else if (liveWorkedHrs !== null) {
         hours = Math.max(2, liveWorkedHrs)
       } else {
