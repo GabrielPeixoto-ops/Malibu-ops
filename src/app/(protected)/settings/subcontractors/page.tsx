@@ -56,6 +56,7 @@ function emptyForm() {
     defaults: '{}',
     google_review_bonus: false,
     color_hex: '#6B6660',
+    round_up_hours: true,
   }
 }
 
@@ -84,6 +85,7 @@ function formFromSub(sub: Subcontractor): ReturnType<typeof emptyForm> {
   f.billing_type = sub.billing_type
   f.google_review_bonus = sub.google_review_bonus ?? false
   f.color_hex = sub.color_hex ?? '#6B6660'
+  f.round_up_hours = sub.round_up_hours ?? true
   if (sub.billing_type === 'percent') {
     f.percent = String((sub.config as PercentConfig).percent)
   } else if (sub.billing_type === 'ratecard') {
@@ -238,6 +240,7 @@ export default function SubcontractorsPage() {
       config,
       google_review_bonus: form.google_review_bonus,
       color_hex: form.color_hex || '#6B6660',
+      round_up_hours: form.round_up_hours,
     }
     let dbError
     if (editing) {
@@ -302,6 +305,11 @@ export default function SubcontractorsPage() {
                     <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${billingBadge(sub.billing_type)}`}>
                       {sub.billing_type}
                     </span>
+                    {sub.round_up_hours === false && (
+                      <span className="ml-1.5 inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-300">
+                        Exact hours
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-dim text-xs hidden sm:table-cell">
                     {sub.billing_type === 'percent' && `${parseFloat(((sub.config as PercentConfig).percent * 100).toFixed(1))}%`}
@@ -346,6 +354,16 @@ export default function SubcontractorsPage() {
             <input type="checkbox" checked={form.google_review_bonus} onChange={(e) => setField('google_review_bonus', e.target.checked)} className={checkboxCls} />
             Google Review Bonus eligible
           </label>
+
+          <label className="flex items-center gap-2 text-sm font-medium text-warm cursor-pointer">
+            <input type="checkbox" checked={form.round_up_hours} onChange={(e) => setField('round_up_hours', e.target.checked)} className={checkboxCls} />
+            Round hours up to 15-min blocks
+          </label>
+          <p className="text-xs text-dim -mt-2">
+            {form.round_up_hours
+              ? 'Standard behavior: worked hours round up to the next 15 minutes.'
+              : 'Off: exact decimal hours are used everywhere (e.g. 5h48m stays 5.80h) — use this to match a subcontractor\'s own reported hours, like TMAAT.'}
+          </p>
 
           <Select
             label="Billing Type"
