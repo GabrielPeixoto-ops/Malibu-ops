@@ -1273,8 +1273,9 @@ const filteredCustomers = useMemo(
     const breakMins = parseFloat(form.break_minutes) || 0
     const rawMins = totalMins - breakMins
     if (rawMins <= 0) return null
+    if (!subRoundUp) return Math.round((rawMins / 60) * 100) / 100
     return Math.ceil(rawMins / 15) * 15 / 60
-  }, [form.actual_start_time, form.actual_finish_time, form.break_minutes])
+  }, [form.actual_start_time, form.actual_finish_time, form.break_minutes, subRoundUp])
 
   // ── Field helpers ──────────────────────────────────────────────────────────
   function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
