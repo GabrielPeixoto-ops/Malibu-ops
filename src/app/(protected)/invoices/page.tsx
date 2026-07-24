@@ -203,15 +203,24 @@ const MIN_CALL = 2
 const HEAVY_ITEM_BONUS = 0.5
 const REVIEW_BONUS = 0.5
 
-// Always rounds UP to the next 15-minute block — same rule as the job page and
-// Dashboard. breakMinutes (job-level only) is subtracted BEFORE rounding, same
-// order as JobForm's workedHoursCalc — subtracting it after rounding gives a
-// different (wrong) result since the break may cross a 15-min boundary.
-function calcHoursFromTimes(start: string, finish: string, breakMinutes = 0): number {
+// Rounds UP to the next 15-minute block — same rule as the job page and
+// Dashboard — UNLESS the job's subcontractor has round_up_hours = false (e.g.
+// TMAAT/TMAAT TT), in which case plain decimal hours are used so our invoiced
+// hours reconcile with what that subcontractor's own portal reports.
+// breakMinutes (job-level only) is subtracted BEFORE rounding, same order as
+// JobForm's workedHoursCalc — subtracting it after rounding gives a different
+// (wrong) result since the break may cross a 15-min boundary.
+function calcHoursFromTimes(start: string, finish: string, breakMinutes = 0, roundToBlock = true): number {
   const [sh, sm] = start.split(':').map(Number)
   const [fh, fm] = finish.split(':').map(Number)
   const mins = (fh * 60 + fm) - (sh * 60 + sm) - breakMinutes
-  return Math.max(0, Math.ceil(mins / 15) * 15 / 60)
+  if (mins <= 0) return 0
+  if (!roundToBlock) return Math.round((mins / 60) * 100) / 100
+  return Math.ceil(mins / 15) * 15 / 60
+}
+
+function jobRoundUp(job: { source: string; subcontractor?: { round_up_hours?: boolean | null } | null }): boolean {
+  return job.source === 'subcontract' && job.subcontractor ? (job.subcontractor.round_up_hours ?? true) : true
 }
 
 const filterInput = 'px-3 py-1.5 text-sm border border-wire rounded-lg bg-panel text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring'
@@ -510,13 +519,14 @@ function InvoicesPageContent() {
           // (e.g. saved under the old nearest-15-min rule before it changed to
           // always-round-up). Mirrors JobForm's resolveCrewHours/baseHrs logic.
           const hasTime = row.start_time?.length === 5 && row.end_time?.length === 5
+          const roundToBlock = jobRoundUp(job)
           const jobLevelHours = (() => {
             if (!job.actual_start_time || !job.actual_finish_time) return null
-            const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0)
+            const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0, roundToBlock)
             return raw > 0 ? raw : null
           })()
           const workedHours = hasTime
-            ? calcHoursFromTimes(row.start_time!, row.end_time!, Number(job.break_minutes) || 0)
+            ? calcHoursFromTimes(row.start_time!, row.end_time!, Number(job.break_minutes) || 0, roundToBlock)
             : (jobLevelHours ?? row.hours)
           const cofHours = row.cof_share ? (row.cof_hours > 0 ? row.cof_hours : Number(job.cof_final ?? job.cof ?? 0)) : 0
           const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
@@ -530,12 +540,13 @@ function InvoicesPageContent() {
         for (const em of job.job_extra_men ?? []) {
           if (em.employee_id !== emp.id) continue
           const hasTime = em.start_time?.length === 5 && em.finish_time?.length === 5
+          const roundToBlock = jobRoundUp(job)
           const jobLevelHours = (() => {
             if (!job.actual_start_time || !job.actual_finish_time) return null
-            const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0)
+            const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0, roundToBlock)
             return raw > 0 ? raw : null
           })()
-          const workedHours = hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0) : (jobLevelHours ?? 0)
+          const workedHours = hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0, roundToBlock) : (jobLevelHours ?? 0)
           if (workedHours <= 0) continue
           const cofHours = em.cof_share ? Number(job.cof_final ?? job.cof ?? 0) : 0
           const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
@@ -604,9 +615,10 @@ function InvoicesPageContent() {
     for (const job of filtered) {
       if (job.google_review) for (const id of job.google_review_employee_ids ?? []) reviewSet.add(id)
 
+      const roundToBlock = jobRoundUp(job)
       const jobLevelHours = (() => {
         if (!job.actual_start_time || !job.actual_finish_time) return null
-        const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0)
+        const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0, roundToBlock)
         return raw > 0 ? raw : null
       })()
       const cofFinalHrs = Number(job.cof_final ?? job.cof) || 0
@@ -617,7 +629,7 @@ function InvoicesPageContent() {
         const hasTime = row.start_time?.length === 5 && row.finish_time?.length === 5
         let rawHours: number
         if (hasTime) {
-          rawHours = calcHoursFromTimes(row.start_time!, row.finish_time!, Number(job.break_minutes) || 0)
+          rawHours = calcHoursFromTimes(row.start_time!, row.finish_time!, Number(job.break_minutes) || 0, roundToBlock)
         } else if (jobLevelHours !== null) {
           rawHours = jobLevelHours
         } else {
@@ -680,7 +692,7 @@ function InvoicesPageContent() {
         const rate = em.rate_per_hour || cw?.rate_per_hour || 0
         if (rate <= 0) continue
         const hasTime = em.start_time?.length === 5 && em.finish_time?.length === 5
-        const rawHours = hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0) : (jobLevelHours ?? 0)
+        const rawHours = hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0, roundToBlock) : (jobLevelHours ?? 0)
         const workedHours = rawHours > 0 ? Math.max(MIN_CALL, rawHours) : 0
         const cofHours = em.cof_share ? cofFinalHrs : 0
         const hasReviewBonus = cw ? reviewSet.has(cw.id) : false
