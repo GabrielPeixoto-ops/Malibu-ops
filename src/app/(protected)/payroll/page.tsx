@@ -65,7 +65,7 @@ interface PayrollJob {
   actual_start_time: string | null
   actual_finish_time: string | null
   break_minutes: number | null
-  subcontractor: { name: string } | null
+  subcontractor: { name: string; round_up_hours: boolean | null } | null
   customer: { name: string } | null
   contract: { name: string } | null
   contract_client: { name: string } | null
@@ -73,16 +73,24 @@ interface PayrollJob {
   job_extra_men: Array<{ employee_id: string | null; rate_per_hour: number | null; start_time: string | null; finish_time: string | null; cof_share: boolean }>
 }
 
-// Always rounds UP to the next 15-minute block — same rule as the job page,
-// Dashboard, and Invoices. breakMinutes (job-level only) is subtracted BEFORE
-// rounding, same order as JobForm's workedHoursCalc — subtracting it after
-// rounding gives a different (wrong) result since the break may cross a
-// 15-min boundary.
-function calcHoursFromTimes(start: string, finish: string, breakMinutes = 0): number {
+// Rounds UP to the next 15-minute block — same rule as the job page, Dashboard,
+// and Invoices — UNLESS the job's subcontractor has round_up_hours = false
+// (e.g. TMAAT/TMAAT TT), in which case plain decimal hours are used so our
+// payroll reconciles with what that subcontractor's own portal reports.
+// breakMinutes (job-level only) is subtracted BEFORE rounding, same order as
+// JobForm's workedHoursCalc — subtracting it after rounding gives a different
+// (wrong) result since the break may cross a 15-min boundary.
+function calcHoursFromTimes(start: string, finish: string, breakMinutes = 0, roundToBlock = true): number {
   const [sh, sm] = start.split(':').map(Number)
   const [fh, fm] = finish.split(':').map(Number)
   const mins = (fh * 60 + fm) - (sh * 60 + sm) - breakMinutes
-  return Math.max(0, Math.ceil(mins / 15) * 15 / 60)
+  if (mins <= 0) return 0
+  if (!roundToBlock) return Math.round((mins / 60) * 100) / 100
+  return Math.ceil(mins / 15) * 15 / 60
+}
+
+function jobRoundUp(job: { source: string; subcontractor: { round_up_hours: boolean | null } | null }): boolean {
+  return job.source === 'subcontract' && job.subcontractor ? (job.subcontractor.round_up_hours ?? true) : true
 }
 
 interface EmployeeEntry {
@@ -139,7 +147,7 @@ export default function PayrollPage() {
         cof, cof_final, extra_men_hours, extra_man_employee_id,
         google_review, google_review_employee_ids,
         actual_start_time, actual_finish_time, break_minutes,
-        subcontractor:subcontractors(name),
+        subcontractor:subcontractors(name, round_up_hours),
         customer:customers(name),
         contract:contracts(name),
         contract_client:contract_clients(name),
@@ -168,13 +176,14 @@ export default function PayrollPage() {
             // `hours` column, which can go stale relative to the current rounding
             // rule. Mirrors JobForm's resolveCrewHours/baseHrs and the Invoices fix.
             const hasTime = row.start_time?.length === 5 && row.end_time?.length === 5
+            const roundToBlock = jobRoundUp(job)
             const jobLevelHours = (() => {
               if (!job.actual_start_time || !job.actual_finish_time) return null
-              const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0)
+              const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0, roundToBlock)
               return raw > 0 ? raw : null
             })()
             const workedHours = hasTime
-              ? calcHoursFromTimes(row.start_time!, row.end_time!, Number(job.break_minutes) || 0)
+              ? calcHoursFromTimes(row.start_time!, row.end_time!, Number(job.break_minutes) || 0, roundToBlock)
               : (jobLevelHours ?? row.hours)
             const cofHours = row.cof_share ? (row.cof_hours > 0 ? row.cof_hours : Number(job.cof_final ?? job.cof ?? 0)) : 0
             const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
@@ -187,12 +196,13 @@ export default function PayrollPage() {
           for (const em of job.job_extra_men ?? []) {
             if (em.employee_id !== emp.id) continue
             const hasTime = em.start_time?.length === 5 && em.finish_time?.length === 5
+            const roundToBlock = jobRoundUp(job)
             const jobLevelHours = (() => {
               if (!job.actual_start_time || !job.actual_finish_time) return null
-              const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0)
+              const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0, roundToBlock)
               return raw > 0 ? raw : null
             })()
-            const workedHours = hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0) : (jobLevelHours ?? 0)
+            const workedHours = hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0, roundToBlock) : (jobLevelHours ?? 0)
             if (workedHours <= 0) continue
             const cofHours = em.cof_share ? Number(job.cof_final ?? job.cof ?? 0) : 0
             const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
