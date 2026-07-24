@@ -61,6 +61,13 @@ export interface Subcontractor {
   config: SubcontractorConfig
   google_review_bonus: boolean
   color_hex: string | null
+  // When false, hours for this subcontractor's jobs are NOT rounded up to the
+  // next 15-minute block — plain decimal hours are used instead (e.g. 5h48m
+  // stays 5.80h rather than becoming 6.00h). Used for TMAAT/TMAAT TT so our
+  // reported hours and crew payroll reconcile with TMAAT's own portal, which
+  // reports exact decimal hours. Defaults to true (existing round-up behavior)
+  // for every other subcontractor.
+  round_up_hours: boolean
   created_at?: string
 }
 
