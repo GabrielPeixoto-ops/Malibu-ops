@@ -61,6 +61,7 @@ interface InvoiceJob {
   manual_hours_override: number | null
   discount: number
   heavy_item_charge: number
+  client_cof_manual_charge: number | null
   override_revenue: number | null
   malibu_revenue: number | null
   client_billing_config: Record<string, unknown> | null
@@ -142,7 +143,7 @@ function calcRevenue(job: InvoiceJob): number | null {
   // What we charge the client for each Extra Man — pure company revenue,
   // independent of what the extra man is actually paid.
   const extraMenRevenue = (job.job_extra_men ?? []).reduce((s, em) => s + (Number(em.client_charge_amount) || 0), 0)
-  const total = base + materialsRevenue + (Number(job.heavy_item_charge) || 0) + extraMenRevenue - (Number(job.discount) || 0) + clientExpenses
+  const total = base + materialsRevenue + (Number(job.heavy_item_charge) || 0) + (Number(job.client_cof_manual_charge) || 0) + extraMenRevenue - (Number(job.discount) || 0) + clientExpenses
   return total > 0 ? total : null
 }
 
@@ -355,7 +356,7 @@ function InvoicesPageContent() {
       .select(`
         id, job_number, date, status, source,
         cof, cof_final, additional_hours, additional_rate, rate_card_key, formula_vars,
-        extra_men_hours, extra_man_employee_id, break_minutes, manual_hours_override, discount, heavy_item_charge, override_revenue, malibu_revenue, client_billing_config,
+        extra_men_hours, extra_man_employee_id, break_minutes, manual_hours_override, discount, heavy_item_charge, client_cof_manual_charge, override_revenue, malibu_revenue, client_billing_config,
         google_review, google_review_employee_ids, actual_start_time, actual_finish_time,
         subcontractor_rate_id, contract_rate_id,
         subcontractor:subcontractors(*),
