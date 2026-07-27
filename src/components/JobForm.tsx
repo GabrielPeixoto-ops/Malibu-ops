@@ -223,6 +223,7 @@ interface FormState {
   extra_men_hours: string
   extra_man_employee_id: string
   break_minutes: string
+  manual_hours_override: string
   discount: string
   notes: string
   completion_notes: string
@@ -346,6 +347,7 @@ function defaultForm(): FormState {
     extra_men_hours: '',
     extra_man_employee_id: '',
     break_minutes: '',
+    manual_hours_override: '',
     discount: '',
     notes: '',
     completion_notes: '',
@@ -583,6 +585,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             additional_hours: number | null; additional_rate: number | null
             rate_card_key: string | null; formula_vars: Record<string, number> | null
             extra_men_hours: number; extra_man_employee_id: string | null; break_minutes: number
+            manual_hours_override: number | null
             discount: number; notes: string | null; completion_notes: string | null
             actual_start_time: string | null; actual_finish_time: string | null
             scheduled_time: string | null; scheduled_finish_time: string | null; reference_number: string | null
@@ -654,6 +657,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             extra_men_hours: j.extra_men_hours > 0 ? j.extra_men_hours.toString() : '',
             extra_man_employee_id: j.extra_man_employee_id ?? '',
             break_minutes: j.break_minutes > 0 ? j.break_minutes.toString() : '',
+            manual_hours_override: j.manual_hours_override != null ? j.manual_hours_override.toString() : '',
             discount: j.discount?.toString() ?? '',
             notes: j.notes ?? '',
             completion_notes: j.completion_notes ?? '',
@@ -973,6 +977,12 @@ export default function JobForm({ jobId }: { jobId?: string }) {
   // exact decimal hours in their own system, so this flag disables that
   // rounding for their jobs so our numbers reconcile with theirs.
   const subRoundUp = form.source === 'subcontract' && selectedSub ? (selectedSub.round_up_hours ?? true) : true
+  // Manual override (migration_v50): when set on a "exact hours" subcontractor
+  // (round_up_hours=false, e.g. TMAAT/TMAAT TT), this single value replaces
+  // the computed worked hours for EVERY crew member / casual crew / extra man
+  // on the job — used when TMAAT's own rounding can't be reconstructed from
+  // start/finish times alone. Not available on normal (round-up) jobs.
+  const manualOverrideHours = (!subRoundUp && form.manual_hours_override.trim()) ? (parseFloat(form.manual_hours_override) || null) : null
 
   const malibuRevenue = useMemo<number | null>(() => {
     if (form.source !== 'subcontract' || selectedSub?.billing_type !== 'percent') return null
@@ -1092,6 +1102,7 @@ const filteredCustomers = useMemo(
     // subcontractor's record disables the block rounding here so our numbers
     // reconcile with theirs instead of overstating hours/payroll.
     const subRoundUp = form.source === 'subcontract' && selectedSub ? (selectedSub.round_up_hours ?? true) : true
+    const manualOverrideHours = (!subRoundUp && form.manual_hours_override.trim()) ? (parseFloat(form.manual_hours_override) || null) : null
 
     const extraMenForBilling = extraMen
       .filter((r) => r.name.trim() && r.start_time.length === 5 && r.finish_time.length === 5)
@@ -1099,7 +1110,7 @@ const filteredCustomers = useMemo(
         const match = resolveExtraMan(r.name)
         return {
           employee_id: match?.id ?? '',
-          hours: Math.max(0, calcCrewHours(r.start_time, r.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp)),
+          hours: Math.max(0, manualOverrideHours ?? calcCrewHours(r.start_time, r.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp)),
           hourly_rate: parseFloat(r.rate_per_hour) || match?.rate,
           employee_name: r.name.trim(),
           cof_share: r.cof_share,
@@ -1172,7 +1183,9 @@ const filteredCustomers = useMemo(
     const cofFinalHrs = form.cof_final.trim() ? (parseFloat(form.cof_final) || null) : null
     const crewData = crew.filter((r) => r.employee_id).map((r) => {
       let hours: number
-      if (crewHasTime(r)) {
+      if (manualOverrideHours !== null) {
+        hours = Math.max(2, manualOverrideHours)
+      } else if (crewHasTime(r)) {
         const raw = Math.max(0, calcCrewHours(r.start_time, r.end_time, parseFloat(form.break_minutes) || 0, subRoundUp))
         hours = raw > 0 ? Math.max(2, raw) : 0
       } else if (_billingWorkedHrs !== null) {
@@ -1198,7 +1211,9 @@ const filteredCustomers = useMemo(
       .map((r) => {
         const hasTime = r.start_time.length === 5 && r.finish_time.length === 5
         let hours: number
-        if (hasTime) {
+        if (manualOverrideHours !== null) {
+          hours = Math.max(2, manualOverrideHours) + (r.cof_share ? (cofFinalHrs ?? 0) : 0)
+        } else if (hasTime) {
           const rawHours = Math.max(0, calcCrewHours(r.start_time, r.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp))
           hours = (rawHours > 0 ? Math.max(2, rawHours) : 0) + (r.cof_share ? (cofFinalHrs ?? 0) : 0)
         } else if (_billingWorkedHrs !== null) {
@@ -1265,6 +1280,7 @@ const filteredCustomers = useMemo(
 
   // ── Worked hours from actual times (rounded to nearest 15 min) ──────────
   const workedHoursCalc = useMemo<number | null>(() => {
+    if (manualOverrideHours !== null) return manualOverrideHours
     if (!form.actual_start_time || !form.actual_finish_time) return null
     const [sh, sm] = form.actual_start_time.split(':').map(Number)
     const [eh, em] = form.actual_finish_time.split(':').map(Number)
@@ -1275,7 +1291,7 @@ const filteredCustomers = useMemo(
     if (rawMins <= 0) return null
     if (!subRoundUp) return Math.round((rawMins / 60) * 100) / 100
     return Math.ceil(rawMins / 15) * 15 / 60
-  }, [form.actual_start_time, form.actual_finish_time, form.break_minutes, subRoundUp])
+  }, [form.actual_start_time, form.actual_finish_time, form.break_minutes, subRoundUp, manualOverrideHours])
 
   // ── Field helpers ──────────────────────────────────────────────────────────
   function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
@@ -1418,6 +1434,7 @@ const filteredCustomers = useMemo(
   // Crew or Casual Crew for this job, hours is 0 — no commission.
   function commissionWorkedHours(employeeId: string, casualWorkerId: string): number {
     const subRoundUp = form.source === 'subcontract' && selectedSub ? (selectedSub.round_up_hours ?? true) : true
+    const manualOverrideHours = (!subRoundUp && form.manual_hours_override.trim()) ? (parseFloat(form.manual_hours_override) || null) : null
     const cofFinalDisplay = form.cof_final.trim() ? (parseFloat(form.cof_final) || 0) : 0
     const billingWorkedHrs = (() => {
       if (!form.actual_start_time || !form.actual_finish_time) return null
@@ -1432,6 +1449,7 @@ const filteredCustomers = useMemo(
       const r = crew.find((c) => c.employee_id === employeeId)
       if (!r) return 0
       const baseHrs = (() => {
+        if (manualOverrideHours !== null) return Math.max(2, manualOverrideHours)
         const rawC = crewHasTime(r) ? calcCrewHours(r.start_time, r.end_time, parseFloat(form.break_minutes) || 0, subRoundUp) : null
         if (rawC !== null && rawC > 0) return Math.max(2, rawC)
         if (billingWorkedHrs !== null) return Math.max(2, billingWorkedHrs)
@@ -1451,6 +1469,7 @@ const filteredCustomers = useMemo(
       if (!r) return 0
       const hasTime = r.start_time.length === 5 && r.finish_time.length === 5
       const baseHrs = (() => {
+        if (manualOverrideHours !== null) return Math.max(2, manualOverrideHours)
         const rawC = hasTime ? calcCrewHours(r.start_time, r.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp) : null
         if (rawC !== null && rawC > 0) return Math.max(2, rawC)
         if (billingWorkedHrs !== null) return Math.max(2, billingWorkedHrs)
@@ -1649,6 +1668,7 @@ const filteredCustomers = useMemo(
     const clientBillingConfig = overrideOpen ? buildOverrideConfig(overrideBilling) : null
 
     const subRoundUp = form.source === 'subcontract' && selectedSub ? (selectedSub.round_up_hours ?? true) : true
+    const manualOverrideHours = (!subRoundUp && form.manual_hours_override.trim()) ? (parseFloat(form.manual_hours_override) || null) : null
 
     const extraMenRows = extraMen.filter((r) => r.name.trim() && r.start_time && r.finish_time)
     // Rows persisted to job_extra_men must NOT require start/finish time —
@@ -1659,13 +1679,14 @@ const filteredCustomers = useMemo(
     // must not.
     const extraMenPersistRows = extraMen.filter((r) => r.name.trim())
     const computedExtraMenHours = extraMenRows.reduce((s, r) => {
-      const h = calcCrewHours(r.start_time, r.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp)
+      const h = manualOverrideHours ?? calcCrewHours(r.start_time, r.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp)
       return s + (h > 0 ? h : 0)
     }, 0)
 
     const cofFinalVal = form.cof_final.trim() ? (parseFloat(form.cof_final) || null) : null
 
     const workedHrsForSave = (() => {
+      if (manualOverrideHours !== null) return manualOverrideHours
       if (!form.actual_start_time || !form.actual_finish_time) return null
       const [sh, sm] = form.actual_start_time.split(':').map(Number)
       const [eh, em] = form.actual_finish_time.split(':').map(Number)
@@ -1757,6 +1778,7 @@ const filteredCustomers = useMemo(
       extra_men_hours: computedExtraMenHours > 0 ? computedExtraMenHours : (parseFloat(form.extra_men_hours) || 0),
       extra_man_employee_id: form.extra_man_employee_id || null,
       break_minutes: parseFloat(form.break_minutes) || 0,
+      manual_hours_override: (!subRoundUp && form.manual_hours_override.trim()) ? (parseFloat(form.manual_hours_override) || null) : null,
       discount: parseFloat(form.discount) || 0,
       deposit: parseFloat(form.deposit) || null,
       heavy_item_charge: parseFloat(form.heavy_item_charge) || null,
@@ -1799,7 +1821,9 @@ const filteredCustomers = useMemo(
 
     const crewRows = crew.filter((r) => r.employee_id).map((r) => {
       let hours: number
-      if (crewHasTime(r)) {
+      if (manualOverrideHours !== null) {
+        hours = Math.max(2, manualOverrideHours) + (r.cof_share ? (cofFinalVal ?? 0) : 0)
+      } else if (crewHasTime(r)) {
         hours = calcCrewHours(r.start_time, r.end_time, parseFloat(form.break_minutes) || 0, subRoundUp)
       } else if (workedHrsForSave !== null) {
         hours = Math.max(2, workedHrsForSave) + (r.cof_share ? (cofFinalVal ?? 0) : 0)
@@ -1853,7 +1877,7 @@ const filteredCustomers = useMemo(
               client_rate_per_hour: parseFloat(r.client_rate_per_hour) || 0,
               client_charge_amount: (() => {
                 const rate = parseFloat(r.client_rate_per_hour) || 0
-                if (rate > 0) return rate * Math.max(0, calcCrewHours(r.start_time, r.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp))
+                if (rate > 0) return rate * Math.max(0, manualOverrideHours ?? calcCrewHours(r.start_time, r.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp))
                 return parseFloat(r.client_charge) || 0
               })(),
             }
@@ -1868,7 +1892,7 @@ const filteredCustomers = useMemo(
             const hasTime = r.start_time.length === 5 && r.finish_time.length === 5
             let hours: number
             if (hasTime) {
-              hours = Math.max(0, calcCrewHours(r.start_time, r.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp))
+              hours = Math.max(0, manualOverrideHours ?? calcCrewHours(r.start_time, r.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp))
             } else if (workedHrsForSave !== null) {
               hours = Math.max(2, workedHrsForSave) + (r.cof_share ? (cofFinalVal ?? 0) : 0)
             } else {
@@ -1984,7 +2008,7 @@ const filteredCustomers = useMemo(
               client_rate_per_hour: parseFloat(r.client_rate_per_hour) || 0,
               client_charge_amount: (() => {
                 const rate = parseFloat(r.client_rate_per_hour) || 0
-                if (rate > 0) return rate * Math.max(0, calcCrewHours(r.start_time, r.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp))
+                if (rate > 0) return rate * Math.max(0, manualOverrideHours ?? calcCrewHours(r.start_time, r.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp))
                 return parseFloat(r.client_charge) || 0
               })(),
             }
@@ -1998,7 +2022,7 @@ const filteredCustomers = useMemo(
             const hasTime = r.start_time.length === 5 && r.finish_time.length === 5
             let hours: number
             if (hasTime) {
-              hours = Math.max(0, calcCrewHours(r.start_time, r.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp))
+              hours = Math.max(0, manualOverrideHours ?? calcCrewHours(r.start_time, r.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp))
             } else if (workedHrsForSave !== null) {
               hours = Math.max(2, workedHrsForSave) + (r.cof_share ? (cofFinalVal ?? 0) : 0)
             } else {
@@ -2827,7 +2851,7 @@ const filteredCustomers = useMemo(
 
             // In Progress / Completion view: full row with time inputs
             const hasTime = crewHasTime(row)
-            const rawComputed = hasTime ? calcCrewHours(row.start_time, row.end_time, parseFloat(form.break_minutes) || 0, subRoundUp) : null
+            const rawComputed = manualOverrideHours ?? (hasTime ? calcCrewHours(row.start_time, row.end_time, parseFloat(form.break_minutes) || 0, subRoundUp) : null)
             const computed = rawComputed !== null && rawComputed > 0 ? Math.max(2, rawComputed) : rawComputed
             return (
               <div key={row._id} className="flex flex-col gap-1.5">
@@ -3064,7 +3088,9 @@ const filteredCustomers = useMemo(
           {casualCrew.map((row) => {
             const hasTime = row.start_time.length === 5 && row.finish_time.length === 5
             const cofFinalHrsUI = form.cof_final.trim() ? (parseFloat(form.cof_final) || null) : null
-            const baseComputed = hasTime
+            const baseComputed = manualOverrideHours !== null
+              ? Math.max(0, manualOverrideHours)
+              : hasTime
               ? Math.max(0, calcCrewHours(row.start_time, row.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp))
               : (row.cof_share ? (cofFinalHrsUI ?? null) : null)
             const casualWorkerIdUI = casualWorkers.find((cw) => cw.name.toLowerCase() === row.name.trim().toLowerCase())?.id
@@ -3352,7 +3378,7 @@ const filteredCustomers = useMemo(
     const crewLines = crew.filter((r) => r.employee_id).map((r) => {
       const emp = empMap.get(r.employee_id)
       if (!emp) return null
-      const workedHours = resolveCrewHours(r, parseFloat(form.break_minutes) || 0, subRoundUp)
+      const workedHours = manualOverrideHours ?? resolveCrewHours(r, parseFloat(form.break_minutes) || 0, subRoundUp)
       const cofHours = r.cof_share ? (parseFloat(r.cof_hours) || 0) : 0
       const reviewBonus = form.google_review && form.google_review_employee_ids.includes(emp.id) ? 0.5 : 0
       const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus
@@ -3801,6 +3827,34 @@ const filteredCustomers = useMemo(
               <Input id="rfv-cof-final" label="Call Out Fee — crew (hrs)" type="number" min="0" step="0.25" value={form.cof_final ?? ''} onChange={(e) => setField('cof_final', e.target.value)} placeholder="0" disabled={isReviewed} />
             </div>
 
+            {/* Manual hours override — only for "exact hours" subcontractors
+                (round_up_hours=false, e.g. TMAAT/TMAAT TT). TMAAT's own portal
+                rounds hours in a way that can't be reliably reconstructed from
+                start/finish times (a "Total hrs" display that's plain decimal
+                vs. an invoiced figure rounded up to 15-min blocks) — this lets
+                the office type in the exact hours TMAAT actually billed/paid,
+                applied uniformly to every crew member / casual / extra man on
+                this job instead of the computed value. */}
+            {!subRoundUp && (
+              <div className="mb-3">
+                <Input
+                  label="Manual Hours Override (TMAAT)"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.manual_hours_override}
+                  onChange={(e) => setField('manual_hours_override', e.target.value)}
+                  placeholder="Leave blank to use computed hours"
+                  disabled={isReviewed}
+                />
+                <p className="text-xs text-dim mt-1">
+                  {form.manual_hours_override.trim()
+                    ? `Overriding: every crew member / casual / extra man on this job will show ${(parseFloat(form.manual_hours_override) || 0).toFixed(2)}h worked, matching what TMAAT actually billed — instead of the computed value.`
+                    : 'Type the exact hours TMAAT billed/paid for this job (from their invoice) if the computed hours don\'t match — applies to everyone on the job.'}
+                </p>
+              </div>
+            )}
+
             {/* Heavy Item Charge — job-level client charge (inc. GST, same as expenses) */}
             <div className="mb-3">
               <Input
@@ -3889,6 +3943,7 @@ const filteredCustomers = useMemo(
                     const emp = employees.find((e) => e.id === r.employee_id)
                     const cofFinalDisplay = form.cof_final.trim() ? (parseFloat(form.cof_final) || 0) : 0
                     const baseHrs = (() => {
+                      if (manualOverrideHours !== null) return Math.max(2, manualOverrideHours)
                       const rawC = crewHasTime(r) ? calcCrewHours(r.start_time, r.end_time, parseFloat(form.break_minutes) || 0, subRoundUp) : null
                       if (rawC !== null && rawC > 0) return Math.max(2, rawC)
                       if (form.actual_start_time && form.actual_finish_time) {
@@ -3947,6 +4002,7 @@ const filteredCustomers = useMemo(
                     const hasTime = r.start_time.length === 5 && r.finish_time.length === 5
                     const cofFinalDisplay = form.cof_final.trim() ? (parseFloat(form.cof_final) || 0) : 0
                     const baseHrs = (() => {
+                      if (manualOverrideHours !== null) return Math.max(2, manualOverrideHours)
                       const rawC = hasTime ? calcCrewHours(r.start_time, r.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp) : null
                       if (rawC !== null && rawC > 0) return Math.max(2, rawC)
                       if (form.actual_start_time && form.actual_finish_time) {
@@ -4074,7 +4130,7 @@ const filteredCustomers = useMemo(
               <div className="space-y-2">
                 {extraMen.map((row) => {
                   const hasTime = row.start_time.length === 5 && row.finish_time.length === 5
-                  const rawComputed = hasTime ? Math.max(0, calcCrewHours(row.start_time, row.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp)) : null
+                  const rawComputed = manualOverrideHours ?? (hasTime ? Math.max(0, calcCrewHours(row.start_time, row.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp)) : null)
                   const baseHrs = rawComputed !== null && rawComputed > 0 ? Math.max(2, rawComputed) : rawComputed
                   const cofFinalDisplay = form.cof_final.trim() ? (parseFloat(form.cof_final) || 0) : 0
                   const cofHrs = (baseHrs !== null && row.cof_share) ? cofFinalDisplay : 0
@@ -4713,7 +4769,7 @@ const filteredCustomers = useMemo(
             <div className="space-y-2">
               {extraMen.map((row) => {
                 const hasTime = row.start_time.length === 5 && row.finish_time.length === 5
-                const computed = hasTime ? Math.max(0, calcCrewHours(row.start_time, row.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp)) : null
+                const computed = manualOverrideHours ?? (hasTime ? Math.max(0, calcCrewHours(row.start_time, row.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp)) : null)
                 return (
                   <div key={row._id} className="flex items-center gap-2 flex-wrap">
                     <input
