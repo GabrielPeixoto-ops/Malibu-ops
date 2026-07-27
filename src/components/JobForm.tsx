@@ -3065,10 +3065,15 @@ const filteredCustomers = useMemo(
                     </div>
                   ) : (
                     <div key={p._id} className="relative group rounded-lg overflow-hidden bg-wire/30 aspect-video">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={p.url} alt={p.caption || 'Job photo'} className="w-full h-full object-cover" />
+                      {/* Wrapped in a link so the photo actually opens full-size in a new
+                          tab on click/tap — previously this was a bare <img> with no way
+                          to view it larger, so users couldn't open completion/damage photos. */}
+                      <a href={p.url} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={p.url} alt={p.caption || 'Job photo'} className="w-full h-full object-cover" />
+                      </a>
                       {p.caption && (
-                        <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs px-2 py-1 truncate">{p.caption}</div>
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs px-2 py-1 truncate pointer-events-none">{p.caption}</div>
                       )}
                       {!locked && (
                         <button
@@ -4275,8 +4280,12 @@ const filteredCustomers = useMemo(
                 <div className="mt-2 flex flex-wrap gap-2">
                   {photos.filter((p) => p.category === 'completion').map((p) => (
                     <div key={p._id} className="relative group w-20 h-14 rounded-lg overflow-hidden bg-wire/30 shrink-0">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={p.url} alt={p.caption || 'Completion photo'} className="w-full h-full object-cover" />
+                      {/* Link-wrapped so tapping/clicking opens the full photo in a new
+                          tab — previously a bare <img> with no way to view it larger. */}
+                      <a href={p.url} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={p.url} alt={p.caption || 'Completion photo'} className="w-full h-full object-cover" />
+                      </a>
                       {!isReviewed && (
                         <button
                           type="button"
@@ -4375,8 +4384,10 @@ const filteredCustomers = useMemo(
                       <div className="mt-2 flex flex-wrap gap-2">
                         {photos.filter((p) => p.category === 'google_review').map((p) => (
                           <div key={p._id} className="relative group w-20 h-14 rounded-lg overflow-hidden bg-wire/30 shrink-0">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={p.url} alt="Review screenshot" className="w-full h-full object-cover" />
+                            <a href={p.url} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={p.url} alt="Review screenshot" className="w-full h-full object-cover" />
+                            </a>
                             {!isReviewed && (
                               <button type="button" onClick={() => removePhoto(p._id)} className="absolute top-0.5 right-0.5 bg-black/60 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity" aria-label="Remove">
                                 <X size={10} />
