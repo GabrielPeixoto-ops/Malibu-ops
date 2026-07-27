@@ -287,6 +287,10 @@ interface FormState {
   gross_job_value: string
   client_cof_override: boolean
   client_cof_hours: string
+  // Manual $ override for the client Call Out charge (migration_v54) — used
+  // instead of client_cof_hours when the amount charged isn't a clean
+  // multiple of the rate. Non-empty here means "dollar mode" is active.
+  client_cof_manual_charge: string
   deposit: string
   heavy_item_charge: string
 }
@@ -401,6 +405,7 @@ function defaultForm(): FormState {
     gross_job_value: '',
     client_cof_override: false,
     client_cof_hours: '',
+    client_cof_manual_charge: '',
     deposit: '',
     heavy_item_charge: '',
   }
@@ -627,6 +632,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             malibu_revenue: number | null
             client_cof_override: boolean
             client_cof_hours: number | null
+            client_cof_manual_charge: number | null
             deposit: number | null
             heavy_item_charge: number | null
             job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; heavy_item: boolean; start_time: string | null; end_time: string | null }>
@@ -714,6 +720,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             gross_job_value: j.gross_job_value != null ? j.gross_job_value.toString() : '',
             client_cof_override: j.client_cof_override ?? false,
             client_cof_hours: j.client_cof_hours != null ? j.client_cof_hours.toString() : '',
+            client_cof_manual_charge: j.client_cof_manual_charge != null ? j.client_cof_manual_charge.toString() : '',
             deposit: j.deposit != null ? j.deposit.toString() : '',
             heavy_item_charge: j.heavy_item_charge != null ? j.heavy_item_charge.toString() : '',
           })
@@ -1088,9 +1095,14 @@ const filteredCustomers = useMemo(
       if (rawMins <= 0) return null
       return Math.ceil(rawMins / 15) * 15 / 60
     })()
-    // Client COF: either same as crew (checkbox off) or custom value (checkbox on)
+    // Client COF: either same as crew (checkbox off) or custom value (checkbox on).
+    // When a manual $ amount is set (client_cof_manual_charge), that dollar
+    // figure is added directly to revenue elsewhere (like heavy_item_charge)
+    // instead of being folded into hours here — so it must be excluded from
+    // cofHours to avoid double-counting.
+    const clientCofDollarMode = form.client_cof_override && form.client_cof_manual_charge.trim() !== ''
     const effectiveClientCof = form.client_cof_override
-      ? (parseFloat(form.client_cof_hours) || 0)
+      ? (clientCofDollarMode ? 0 : (parseFloat(form.client_cof_hours) || 0))
       : (parseFloat(form.cof_final) || 0)
     // Total billed = max(2, worked) + client COF surcharge
     const cofHours = workedHrs !== null
@@ -1109,7 +1121,7 @@ const filteredCustomers = useMemo(
     const rate = privateRates.find((r) => r.id === form.private_rate_id)
     if (!rate) return null
     return { rate_per_hour: rate.rate_per_hour, cofHours }
-  }, [form.source, form.private_rate_custom, form.private_rate_custom_price, form.private_rate_custom_gst_exclusive, form.private_rate_id, form.cof_final, form.cof, form.client_cof_override, form.client_cof_hours, form.actual_start_time, form.actual_finish_time, form.break_minutes, privateRates])
+  }, [form.source, form.private_rate_custom, form.private_rate_custom_price, form.private_rate_custom_gst_exclusive, form.private_rate_id, form.cof_final, form.cof, form.client_cof_override, form.client_cof_hours, form.client_cof_manual_charge, form.actual_start_time, form.actual_finish_time, form.break_minutes, privateRates])
 
   const summary = useMemo<JobSummary | null>(() => {
     if (form.source === 'subcontract' && !selectedSub) return null
@@ -1153,9 +1165,11 @@ const filteredCustomers = useMemo(
       if (!subRoundUp) return Math.round((rawMins / 60) * 100) / 100
       return Math.ceil(rawMins / 15) * 15 / 60
     })()
-    // Client COF: what gets billed to the client for the Call Out Fee portion
+    // Client COF: what gets billed to the client for the Call Out Fee portion.
+    // Excluded when a manual $ amount is set — that's added flat elsewhere.
+    const clientCofDollarModeSummary = form.client_cof_override && form.client_cof_manual_charge.trim() !== ''
     const effectiveClientCof = form.client_cof_override
-      ? (parseFloat(form.client_cof_hours) || 0)
+      ? (clientCofDollarModeSummary ? 0 : (parseFloat(form.client_cof_hours) || 0))
       : (parseFloat(form.cof_final) || 0)
 
     const selectedSubRatePH = form.source === 'subcontract' && selectedSub?.billing_type === 'ratecard'
@@ -1197,6 +1211,7 @@ const filteredCustomers = useMemo(
       discount: parseFloat(form.discount) || 0,
       deposit: parseFloat(form.deposit) || 0,
       heavy_item_charge: parseFloat(form.heavy_item_charge) || 0,
+      client_cof_manual_charge: clientCofDollarModeSummary ? (parseFloat(form.client_cof_manual_charge) || 0) : 0,
       source: form.source,
       client_billing_config: overrideOpen ? buildOverrideConfig(overrideBilling) as unknown as SubcontractorConfig : null,
       google_review: form.google_review,
@@ -1738,7 +1753,10 @@ const filteredCustomers = useMemo(
       : null
 
     // Revenue for private jobs: rate × (max(2, workedHrs) + effectiveClientCof)
-    const saveEffectiveClientCof = form.client_cof_override
+    const clientCofDollarModeSave = form.client_cof_override && form.client_cof_manual_charge.trim() !== ''
+    const saveEffectiveClientCof = clientCofDollarModeSave
+      ? 0
+      : form.client_cof_override
       ? (parseFloat(form.client_cof_hours) || 0)
       : (parseFloat(form.cof_final) || 0)
     const computedPrivateRevenue = (() => {
@@ -1817,6 +1835,7 @@ const filteredCustomers = useMemo(
       discount: parseFloat(form.discount) || 0,
       deposit: parseFloat(form.deposit) || null,
       heavy_item_charge: parseFloat(form.heavy_item_charge) || null,
+      client_cof_manual_charge: form.client_cof_override && form.client_cof_manual_charge.trim() ? (parseFloat(form.client_cof_manual_charge) || null) : null,
       notes: form.notes.trim() || null,
       completion_notes: form.completion_notes.trim() || null,
       actual_start_time: form.actual_start_time || null,
@@ -3977,7 +3996,10 @@ const filteredCustomers = useMemo(
                     checked={form.client_cof_override}
                     onChange={(e) => {
                       setField('client_cof_override', e.target.checked)
-                      if (!e.target.checked) setField('client_cof_hours', '')
+                      if (!e.target.checked) {
+                        setField('client_cof_hours', '')
+                        setField('client_cof_manual_charge', '')
+                      }
                     }}
                     disabled={isReviewed}
                     className="w-3.5 h-3.5 rounded accent-gold"
@@ -3985,21 +4007,60 @@ const filteredCustomers = useMemo(
                   <span className="text-xs text-dim">Charge different Call Out amount to client</span>
                 </label>
                 {form.client_cof_override && (
-                  <div className="flex items-center gap-2 pl-5">
-                    <label className="text-xs text-dim whitespace-nowrap">Client Call Out (hrs)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.25"
-                      placeholder={form.cof_final || '0'}
-                      value={form.client_cof_hours}
-                      onChange={(e) => setField('client_cof_hours', e.target.value)}
-                      disabled={isReviewed}
-                      className="w-24 px-2 py-1 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface"
-                    />
-                    <span className="text-xs text-dim">
-                      vs crew {form.cof_final || '0'}h
-                    </span>
+                  <div className="pl-5 space-y-2">
+                    <div className="flex items-center gap-1 text-xs">
+                      <button
+                        type="button"
+                        disabled={isReviewed}
+                        onClick={() => setField('client_cof_manual_charge', '')}
+                        className={`px-2 py-0.5 rounded-md border ${form.client_cof_manual_charge.trim() === '' ? 'border-gold-ring bg-gold/10 text-gold' : 'border-wire text-dim'}`}
+                      >
+                        Horas
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isReviewed}
+                        onClick={() => setField('client_cof_manual_charge', form.client_cof_manual_charge.trim() || '0')}
+                        className={`px-2 py-0.5 rounded-md border ${form.client_cof_manual_charge.trim() !== '' ? 'border-gold-ring bg-gold/10 text-gold' : 'border-wire text-dim'}`}
+                      >
+                        Valor ($)
+                      </button>
+                    </div>
+                    {form.client_cof_manual_charge.trim() === '' ? (
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs text-dim whitespace-nowrap">Client Call Out (hrs)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.25"
+                          placeholder={form.cof_final || '0'}
+                          value={form.client_cof_hours}
+                          onChange={(e) => setField('client_cof_hours', e.target.value)}
+                          disabled={isReviewed}
+                          className="w-24 px-2 py-1 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface"
+                        />
+                        <span className="text-xs text-dim">
+                          vs crew {form.cof_final || '0'}h
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs text-dim whitespace-nowrap">Client Call Out ($, inc. GST)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="0.00"
+                          value={form.client_cof_manual_charge}
+                          onChange={(e) => setField('client_cof_manual_charge', e.target.value)}
+                          disabled={isReviewed}
+                          className="w-28 px-2 py-1 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface"
+                        />
+                        <span className="text-xs text-dim">
+                          valor fixo, substitui o cálculo por horas
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
