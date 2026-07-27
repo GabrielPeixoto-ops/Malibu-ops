@@ -165,7 +165,7 @@ export default function TeamsPage() {
           } else {
             groups.set(key, {
               fleetId: truck?.fleet_id ?? null,
-              label: truck?.name ?? 'Sem truck atribuído',
+              label: truck?.name ?? 'No truck assigned',
               registration: truck?.registration ?? null,
               crewNames: [...new Set(crewNames)],
               jobs: [job],
@@ -198,8 +198,8 @@ export default function TeamsPage() {
 
       <div className="no-print flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-display font-bold text-parchment">Times</h1>
-          <p className="text-sm text-dim mt-0.5">Monta o quadro de trucks/motoristas/jobs da semana, direto dos jobs já cadastrados.</p>
+          <h1 className="text-2xl font-display font-bold text-parchment">Teams</h1>
+          <p className="text-sm text-dim mt-0.5">Builds the weekly trucks/drivers/jobs roster, straight from the jobs already on file.</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setWeekStart((w) => addDays(w, -7))} className="p-2 text-dim hover:text-parchment rounded-lg hover:bg-panel transition-colors">
@@ -209,20 +209,20 @@ export default function TeamsPage() {
           <button onClick={() => setWeekStart((w) => addDays(w, 7))} className="p-2 text-dim hover:text-parchment rounded-lg hover:bg-panel transition-colors">
             <ChevronRight size={18} />
           </button>
-          <Button variant="secondary" size="sm" onClick={() => setWeekStart(getMonday(new Date()))}>Hoje</Button>
+          <Button variant="secondary" size="sm" onClick={() => setWeekStart(getMonday(new Date()))}>Today</Button>
           <Button onClick={() => window.print()} size="sm">
-            <Printer size={14} /> Baixar / Imprimir
+            <Printer size={14} /> Download / Print
           </Button>
         </div>
       </div>
 
       <div id="teams-print-area">
-        <h2 className="hidden print:block text-lg font-bold mb-4">Malibu Moving Specialists — Times {fmtWeekRange(weekStart)}</h2>
+        <h2 className="hidden print:block text-lg font-bold mb-4">Malibu Moving Specialists — Teams {fmtWeekRange(weekStart)}</h2>
 
         {loading ? (
           <p className="text-warm text-sm">Loading…</p>
         ) : daysWithJobs.length === 0 ? (
-          <div className="bg-surface rounded-xl border border-wire p-12 text-center text-dim">Nenhum job agendado nesta semana.</div>
+          <div className="bg-surface rounded-xl border border-wire p-12 text-center text-dim">No jobs scheduled this week.</div>
         ) : (
           <div className="space-y-6">
             {daysWithJobs.map(({ day, dayISO, groups }) => (
@@ -241,7 +241,7 @@ export default function TeamsPage() {
                       </div>
                       <div className="p-3 flex-1 flex flex-col gap-2">
                         <p className="text-sm font-medium text-parchment">
-                          {g.crewNames.length > 0 ? g.crewNames.join(' / ') : <span className="text-dim italic">Sem equipe atribuída</span>}
+                          {g.crewNames.length > 0 ? g.crewNames.join(' / ') : <span className="text-dim italic">No crew assigned</span>}
                         </p>
                         <div className="space-y-1.5">
                           {g.jobs.map((job) => (
