@@ -71,7 +71,7 @@ interface PayrollJob {
   contract: { name: string } | null
   contract_client: { name: string } | null
   job_crew: PayrollCrewRow[]
-  job_extra_men: Array<{ employee_id: string | null; rate_per_hour: number | null; start_time: string | null; finish_time: string | null; cof_share: boolean }>
+  job_extra_men: Array<{ employee_id: string | null; rate_per_hour: number | null; start_time: string | null; finish_time: string | null; cof_share: boolean; minimum_hours: number | null }>
 }
 
 // Rounds UP to the next 15-minute block — same rule as the job page, Dashboard,
@@ -167,7 +167,7 @@ export default function PayrollPage() {
         contract:contracts(name),
         contract_client:contract_clients(name),
         job_crew(employee_id, hours, cof_share, cof_hours, start_time, end_time),
-        job_extra_men(employee_id, rate_per_hour, start_time, finish_time, cof_share)
+        job_extra_men(employee_id, rate_per_hour, start_time, finish_time, cof_share, minimum_hours)
       `)
       .in('status', ['reviewed', 'invoiced', 'paid'])
       .gte('date', start)
@@ -223,7 +223,11 @@ export default function PayrollPage() {
             if (workedHours <= 0) continue
             const cofHours = em.cof_share ? Number(job.cof_final ?? job.cof ?? 0) : 0
             const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
-            const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus
+            // Per-person minimum (migration_v51) — e.g. a guaranteed 4h
+            // "sweetener" for a far/late job — overrides the standard 2h
+            // minimum call when set on this extra man row.
+            const minCall = em.minimum_hours && em.minimum_hours > 0 ? em.minimum_hours : MIN_CALL
+            const paidHours = Math.max(workedHours, minCall) + cofHours + reviewBonus
             const workedTime = (em.start_time && em.finish_time)
               ? `${em.start_time.slice(0, 5)}–${em.finish_time.slice(0, 5)}`
               : null
