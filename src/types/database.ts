@@ -199,6 +199,13 @@ export interface Job {
   extra_men_hours: number
   extra_man_employee_id: string | null
   break_minutes: number
+  // Manual override for total worked hours, applied uniformly to every crew
+  // member / casual crew / extra man on this job — used for TMAAT/TMAAT TT
+  // jobs (round_up_hours=false subcontractors) where TMAAT's own portal
+  // rounds hours in a way we can't reliably reverse-engineer from start/
+  // finish times (see migration_v50). NULL means no override — hours are
+  // computed live from times as usual.
+  manual_hours_override: number | null
   discount: number
   notes: string | null
   completion_notes: string | null
