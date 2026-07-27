@@ -138,7 +138,7 @@ export function calculatePayroll(
   employees: Employee[],
   cofHours = 0,
   googleReviewEmployeeIds: string[] = [],
-  extraMen: Array<{ employee_id: string; hours: number; hourly_rate?: number; employee_name?: string; cof_share?: boolean }> = [],
+  extraMen: Array<{ employee_id: string; hours: number; hourly_rate?: number; employee_name?: string; cof_share?: boolean; minimum_hours?: number | null }> = [],
   casualCrew: Array<{ name: string; rate_per_hour: number; hours: number; heavy_item?: boolean; casual_worker_id?: string | null }> = [],
   commissions: Array<{ employee_id: string | null; casual_worker_id?: string | null; casual_worker_name?: string; rate_per_hour: number; hours: number; label?: string }> = []
 ): PayrollResult {
@@ -180,7 +180,10 @@ export function calculatePayroll(
     // Out Fee the same way regular crew does (via cof_share), otherwise they're
     // silently underpaid relative to everyone else on the same job.
     const rowCof = em.cof_share ? cofHours : 0
-    const paid_hours = Math.max(em.hours, MIN_CALL) + rowCof + (hasReviewBonus ? REVIEW_BONUS : 0)
+    // Per-person minimum (migration_v51) — e.g. a guaranteed 4h "sweetener"
+    // for a far/late job — overrides the standard 2h minimum call when set.
+    const rowMinCall = em.minimum_hours && em.minimum_hours > 0 ? em.minimum_hours : MIN_CALL
+    const paid_hours = Math.max(em.hours, rowMinCall) + rowCof + (hasReviewBonus ? REVIEW_BONUS : 0)
     entries.push({
       employee_id: em.employee_id,
       employee_name: name,
