@@ -65,6 +65,7 @@ interface PayrollJob {
   actual_start_time: string | null
   actual_finish_time: string | null
   break_minutes: number | null
+  manual_hours_override: number | null
   subcontractor: { name: string; round_up_hours: boolean | null } | null
   customer: { name: string } | null
   contract: { name: string } | null
@@ -91,6 +92,16 @@ function calcHoursFromTimes(start: string, finish: string, breakMinutes = 0, rou
 
 function jobRoundUp(job: { source: string; subcontractor: { round_up_hours: boolean | null } | null }): boolean {
   return job.source === 'subcontract' && job.subcontractor ? (job.subcontractor.round_up_hours ?? true) : true
+}
+
+// Manual override (migration_v50): when set on a TMAAT-type job (round_up_hours
+// = false), this single value replaces the computed worked hours for EVERY
+// crew member / extra man on the job — used when TMAAT's own rounding can't
+// be reconstructed from start/finish times. See JobForm.tsx for the matching
+// UI and same-priority logic.
+function jobManualHours(job: { source: string; subcontractor: { round_up_hours: boolean | null } | null; manual_hours_override: number | null }): number | null {
+  if (jobRoundUp(job)) return null
+  return job.manual_hours_override ?? null
 }
 
 interface EmployeeEntry {
@@ -146,7 +157,7 @@ export default function PayrollPage() {
         id, job_number, date, status, source,
         cof, cof_final, extra_men_hours, extra_man_employee_id,
         google_review, google_review_employee_ids,
-        actual_start_time, actual_finish_time, break_minutes,
+        actual_start_time, actual_finish_time, break_minutes, manual_hours_override,
         subcontractor:subcontractors(name, round_up_hours),
         customer:customers(name),
         contract:contracts(name),
@@ -177,14 +188,15 @@ export default function PayrollPage() {
             // rule. Mirrors JobForm's resolveCrewHours/baseHrs and the Invoices fix.
             const hasTime = row.start_time?.length === 5 && row.end_time?.length === 5
             const roundToBlock = jobRoundUp(job)
+            const manualHours = jobManualHours(job)
             const jobLevelHours = (() => {
               if (!job.actual_start_time || !job.actual_finish_time) return null
               const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0, roundToBlock)
               return raw > 0 ? raw : null
             })()
-            const workedHours = hasTime
+            const workedHours = manualHours ?? (hasTime
               ? calcHoursFromTimes(row.start_time!, row.end_time!, Number(job.break_minutes) || 0, roundToBlock)
-              : (jobLevelHours ?? row.hours)
+              : (jobLevelHours ?? row.hours))
             const cofHours = row.cof_share ? (row.cof_hours > 0 ? row.cof_hours : Number(job.cof_final ?? job.cof ?? 0)) : 0
             const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
             const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus
@@ -197,12 +209,13 @@ export default function PayrollPage() {
             if (em.employee_id !== emp.id) continue
             const hasTime = em.start_time?.length === 5 && em.finish_time?.length === 5
             const roundToBlock = jobRoundUp(job)
+            const manualHours = jobManualHours(job)
             const jobLevelHours = (() => {
               if (!job.actual_start_time || !job.actual_finish_time) return null
               const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0, roundToBlock)
               return raw > 0 ? raw : null
             })()
-            const workedHours = hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0, roundToBlock) : (jobLevelHours ?? 0)
+            const workedHours = manualHours ?? (hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0, roundToBlock) : (jobLevelHours ?? 0))
             if (workedHours <= 0) continue
             const cofHours = em.cof_share ? Number(job.cof_final ?? job.cof ?? 0) : 0
             const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
