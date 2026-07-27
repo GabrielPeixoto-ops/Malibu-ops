@@ -1,0 +1,14 @@
+-- migration_v50: manual worked-hours override per job
+--
+-- jobs.manual_hours_override: nullable decimal. When set (and > 0), this
+-- value is used as the "worked hours" for EVERY crew member / casual crew /
+-- extra man on this job, instead of computing hours from each person's
+-- individual start/finish times. Intended for TMAAT / TMAAT TT jobs, where
+-- TMAAT's own portal rounds hours in an inconsistent way (a "Total hrs"
+-- display that's plain decimal, vs an invoiced/billed hours figure that's
+-- rounded up to 15-min blocks) that we can't reliably reverse-engineer from
+-- start/finish times alone. Letting the office enter the exact hours TMAAT
+-- actually billed/paid removes the guesswork. Left NULL (default), jobs
+-- behave exactly as before — hours computed live from times, per the
+-- subcontractor's round_up_hours flag (migration_v49).
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS manual_hours_override numeric;
