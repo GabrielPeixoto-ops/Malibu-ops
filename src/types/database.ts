@@ -261,6 +261,11 @@ export interface Job {
   contract_rate_custom_price: number | null
   contract_client_name: string | null
   heavy_item_charge: number | null
+  // Optional flat $ override for the client-facing Call Out charge — used
+  // when the amount charged isn't a clean multiple of the rate (migration_v54).
+  // Added on top of revenue exactly like heavy_item_charge, never folded into
+  // the hours-based client_cof_hours field.
+  client_cof_manual_charge: number | null
   malibu_revenue: number | null
   created_at?: string
   subcontractor?: Subcontractor
