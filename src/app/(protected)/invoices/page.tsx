@@ -79,7 +79,7 @@ interface InvoiceJob {
   job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; start_time: string | null; end_time: string | null }>
   job_casual_crew: Array<{ casual_worker_id: string | null; name: string; rate_per_hour: number; hours: number; cof_share: boolean; heavy_item: boolean; start_time: string | null; finish_time: string | null }>
   job_commissions: Array<{ employee_id: string | null; casual_worker_id: string | null; rate_per_hour: number; hours: number; commission_type: { name: string } | null }>
-  job_extra_men: Array<{ employee_id: string | null; name: string | null; rate_per_hour: number | null; start_time: string | null; finish_time: string | null; cof_share: boolean; client_charge_amount: number }>
+  job_extra_men: Array<{ employee_id: string | null; name: string | null; rate_per_hour: number | null; start_time: string | null; finish_time: string | null; cof_share: boolean; client_charge_amount: number; minimum_hours: number | null }>
   job_materials: Array<{ quantity: number; cost_price: number; sale_price: number }>
   job_expenses: Array<{ amount: number; is_client_expense: boolean }>
   job_employee_expenses: Array<{ employee_id: string | null; casual_worker_id: string | null; description: string | null; amount: number }>
@@ -367,7 +367,7 @@ function InvoicesPageContent() {
         job_commissions(employee_id, casual_worker_id, rate_per_hour, hours, commission_type:commission_types(name)),
         job_materials(quantity, cost_price, sale_price),
         job_expenses(amount, is_client_expense),
-        job_extra_men(employee_id, name, rate_per_hour, start_time, finish_time, cof_share, client_charge_amount),
+        job_extra_men(employee_id, name, rate_per_hour, start_time, finish_time, cof_share, client_charge_amount, minimum_hours),
         job_employee_expenses(employee_id, casual_worker_id, description, amount)
       `)
       .gte('date', dateFrom)
@@ -567,7 +567,11 @@ function InvoicesPageContent() {
           if (workedHours <= 0) continue
           const cofHours = em.cof_share ? Number(job.cof_final ?? job.cof ?? 0) : 0
           const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
-          const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus
+          // Per-person minimum (migration_v51) — e.g. a guaranteed 4h
+          // "sweetener" for a far/late job — overrides the standard 2h
+          // minimum call when set on this extra man row.
+          const minCall = em.minimum_hours && em.minimum_hours > 0 ? em.minimum_hours : MIN_CALL
+          const paidHours = Math.max(workedHours, minCall) + cofHours + reviewBonus
           const rate = em.rate_per_hour || emp.hourly_rate
           entries.push({ job, workedHours, cofHours, paidHours, pay: paidHours * rate, googleReviewBonus: reviewBonus > 0 })
         }
@@ -713,7 +717,11 @@ function InvoicesPageContent() {
         if (rate <= 0) continue
         const hasTime = em.start_time?.length === 5 && em.finish_time?.length === 5
         const rawHours = manualHours ?? (hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0, roundToBlock) : (jobLevelHours ?? 0))
-        const workedHours = rawHours > 0 ? Math.max(MIN_CALL, rawHours) : 0
+        // Per-person minimum (migration_v51) — e.g. a guaranteed 4h
+        // "sweetener" for a far/late job — overrides the standard 2h minimum
+        // call when set on this extra man row.
+        const minCall = em.minimum_hours && em.minimum_hours > 0 ? em.minimum_hours : MIN_CALL
+        const workedHours = rawHours > 0 ? Math.max(minCall, rawHours) : 0
         const cofHours = em.cof_share ? cofFinalHrs : 0
         const hasReviewBonus = cw ? reviewSet.has(cw.id) : false
         const paidHours = workedHours + cofHours + (hasReviewBonus ? REVIEW_BONUS : 0)
