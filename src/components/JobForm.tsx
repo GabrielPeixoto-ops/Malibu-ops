@@ -87,6 +87,16 @@ function resolveCrewHours(row: CrewRow, breakMinutes = 0, roundToBlock = true): 
   return crewHasTime(row) ? calcCrewHours(row.start_time, row.end_time, breakMinutes, roundToBlock) : parseFloat(row.hours) || 0
 }
 
+// Manual hours override (migration_v50): the office types the raw hours TMAAT
+// billed for, same as any other worked-hours figure — so the job's break
+// (BREAK (MIN)) must be deducted from it exactly like it is from computed
+// start/finish times, instead of being applied on top of the typed value.
+// Returns null when there's no override set.
+function applyManualOverride(rawOverride: number | null, breakMinutes: number): number | null {
+  if (rawOverride === null) return null
+  return Math.max(0, rawOverride - Math.max(0, breakMinutes) / 60)
+}
+
 interface MaterialRow {
   _id: string
   material_name: string
@@ -982,7 +992,10 @@ export default function JobForm({ jobId }: { jobId?: string }) {
   // the computed worked hours for EVERY crew member / casual crew / extra man
   // on the job — used when TMAAT's own rounding can't be reconstructed from
   // start/finish times alone. Not available on normal (round-up) jobs.
-  const manualOverrideHours = (!subRoundUp && form.manual_hours_override.trim()) ? (parseFloat(form.manual_hours_override) || null) : null
+  const manualOverrideHours = applyManualOverride(
+    (!subRoundUp && form.manual_hours_override.trim()) ? (parseFloat(form.manual_hours_override) || null) : null,
+    parseFloat(form.break_minutes) || 0
+  )
 
   const malibuRevenue = useMemo<number | null>(() => {
     if (form.source !== 'subcontract' || selectedSub?.billing_type !== 'percent') return null
@@ -1102,7 +1115,10 @@ const filteredCustomers = useMemo(
     // subcontractor's record disables the block rounding here so our numbers
     // reconcile with theirs instead of overstating hours/payroll.
     const subRoundUp = form.source === 'subcontract' && selectedSub ? (selectedSub.round_up_hours ?? true) : true
-    const manualOverrideHours = (!subRoundUp && form.manual_hours_override.trim()) ? (parseFloat(form.manual_hours_override) || null) : null
+    const manualOverrideHours = applyManualOverride(
+    (!subRoundUp && form.manual_hours_override.trim()) ? (parseFloat(form.manual_hours_override) || null) : null,
+    parseFloat(form.break_minutes) || 0
+  )
 
     const extraMenForBilling = extraMen
       .filter((r) => r.name.trim() && r.start_time.length === 5 && r.finish_time.length === 5)
@@ -1434,7 +1450,10 @@ const filteredCustomers = useMemo(
   // Crew or Casual Crew for this job, hours is 0 — no commission.
   function commissionWorkedHours(employeeId: string, casualWorkerId: string): number {
     const subRoundUp = form.source === 'subcontract' && selectedSub ? (selectedSub.round_up_hours ?? true) : true
-    const manualOverrideHours = (!subRoundUp && form.manual_hours_override.trim()) ? (parseFloat(form.manual_hours_override) || null) : null
+    const manualOverrideHours = applyManualOverride(
+    (!subRoundUp && form.manual_hours_override.trim()) ? (parseFloat(form.manual_hours_override) || null) : null,
+    parseFloat(form.break_minutes) || 0
+  )
     const cofFinalDisplay = form.cof_final.trim() ? (parseFloat(form.cof_final) || 0) : 0
     const billingWorkedHrs = (() => {
       if (!form.actual_start_time || !form.actual_finish_time) return null
@@ -1668,7 +1687,10 @@ const filteredCustomers = useMemo(
     const clientBillingConfig = overrideOpen ? buildOverrideConfig(overrideBilling) : null
 
     const subRoundUp = form.source === 'subcontract' && selectedSub ? (selectedSub.round_up_hours ?? true) : true
-    const manualOverrideHours = (!subRoundUp && form.manual_hours_override.trim()) ? (parseFloat(form.manual_hours_override) || null) : null
+    const manualOverrideHours = applyManualOverride(
+    (!subRoundUp && form.manual_hours_override.trim()) ? (parseFloat(form.manual_hours_override) || null) : null,
+    parseFloat(form.break_minutes) || 0
+  )
 
     const extraMenRows = extraMen.filter((r) => r.name.trim() && r.start_time && r.finish_time)
     // Rows persisted to job_extra_men must NOT require start/finish time —
@@ -3849,8 +3871,8 @@ const filteredCustomers = useMemo(
                 />
                 <p className="text-xs text-dim mt-1">
                   {form.manual_hours_override.trim()
-                    ? `Overriding: every crew member / casual / extra man on this job will show ${(parseFloat(form.manual_hours_override) || 0).toFixed(2)}h worked, matching what TMAAT actually billed — instead of the computed value.`
-                    : 'Type the exact hours TMAAT billed/paid for this job (from their invoice) if the computed hours don\'t match — applies to everyone on the job.'}
+                    ? `Overriding: every crew member / casual / extra man on this job will show ${(manualOverrideHours ?? 0).toFixed(2)}h worked${(parseFloat(form.break_minutes) || 0) > 0 ? ` (${(parseFloat(form.manual_hours_override) || 0).toFixed(2)}h entered minus ${form.break_minutes}min break)` : ''}, matching what TMAAT actually billed — instead of the computed value.`
+                    : 'Type the exact hours TMAAT billed/paid for this job (from their invoice) if the computed hours don\'t match — the job\'s break is deducted automatically, and it applies to everyone on the job.'}
                 </p>
               </div>
             )}
