@@ -112,6 +112,22 @@ export interface Fleet {
   created_at?: string
 }
 
+// One diesel fill-up for a truck (migration_v52). Manual entry for now — lets
+// the Fleet page show average spend and, once 2+ logs for a truck have an
+// odometer reading, an estimated L/100km consumption figure. A stopgap until
+// (if) we get API access from Quik/QuikTrak to pull km driven automatically.
+export interface FleetFuelLog {
+  id: string
+  fleet_id: string
+  date: string
+  litres: number
+  cost: number
+  odometer_km: number | null
+  filled_by: string | null
+  notes: string | null
+  created_at?: string
+}
+
 export interface JobTruck {
   id: string
   job_id: string
