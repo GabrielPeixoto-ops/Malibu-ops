@@ -58,6 +58,7 @@ interface InvoiceJob {
   extra_men_hours: number
   extra_man_employee_id: string | null
   break_minutes: number
+  manual_hours_override: number | null
   discount: number
   heavy_item_charge: number
   override_revenue: number | null
@@ -223,6 +224,16 @@ function jobRoundUp(job: { source: string; subcontractor?: { round_up_hours?: bo
   return job.source === 'subcontract' && job.subcontractor ? (job.subcontractor.round_up_hours ?? true) : true
 }
 
+// Manual override (migration_v50): when set on a TMAAT-type job (round_up_hours
+// = false), this single value replaces the computed worked hours for EVERY
+// crew member / casual / extra man on the job — used when TMAAT's own
+// rounding can't be reconstructed from start/finish times. See JobForm.tsx
+// for the matching UI and same-priority logic.
+function jobManualHours(job: { source: string; subcontractor?: { round_up_hours?: boolean | null } | null; manual_hours_override: number | null }): number | null {
+  if (jobRoundUp(job)) return null
+  return job.manual_hours_override ?? null
+}
+
 const filterInput = 'px-3 py-1.5 text-sm border border-wire rounded-lg bg-panel text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring'
 
 export default function InvoicesPage() {
@@ -340,7 +351,7 @@ function InvoicesPageContent() {
       .select(`
         id, job_number, date, status, source,
         cof, cof_final, additional_hours, additional_rate, rate_card_key, formula_vars,
-        extra_men_hours, extra_man_employee_id, break_minutes, discount, heavy_item_charge, override_revenue, malibu_revenue, client_billing_config,
+        extra_men_hours, extra_man_employee_id, break_minutes, manual_hours_override, discount, heavy_item_charge, override_revenue, malibu_revenue, client_billing_config,
         google_review, google_review_employee_ids, actual_start_time, actual_finish_time,
         subcontractor_rate_id, contract_rate_id,
         subcontractor:subcontractors(*),
@@ -520,14 +531,15 @@ function InvoicesPageContent() {
           // always-round-up). Mirrors JobForm's resolveCrewHours/baseHrs logic.
           const hasTime = row.start_time?.length === 5 && row.end_time?.length === 5
           const roundToBlock = jobRoundUp(job)
+          const manualHours = jobManualHours(job)
           const jobLevelHours = (() => {
             if (!job.actual_start_time || !job.actual_finish_time) return null
             const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0, roundToBlock)
             return raw > 0 ? raw : null
           })()
-          const workedHours = hasTime
+          const workedHours = manualHours ?? (hasTime
             ? calcHoursFromTimes(row.start_time!, row.end_time!, Number(job.break_minutes) || 0, roundToBlock)
-            : (jobLevelHours ?? row.hours)
+            : (jobLevelHours ?? row.hours))
           const cofHours = row.cof_share ? (row.cof_hours > 0 ? row.cof_hours : Number(job.cof_final ?? job.cof ?? 0)) : 0
           const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
           const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus
@@ -541,12 +553,13 @@ function InvoicesPageContent() {
           if (em.employee_id !== emp.id) continue
           const hasTime = em.start_time?.length === 5 && em.finish_time?.length === 5
           const roundToBlock = jobRoundUp(job)
+          const manualHours = jobManualHours(job)
           const jobLevelHours = (() => {
             if (!job.actual_start_time || !job.actual_finish_time) return null
             const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0, roundToBlock)
             return raw > 0 ? raw : null
           })()
-          const workedHours = hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0, roundToBlock) : (jobLevelHours ?? 0)
+          const workedHours = manualHours ?? (hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0, roundToBlock) : (jobLevelHours ?? 0))
           if (workedHours <= 0) continue
           const cofHours = em.cof_share ? Number(job.cof_final ?? job.cof ?? 0) : 0
           const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
@@ -616,6 +629,7 @@ function InvoicesPageContent() {
       if (job.google_review) for (const id of job.google_review_employee_ids ?? []) reviewSet.add(id)
 
       const roundToBlock = jobRoundUp(job)
+      const manualHours = jobManualHours(job)
       const jobLevelHours = (() => {
         if (!job.actual_start_time || !job.actual_finish_time) return null
         const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0, roundToBlock)
@@ -628,7 +642,9 @@ function InvoicesPageContent() {
         if (!name || row.rate_per_hour <= 0) continue
         const hasTime = row.start_time?.length === 5 && row.finish_time?.length === 5
         let rawHours: number
-        if (hasTime) {
+        if (manualHours !== null) {
+          rawHours = manualHours
+        } else if (hasTime) {
           rawHours = calcHoursFromTimes(row.start_time!, row.finish_time!, Number(job.break_minutes) || 0, roundToBlock)
         } else if (jobLevelHours !== null) {
           rawHours = jobLevelHours
@@ -692,7 +708,7 @@ function InvoicesPageContent() {
         const rate = em.rate_per_hour || cw?.rate_per_hour || 0
         if (rate <= 0) continue
         const hasTime = em.start_time?.length === 5 && em.finish_time?.length === 5
-        const rawHours = hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0, roundToBlock) : (jobLevelHours ?? 0)
+        const rawHours = manualHours ?? (hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0, roundToBlock) : (jobLevelHours ?? 0))
         const workedHours = rawHours > 0 ? Math.max(MIN_CALL, rawHours) : 0
         const cofHours = em.cof_share ? cofFinalHrs : 0
         const hasReviewBonus = cw ? reviewSet.has(cw.id) : false
