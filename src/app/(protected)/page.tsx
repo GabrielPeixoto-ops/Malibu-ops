@@ -110,7 +110,7 @@ interface CalendarJob {
   job_expenses: Array<{ amount: number; is_client_expense: boolean }>
   job_casual_crew: Array<{ name: string; rate_per_hour: number; heavy_item: boolean; cof_share: boolean; start_time: string | null; finish_time: string | null; casual_worker_id: string | null }>
   job_commissions: Array<{ employee_id: string | null; casual_worker_id: string | null; rate_per_hour: number; hours: number }>
-  job_extra_men: Array<{ employee_id: string | null; name: string | null; rate_per_hour: number | null; start_time: string | null; finish_time: string | null; cof_share: boolean; client_charge_amount: number }>
+  job_extra_men: Array<{ employee_id: string | null; name: string | null; rate_per_hour: number | null; start_time: string | null; finish_time: string | null; cof_share: boolean; client_charge_amount: number; minimum_hours: number | null }>
   job_trucks: Array<{ fleet: { name: string; registration: string | null } | null }>
   subcontractor_rate_ph: number | null
   contract_rate_ph: number | null
@@ -309,7 +309,7 @@ function buildExtraMenPayroll(
   job: CalendarJob,
   employees: Employee[],
   casualWorkers: Array<{ id: string; name: string; rate_per_hour: number }>
-): Array<{ employee_id: string; hours: number; hourly_rate?: number; employee_name?: string; cof_share: boolean; client_charge: number }> {
+): Array<{ employee_id: string; hours: number; hourly_rate?: number; employee_name?: string; cof_share: boolean; client_charge: number; minimum_hours: number | null }> {
   const roundToBlock = jobRoundUp(job)
   const manualHours = jobManualHours(job)
   const liveWorkedHrs = (() => {
@@ -321,13 +321,15 @@ function buildExtraMenPayroll(
     .filter((r) => r.employee_id || (r.name && r.name.trim()))
     .map((r) => {
       const hasTime = r.start_time?.length === 5 && r.finish_time?.length === 5
+      // Raw (uncapped) hours here — the 2h (or per-person, migration_v51)
+      // minimum call is applied once, downstream, by calculatePayroll.
       let hours: number
       if (manualHours !== null) {
-        hours = Math.max(2, manualHours)
+        hours = manualHours
       } else if (hasTime) {
         hours = calcHoursFromTimes(r.start_time!, r.finish_time!, Number(job.break_minutes) || 0, roundToBlock)
       } else if (liveWorkedHrs !== null) {
-        hours = Math.max(2, liveWorkedHrs)
+        hours = liveWorkedHrs
       } else {
         hours = 0
       }
@@ -343,6 +345,7 @@ function buildExtraMenPayroll(
         employee_name: (r.name && r.name.trim()) || staffEmp?.name || casualWorker?.name,
         cof_share: r.cof_share,
         client_charge: Number(r.client_charge_amount) || 0,
+        minimum_hours: r.minimum_hours,
       }
     })
 }
@@ -454,7 +457,7 @@ export default function DashboardPage() {
           job_expenses(amount, is_client_expense),
           job_casual_crew(name, rate_per_hour, heavy_item, cof_share, start_time, finish_time, casual_worker_id),
           job_commissions(employee_id, casual_worker_id, rate_per_hour, hours),
-          job_extra_men(employee_id, name, rate_per_hour, start_time, finish_time, cof_share, client_charge_amount)
+          job_extra_men(employee_id, name, rate_per_hour, start_time, finish_time, cof_share, client_charge_amount, minimum_hours)
         `)
         .gte('date', start)
         .lte('date', end)
