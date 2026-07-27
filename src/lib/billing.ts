@@ -280,7 +280,7 @@ export interface JobSummary {
   margin: number | null
 }
 
-type JobSummaryInput = Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'additional_rate' | 'rate_card_key' | 'formula_vars' | 'discount' | 'deposit' | 'heavy_item_charge' | 'extra_men_hours' | 'break_minutes' | 'override_revenue'> & {
+type JobSummaryInput = Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'additional_rate' | 'rate_card_key' | 'formula_vars' | 'discount' | 'deposit' | 'heavy_item_charge' | 'client_cof_manual_charge' | 'extra_men_hours' | 'break_minutes' | 'override_revenue'> & {
   source?: JobSource
   client_billing_config?: SubcontractorConfig | null
   google_review?: boolean
@@ -334,6 +334,10 @@ export function calculateJobSummary(
   const discount = Number(job.discount) || 0
   const deposit = Number(job.deposit) || 0
   const heavyItemCharge = Number(job.heavy_item_charge) || 0
+  // Manual $ override for the client-facing Call Out charge (migration_v54) —
+  // added flat on top of revenue, same as heavyItemCharge, instead of being
+  // folded into the hours-based cofHours × rate calculation.
+  const clientCofManualCharge = Number(job.client_cof_manual_charge) || 0
   // What we charge the client for bringing on an extra man is company revenue —
   // it's independent of what the extra man is actually paid (hours + COF +
   // review bonus, computed separately in calculatePayroll below). Prefer an
@@ -344,7 +348,7 @@ export function calculateJobSummary(
     if (rate > 0) return s + rate * (Number(em.hours) || 0)
     return s + (Number(em.client_charge) || 0)
   }, 0)
-  const totalRevenue = subRevenue + materialsRevenue + clientExpensesTotal + heavyItemCharge + extraMenRevenue - discount
+  const totalRevenue = subRevenue + materialsRevenue + clientExpensesTotal + heavyItemCharge + clientCofManualCharge + extraMenRevenue - discount
   const cofHours = Number(job.cof_final ?? job.cof) || 0
   const reviewIds = job.google_review ? (job.google_review_employee_ids ?? []) : []
   const { total: payrollTotal, entries: payrollEntries, casualEntries } = calculatePayroll(
