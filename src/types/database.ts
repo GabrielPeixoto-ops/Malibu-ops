@@ -283,6 +283,11 @@ export interface JobExtraMan {
   employee_id: string | null
   start_time: string | null
   finish_time: string | null
+  // Per-person minimum call-out hours (migration_v51). Extra men are often
+  // brought on as a one-off "sweetener" for a far/late job — the office
+  // promises a guaranteed minimum payout (e.g. 4h) even if they end up
+  // working less. NULL falls back to the standard 2h minimum.
+  minimum_hours: number | null
   created_at?: string
 }
 
