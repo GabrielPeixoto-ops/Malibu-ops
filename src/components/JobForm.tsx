@@ -127,6 +127,12 @@ interface ExtraManRow {
   // worked + COF + review bonus, computed separately for payroll). Total
   // charged = hours × this rate, computed automatically instead of typed.
   client_rate_per_hour: string
+  // Per-person minimum call-out hours (migration_v51). Extra men are often
+  // brought on as a one-off "sweetener" for a far or late job — the office
+  // promises them a minimum number of hours' pay (e.g. 4h) to make the job
+  // worth their while, even if they end up working less. Empty = falls back
+  // to the standard 2h minimum call, same as everyone else.
+  minimum_hours: string
 }
 
 interface JobTruckRow {
@@ -734,7 +740,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
 
           try {
             const { data: emData } = await supabase.from('job_extra_men').select('*').eq('job_id', jobId).order('created_at')
-            setExtraMan((emData ?? []).map((r: { id: string; employee_id: string | null; name?: string | null; rate_per_hour?: number | null; start_time: string | null; finish_time: string | null; cof_share?: boolean; client_charge_amount?: number; client_rate_per_hour?: number }) => {
+            setExtraMan((emData ?? []).map((r: { id: string; employee_id: string | null; name?: string | null; rate_per_hour?: number | null; start_time: string | null; finish_time: string | null; cof_share?: boolean; client_charge_amount?: number; client_rate_per_hour?: number; minimum_hours?: number | null }) => {
               // Legacy rows (saved before the free-text name/rate columns existed)
               // only have employee_id — resolve a display name/rate from it.
               const staffEmp = r.employee_id ? loadedEmployees.find((e) => e.id === r.employee_id) : undefined
@@ -751,6 +757,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
                 cof_share: r.cof_share ?? false,
                 client_charge: r.client_charge_amount ? r.client_charge_amount.toString() : '',
                 client_rate_per_hour: r.client_rate_per_hour ? r.client_rate_per_hour.toString() : '',
+                minimum_hours: r.minimum_hours != null ? r.minimum_hours.toString() : '',
               }
             }))
           } catch { /* migration not yet applied */ }
@@ -1391,12 +1398,18 @@ const filteredCustomers = useMemo(
 
   // ── Extra men helpers ──────────────────────────────────────────────────────
   function addExtraMan() {
-    setExtraMan((em) => [...em, { _id: crypto.randomUUID(), name: '', rate_per_hour: '', start_time: '', finish_time: '', cof_share: false, client_charge: '', client_rate_per_hour: '' }])
+    setExtraMan((em) => [...em, { _id: crypto.randomUUID(), name: '', rate_per_hour: '', start_time: '', finish_time: '', cof_share: false, client_charge: '', client_rate_per_hour: '', minimum_hours: '' }])
   }
-  function updateExtraMan(_id: string, field: 'name' | 'rate_per_hour' | 'start_time' | 'finish_time' | 'client_charge' | 'client_rate_per_hour', value: string): void
+  function updateExtraMan(_id: string, field: 'name' | 'rate_per_hour' | 'start_time' | 'finish_time' | 'client_charge' | 'client_rate_per_hour' | 'minimum_hours', value: string): void
   function updateExtraMan(_id: string, field: 'cof_share', value: boolean): void
-  function updateExtraMan(_id: string, field: 'name' | 'rate_per_hour' | 'start_time' | 'finish_time' | 'client_charge' | 'client_rate_per_hour' | 'cof_share', value: string | boolean) {
+  function updateExtraMan(_id: string, field: 'name' | 'rate_per_hour' | 'start_time' | 'finish_time' | 'client_charge' | 'client_rate_per_hour' | 'minimum_hours' | 'cof_share', value: string | boolean) {
     setExtraMan((em) => em.map((r) => r._id === _id ? { ...r, [field]: value } : r))
+  }
+  // Per-person minimum call-out hours (migration_v51) — falls back to the
+  // standard 2h minimum when left blank. See ExtraManRow.minimum_hours.
+  function extraManMinHours(row: { minimum_hours: string }): number {
+    const v = parseFloat(row.minimum_hours)
+    return v > 0 ? v : 2
   }
   function removeExtraMan(_id: string) {
     setExtraMan((em) => em.filter((r) => r._id !== _id))
@@ -1897,6 +1910,7 @@ const filteredCustomers = useMemo(
               finish_time: r.finish_time || null,
               cof_share: r.cof_share,
               client_rate_per_hour: parseFloat(r.client_rate_per_hour) || 0,
+              minimum_hours: parseFloat(r.minimum_hours) || null,
               client_charge_amount: (() => {
                 const rate = parseFloat(r.client_rate_per_hour) || 0
                 if (rate > 0) return rate * Math.max(0, manualOverrideHours ?? calcCrewHours(r.start_time, r.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp))
@@ -2028,6 +2042,7 @@ const filteredCustomers = useMemo(
               finish_time: r.finish_time || null,
               cof_share: r.cof_share,
               client_rate_per_hour: parseFloat(r.client_rate_per_hour) || 0,
+              minimum_hours: parseFloat(r.minimum_hours) || null,
               client_charge_amount: (() => {
                 const rate = parseFloat(r.client_rate_per_hour) || 0
                 if (rate > 0) return rate * Math.max(0, manualOverrideHours ?? calcCrewHours(r.start_time, r.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp))
@@ -4158,7 +4173,7 @@ const filteredCustomers = useMemo(
                 {extraMen.map((row) => {
                   const hasTime = row.start_time.length === 5 && row.finish_time.length === 5
                   const rawComputed = manualOverrideHours ?? (hasTime ? Math.max(0, calcCrewHours(row.start_time, row.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp)) : null)
-                  const baseHrs = rawComputed !== null && rawComputed > 0 ? Math.max(2, rawComputed) : rawComputed
+                  const baseHrs = rawComputed !== null && rawComputed > 0 ? Math.max(extraManMinHours(row), rawComputed) : rawComputed
                   const cofFinalDisplay = form.cof_final.trim() ? (parseFloat(form.cof_final) || 0) : 0
                   const cofHrs = (baseHrs !== null && row.cof_share) ? cofFinalDisplay : 0
                   const matchedId = resolveExtraMan(row.name)?.id
@@ -4221,6 +4236,19 @@ const filteredCustomers = useMemo(
                         />
                         <span className="text-xs text-dim">COF</span>
                       </label>
+                      <div className="flex items-center gap-1 shrink-0" title="Guaranteed minimum paid hours for this person on this job — used when offering a sweetener for a far/late job. Leave blank for the standard 2h minimum.">
+                        <span className="text-xs text-dim whitespace-nowrap">Min hrs</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={row.minimum_hours}
+                          onChange={(e) => updateExtraMan(row._id, 'minimum_hours', e.target.value)}
+                          disabled={isReviewed}
+                          placeholder="2"
+                          className="w-14 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface"
+                        />
+                      </div>
                       {computedLabel && <span className="text-xs font-mono text-warm tabular-nums whitespace-nowrap">{computedLabel}</span>}
                       <div className="flex items-center gap-1 shrink-0">
                         <span className="text-xs text-dim whitespace-nowrap">Client rate $</span>
@@ -4851,6 +4879,18 @@ const filteredCustomers = useMemo(
                       />
                       <span className="text-xs text-dim">COF</span>
                     </label>
+                    <div className="flex items-center gap-1 shrink-0" title="Guaranteed minimum paid hours for this person on this job — used when offering a sweetener for a far/late job. Leave blank for the standard 2h minimum.">
+                      <span className="text-xs text-dim whitespace-nowrap">Min hrs</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={row.minimum_hours}
+                        onChange={(e) => updateExtraMan(row._id, 'minimum_hours', e.target.value)}
+                        placeholder="2"
+                        className="w-14 px-2 py-1.5 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
+                      />
+                    </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <span className="text-xs text-dim whitespace-nowrap">Client rate $</span>
                       <input
