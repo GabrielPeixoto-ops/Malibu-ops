@@ -343,26 +343,26 @@ export default function FleetPage() {
                           className="flex items-center gap-1 text-xs text-dim hover:text-warm transition-colors"
                         >
                           <Fuel className="w-3 h-3" />
-                          Combustível
+                          Fuel
                           {logs.length > 0 && (fuelOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
                         </button>
                         <button
                           onClick={() => openFuelLog(t)}
                           className="text-xs font-medium text-gold hover:text-gold-bright"
                         >
-                          + Lançar
+                          + Log
                         </button>
                       </div>
                       {logs.length === 0 ? (
-                        <p className="text-xs text-dim">Nenhum abastecimento lançado ainda.</p>
+                        <p className="text-xs text-dim">No fill-ups logged yet.</p>
                       ) : (
                         <div className="text-xs text-warm space-y-0.5">
                           <p>
-                            Últimos 30 dias: <span className="font-semibold text-parchment">${recentCost.toFixed(2)}</span>
+                            Last 30 days: <span className="font-semibold text-parchment">${recentCost.toFixed(2)}</span>
                             {recentLitres > 0 && <span className="text-dim"> ({recentLitres.toFixed(0)}L)</span>}
                           </p>
                           {avgConsumption != null && (
-                            <p className="text-dim">Média: <span className="font-semibold text-parchment">{avgConsumption.toFixed(1)} L/100km</span></p>
+                            <p className="text-dim">Average: <span className="font-semibold text-parchment">{avgConsumption.toFixed(1)} L/100km</span></p>
                           )}
                         </div>
                       )}
@@ -441,18 +441,18 @@ export default function FleetPage() {
         </div>
       </Modal>
 
-      <Modal open={fuelModalOpen} onClose={() => setFuelModalOpen(false)} title={fuelTruck ? `Abastecimento — ${fuelTruck.name}` : 'Abastecimento'}>
+      <Modal open={fuelModalOpen} onClose={() => setFuelModalOpen(false)} title={fuelTruck ? `Fuel log — ${fuelTruck.name}` : 'Fuel log'}>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Data" type="date" value={fuelForm.date} onChange={(e) => setFuelForm((f) => ({ ...f, date: e.target.value }))} />
-            <Input label="Quem abasteceu" value={fuelForm.filled_by} onChange={(e) => setFuelForm((f) => ({ ...f, filled_by: e.target.value }))} placeholder="Nome do motorista" />
+            <Input label="Date" type="date" value={fuelForm.date} onChange={(e) => setFuelForm((f) => ({ ...f, date: e.target.value }))} />
+            <Input label="Filled by" value={fuelForm.filled_by} onChange={(e) => setFuelForm((f) => ({ ...f, filled_by: e.target.value }))} placeholder="Driver name" />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Litros" type="number" min="0" step="0.01" value={fuelForm.litres} onChange={(e) => setFuelForm((f) => ({ ...f, litres: e.target.value }))} placeholder="80" />
-            <Input label="Custo ($)" type="number" min="0" step="0.01" value={fuelForm.cost} onChange={(e) => setFuelForm((f) => ({ ...f, cost: e.target.value }))} placeholder="150.00" />
+            <Input label="Litres" type="number" min="0" step="0.01" value={fuelForm.litres} onChange={(e) => setFuelForm((f) => ({ ...f, litres: e.target.value }))} placeholder="80" />
+            <Input label="Cost ($)" type="number" min="0" step="0.01" value={fuelForm.cost} onChange={(e) => setFuelForm((f) => ({ ...f, cost: e.target.value }))} placeholder="150.00" />
           </div>
           <Input
-            label="Odômetro (km) — opcional"
+            label="Odometer (km) — optional"
             type="number"
             min="0"
             value={fuelForm.odometer_km}
@@ -460,21 +460,21 @@ export default function FleetPage() {
             placeholder="120500"
           />
           <p className="text-xs text-dim -mt-2">
-            Preenchendo o odômetro em cada abastecimento a gente consegue calcular a média de L/100km do truck automaticamente.
+            Filling in the odometer at each fill-up lets us automatically calculate the truck&apos;s average L/100km.
           </p>
           <div>
-            <label className="block text-xs font-semibold text-dim uppercase tracking-wide mb-1">Notas</label>
+            <label className="block text-xs font-semibold text-dim uppercase tracking-wide mb-1">Notes</label>
             <textarea
               rows={2}
               value={fuelForm.notes}
               onChange={(e) => setFuelForm((f) => ({ ...f, notes: e.target.value }))}
-              placeholder="Posto, observações…"
+              placeholder="Station, remarks…"
               className="w-full px-3 py-2 text-sm border border-wire rounded-lg bg-panel text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
             />
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={() => setFuelModalOpen(false)}>Cancel</Button>
-            <Button onClick={handleSaveFuel} disabled={fuelSaving}>{fuelSaving ? 'Salvando…' : 'Salvar'}</Button>
+            <Button onClick={handleSaveFuel} disabled={fuelSaving}>{fuelSaving ? 'Saving…' : 'Save'}</Button>
           </div>
         </div>
       </Modal>
