@@ -1885,6 +1885,17 @@ const filteredCustomers = useMemo(
 
     const truckPersistRows = jobTruckRows.filter((r) => r.fleet_id)
 
+    // Every sub-table save below (extra men, casual crew, commissions, expenses,
+    // rate blocks, addresses, comments) is delete-then-reinsert wrapped in a try/
+    // catch. That pattern used to silently swallow EVERY error under the
+    // assumption it only ever meant "migration not applied yet" — which hid a
+    // real bug (job_extra_men FK mismatch) where the delete succeeded, the
+    // reinsert threw, and the data was gone with no error shown anywhere. Real
+    // errors are now collected here and surfaced to the user after the save
+    // instead of disappearing; only genuine "column/table doesn't exist yet"
+    // errors are still ignored.
+    const persistWarnings: string[] = []
+
     if (isEdit && jobId) {
       const { error: updErr } = await supabase.from('jobs').update(payload).eq('id', jobId)
       if (updErr) throw updErr
@@ -1899,11 +1910,19 @@ const filteredCustomers = useMemo(
       try {
         await supabase.from('job_extra_men').delete().eq('job_id', jobId)
         if (extraMenPersistRows.length) {
-          await supabase.from('job_extra_men').insert(extraMenPersistRows.map((r) => {
+          const { error: emInsErr } = await supabase.from('job_extra_men').insert(extraMenPersistRows.map((r) => {
             const match = resolveExtraMan(r.name)
             return {
               job_id: jobId,
-              employee_id: match?.id ?? null,
+              // CRITICAL: employee_id and casual_worker_id are separate FK columns
+              // (employee_id -> employees.id, casual_worker_id -> casual_workers.id).
+              // Writing a casual worker's id into employee_id violates the FK
+              // constraint, the insert throws, and — because this used to be a
+              // blanket try/catch — the row silently never gets reinserted after
+              // the delete above, wiping the extra man from the job. Never
+              // collapse these back into a single field.
+              employee_id: match && !match.isCasual ? match.id : null,
+              casual_worker_id: match && match.isCasual ? match.id : null,
               name: r.name.trim(),
               rate_per_hour: parseFloat(r.rate_per_hour) || match?.rate || 0,
               start_time: r.start_time || null,
@@ -1918,13 +1937,14 @@ const filteredCustomers = useMemo(
               })(),
             }
           }))
+          if (emInsErr) throw emInsErr
         }
-      } catch { /* migration not yet applied */ }
+      } catch (err) { if (!isMissingSchemaError(err)) persistWarnings.push(`Extra Men: ${extractMsg(err, 'unknown error')}`) }
       try {
         await supabase.from('job_casual_crew').delete().eq('job_id', jobId)
         const ccRows = casualCrew.filter((r) => r.name.trim())
         if (ccRows.length) {
-          await supabase.from('job_casual_crew').insert(ccRows.map((r) => {
+          const { error: ccInsErr } = await supabase.from('job_casual_crew').insert(ccRows.map((r) => {
             const hasTime = r.start_time.length === 5 && r.finish_time.length === 5
             let hours: number
             if (hasTime) {
@@ -1951,13 +1971,14 @@ const filteredCustomers = useMemo(
               casual_worker_id: cw?.id ?? null,
             }
           }))
+          if (ccInsErr) throw ccInsErr
         }
-      } catch { /* migration not yet applied */ }
+      } catch (err) { if (!isMissingSchemaError(err)) persistWarnings.push(`job_casual_crew: ${extractMsg(err, 'unknown error')}`) }
       try {
         await supabase.from('job_commissions').delete().eq('job_id', jobId)
         const comRows = commissions.filter((r) => (r.employee_id || r.casual_worker_id) && commissionWorkedHours(r.employee_id, r.casual_worker_id) > 0)
         if (comRows.length) {
-          await supabase.from('job_commissions').insert(comRows.map((r) => ({
+          const { error: comInsErr } = await supabase.from('job_commissions').insert(comRows.map((r) => ({
             job_id: jobId,
             commission_type_id: r.commission_type_id || null,
             employee_id: r.employee_id || null,
@@ -1965,20 +1986,22 @@ const filteredCustomers = useMemo(
             rate_per_hour: parseFloat(r.rate_per_hour) || 0,
             hours: commissionWorkedHours(r.employee_id, r.casual_worker_id),
           })))
+          if (comInsErr) throw comInsErr
         }
-      } catch { /* migration not yet applied */ }
+      } catch (err) { if (!isMissingSchemaError(err)) persistWarnings.push(`job_commissions: ${extractMsg(err, 'unknown error')}`) }
       try {
         await supabase.from('job_expenses').delete().eq('job_id', jobId)
         const expRows = expenses.filter((r) => r.description.trim())
         if (expRows.length) {
-          await supabase.from('job_expenses').insert(expRows.map((r) => ({
+          const { error: expInsErr } = await supabase.from('job_expenses').insert(expRows.map((r) => ({
             job_id: jobId,
             description: r.description.trim(),
             amount: parseFloat(r.amount) || 0,
             is_client_expense: r.is_client_expense,
           })))
+          if (expInsErr) throw expInsErr
         }
-      } catch { /* migration not yet applied */ }
+      } catch (err) { if (!isMissingSchemaError(err)) persistWarnings.push(`job_expenses: ${extractMsg(err, 'unknown error')}`) }
       try {
         await supabase.from('job_employee_expenses').delete().eq('job_id', jobId)
         // Only require a person to be selected — never gate on the amount/
@@ -1987,19 +2010,20 @@ const filteredCustomers = useMemo(
         // optional field is still blank).
         const empExpRows = employeeExpenses.filter((r) => r.employee_id || r.casual_worker_id)
         if (empExpRows.length) {
-          await supabase.from('job_employee_expenses').insert(empExpRows.map((r) => ({
+          const { error: empExpInsErr } = await supabase.from('job_employee_expenses').insert(empExpRows.map((r) => ({
             job_id: jobId,
             employee_id: r.employee_id || null,
             casual_worker_id: r.casual_worker_id || null,
             description: r.description.trim() || null,
             amount: parseFloat(r.amount) || 0,
           })))
+          if (empExpInsErr) throw empExpInsErr
         }
-      } catch { /* migration not yet applied */ }
+      } catch (err) { if (!isMissingSchemaError(err)) persistWarnings.push(`job_employee_expenses: ${extractMsg(err, 'unknown error')}`) }
       try {
         await supabase.from('job_rate_blocks').delete().eq('job_id', jobId)
         if (rateBlocksPersistRows.length) {
-          await supabase.from('job_rate_blocks').insert(rateBlocksPersistRows.map((r, i) => ({
+          const { error: rbInsErr } = await supabase.from('job_rate_blocks').insert(rateBlocksPersistRows.map((r, i) => ({
             job_id: jobId,
             label: r.label.trim() || null,
             rate_per_hour: parseFloat(r.rate_per_hour) || 0,
@@ -2007,20 +2031,22 @@ const filteredCustomers = useMemo(
             finish_time: r.finish_time || null,
             sort_order: i,
           })))
+          if (rbInsErr) throw rbInsErr
         }
-      } catch { /* migration not yet applied */ }
+      } catch (err) { if (!isMissingSchemaError(err)) persistWarnings.push(`job_rate_blocks: ${extractMsg(err, 'unknown error')}`) }
       try {
         await supabase.from('job_addresses').delete().eq('job_id', jobId)
         const addrRows = extraAddresses.filter((r) => r.address.trim())
         if (addrRows.length) {
-          await supabase.from('job_addresses').insert(addrRows.map((r, i) => ({
+          const { error: addrInsErr } = await supabase.from('job_addresses').insert(addrRows.map((r, i) => ({
             job_id: jobId,
             address_type: r.address_type,
             address: r.address.trim(),
             sort_order: i,
           })))
+          if (addrInsErr) throw addrInsErr
         }
-      } catch { /* migration not yet applied */ }
+      } catch (err) { if (!isMissingSchemaError(err)) persistWarnings.push(`job_addresses: ${extractMsg(err, 'unknown error')}`) }
     } else {
       const { data: job, error: insErr } = await supabase.from('jobs').insert(payload).select().single()
       if (insErr || !job) throw insErr ?? new Error('Insert failed')
@@ -2031,11 +2057,14 @@ const filteredCustomers = useMemo(
       if (photos.length) await supabase.from('job_photos').insert(photos.map((p) => ({ job_id: newId, url: p.url, caption: p.caption || null, category: p.category })))
       try {
         if (extraMenPersistRows.length) {
-          await supabase.from('job_extra_men').insert(extraMenPersistRows.map((r) => {
+          const { error: emInsErr } = await supabase.from('job_extra_men').insert(extraMenPersistRows.map((r) => {
             const match = resolveExtraMan(r.name)
             return {
               job_id: newId,
-              employee_id: match?.id ?? null,
+              // See matching comment in the isEdit branch above: employee_id and
+              // casual_worker_id are separate FKs — never collapse them.
+              employee_id: match && !match.isCasual ? match.id : null,
+              casual_worker_id: match && match.isCasual ? match.id : null,
               name: r.name.trim(),
               rate_per_hour: parseFloat(r.rate_per_hour) || match?.rate || 0,
               start_time: r.start_time || null,
@@ -2050,12 +2079,13 @@ const filteredCustomers = useMemo(
               })(),
             }
           }))
+          if (emInsErr) throw emInsErr
         }
-      } catch { /* migration not yet applied */ }
+      } catch (err) { if (!isMissingSchemaError(err)) persistWarnings.push(`Extra Men: ${extractMsg(err, 'unknown error')}`) }
       try {
         const ccRows = casualCrew.filter((r) => r.name.trim())
         if (ccRows.length) {
-          await supabase.from('job_casual_crew').insert(ccRows.map((r) => {
+          const { error: ccInsErr } = await supabase.from('job_casual_crew').insert(ccRows.map((r) => {
             const hasTime = r.start_time.length === 5 && r.finish_time.length === 5
             let hours: number
             if (hasTime) {
@@ -2078,12 +2108,13 @@ const filteredCustomers = useMemo(
               casual_worker_id: cw?.id ?? null,
             }
           }))
+          if (ccInsErr) throw ccInsErr
         }
-      } catch { /* migration not yet applied */ }
+      } catch (err) { if (!isMissingSchemaError(err)) persistWarnings.push(`job_casual_crew: ${extractMsg(err, 'unknown error')}`) }
       try {
         const comRows = commissions.filter((r) => (r.employee_id || r.casual_worker_id) && commissionWorkedHours(r.employee_id, r.casual_worker_id) > 0)
         if (comRows.length) {
-          await supabase.from('job_commissions').insert(comRows.map((r) => ({
+          const { error: comInsErr } = await supabase.from('job_commissions').insert(comRows.map((r) => ({
             job_id: newId,
             commission_type_id: r.commission_type_id || null,
             employee_id: r.employee_id || null,
@@ -2091,34 +2122,37 @@ const filteredCustomers = useMemo(
             rate_per_hour: parseFloat(r.rate_per_hour) || 0,
             hours: commissionWorkedHours(r.employee_id, r.casual_worker_id),
           })))
+          if (comInsErr) throw comInsErr
         }
-      } catch { /* migration not yet applied */ }
+      } catch (err) { if (!isMissingSchemaError(err)) persistWarnings.push(`job_commissions: ${extractMsg(err, 'unknown error')}`) }
       try {
         const expRows = expenses.filter((r) => r.description.trim())
         if (expRows.length) {
-          await supabase.from('job_expenses').insert(expRows.map((r) => ({
+          const { error: expInsErr } = await supabase.from('job_expenses').insert(expRows.map((r) => ({
             job_id: newId,
             description: r.description.trim(),
             amount: parseFloat(r.amount) || 0,
             is_client_expense: r.is_client_expense,
           })))
+          if (expInsErr) throw expInsErr
         }
-      } catch { /* migration not yet applied */ }
+      } catch (err) { if (!isMissingSchemaError(err)) persistWarnings.push(`job_expenses: ${extractMsg(err, 'unknown error')}`) }
       try {
         const empExpRows = employeeExpenses.filter((r) => r.employee_id || r.casual_worker_id)
         if (empExpRows.length) {
-          await supabase.from('job_employee_expenses').insert(empExpRows.map((r) => ({
+          const { error: empExpInsErr } = await supabase.from('job_employee_expenses').insert(empExpRows.map((r) => ({
             job_id: newId,
             employee_id: r.employee_id || null,
             casual_worker_id: r.casual_worker_id || null,
             description: r.description.trim() || null,
             amount: parseFloat(r.amount) || 0,
           })))
+          if (empExpInsErr) throw empExpInsErr
         }
-      } catch { /* migration not yet applied */ }
+      } catch (err) { if (!isMissingSchemaError(err)) persistWarnings.push(`job_employee_expenses: ${extractMsg(err, 'unknown error')}`) }
       try {
         if (rateBlocksPersistRows.length) {
-          await supabase.from('job_rate_blocks').insert(rateBlocksPersistRows.map((r, i) => ({
+          const { error: rbInsErr } = await supabase.from('job_rate_blocks').insert(rateBlocksPersistRows.map((r, i) => ({
             job_id: newId,
             label: r.label.trim() || null,
             rate_per_hour: parseFloat(r.rate_per_hour) || 0,
@@ -2126,25 +2160,27 @@ const filteredCustomers = useMemo(
             finish_time: r.finish_time || null,
             sort_order: i,
           })))
+          if (rbInsErr) throw rbInsErr
         }
-      } catch { /* migration not yet applied */ }
+      } catch (err) { if (!isMissingSchemaError(err)) persistWarnings.push(`job_rate_blocks: ${extractMsg(err, 'unknown error')}`) }
       try {
         const addrRows = extraAddresses.filter((r) => r.address.trim())
         if (addrRows.length) {
-          await supabase.from('job_addresses').insert(addrRows.map((r, i) => ({
+          const { error: addrInsErr } = await supabase.from('job_addresses').insert(addrRows.map((r, i) => ({
             job_id: newId,
             address_type: r.address_type,
             address: r.address.trim(),
             sort_order: i,
           })))
+          if (addrInsErr) throw addrInsErr
         }
-      } catch { /* migration not yet applied */ }
+      } catch (err) { if (!isMissingSchemaError(err)) persistWarnings.push(`job_addresses: ${extractMsg(err, 'unknown error')}`) }
       try {
         // Comments typed in before the job existed (no job_id yet) — flush
         // them to job_comments now that the job row is created.
         const commentRows = comments.filter((c) => (c.body.trim() || c.attachment_url) && c.author_name.trim())
         if (commentRows.length) {
-          await supabase.from('job_comments').insert(commentRows.map((c) => ({
+          const { error: comAttInsErr } = await supabase.from('job_comments').insert(commentRows.map((c) => ({
             job_id: newId,
             author_name: c.author_name.trim(),
             body: c.body.trim(),
@@ -2152,8 +2188,16 @@ const filteredCustomers = useMemo(
             attachment_url: c.attachment_url ?? null,
             attachment_name: c.attachment_name ?? null,
           })))
+          if (comAttInsErr) throw comAttInsErr
         }
-      } catch { /* migration not yet applied */ }
+      } catch (err) { if (!isMissingSchemaError(err)) persistWarnings.push(`job_comments: ${extractMsg(err, 'unknown error')}`) }
+    }
+
+    // Surface any real sub-table save failures instead of letting them
+    // disappear — this is a warning (the main job row did save), but the
+    // person needs to know something didn't persist so they can retry.
+    if (persistWarnings.length > 0) {
+      setError(`Job salvo, mas isto NÃO foi salvo corretamente — tente salvar de novo: ${persistWarnings.join(' | ')}`)
     }
 
     if (!isEdit) {
@@ -2167,6 +2211,19 @@ const filteredCustomers = useMemo(
     if (e instanceof Error) return e.message
     if (e && typeof e === 'object' && 'message' in e) return String((e as { message: unknown }).message)
     return fallback
+  }
+
+  // True only for "this column/table doesn't exist in this environment yet"
+  // errors (Postgres undefined_column/undefined_table, or Postgrest's schema-
+  // cache equivalent) — the one case where silently skipping a sub-table save
+  // is actually safe (migration not applied yet). Anything else (FK violations,
+  // not-null violations, network errors, etc.) is a real failure and must be
+  // surfaced, never swallowed.
+  function isMissingSchemaError(err: unknown): boolean {
+    const code = (err && typeof err === 'object' && 'code' in err) ? String((err as { code: unknown }).code) : ''
+    if (code === '42703' || code === '42P01' || code === 'PGRST205' || code === 'PGRST204') return true
+    const msg = extractMsg(err, '').toLowerCase()
+    return msg.includes('does not exist') || msg.includes('could not find the table') || msg.includes('could not find the') && msg.includes('column')
   }
 
   async function confirmNewCasualWorker() {
