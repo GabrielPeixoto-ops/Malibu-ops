@@ -88,6 +88,7 @@ interface CalendarJob {
   formula_vars: Record<string, number> | null
   extra_men_hours: number
   break_minutes: number
+  manual_hours_override: number | null
   discount: number
   heavy_item_charge: number | null
   override_revenue: number | null
@@ -222,9 +223,20 @@ function jobRoundUp(job: { source: string; subcontractor: { round_up_hours: bool
   return job.source === 'subcontract' && job.subcontractor ? (job.subcontractor.round_up_hours ?? true) : true
 }
 
+// Manual override (migration_v50): when set on a TMAAT-type job (round_up_hours
+// = false), this single value replaces the computed worked hours for EVERY
+// crew member / casual / extra man on the job — used when TMAAT's own
+// rounding can't be reconstructed from start/finish times. See JobForm.tsx
+// for the matching UI and same-priority logic.
+function jobManualHours(job: { source: string; subcontractor: { round_up_hours: boolean | null } | null; manual_hours_override: number | null }): number | null {
+  if (jobRoundUp(job)) return null
+  return job.manual_hours_override ?? null
+}
+
 function buildStaffPayrollCrew(job: CalendarJob, crew: CrewRow[]): Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; heavy_item?: boolean }> {
   const cofFinalHrs = Number(job.cof_final ?? job.cof) || 0
   const roundToBlock = jobRoundUp(job)
+  const manualHours = jobManualHours(job)
   const liveWorkedHrs = (() => {
     if (!job.actual_start_time || !job.actual_finish_time) return null
     const hrs = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0, roundToBlock)
@@ -233,7 +245,9 @@ function buildStaffPayrollCrew(job: CalendarJob, crew: CrewRow[]): Array<{ emplo
   return crew.map(r => {
     const hasIndividualTime = r.start_time?.length === 5 && r.end_time?.length === 5
     let hours: number
-    if (hasIndividualTime) {
+    if (manualHours !== null) {
+      hours = Math.max(2, manualHours)
+    } else if (hasIndividualTime) {
       // Individual times: recompute live from start/end, same rounding rule
       // as job-level. Don't trust the stored `hours` column — it may have
       // been saved before this rounding rule existed.
@@ -256,6 +270,7 @@ function buildCasualPayroll(job: CalendarJob): Array<{ name: string; rate_per_ho
   const MIN_CALL = 2
   const cofFinalHrs = Number(job.cof_final ?? job.cof) || 0
   const roundToBlock = jobRoundUp(job)
+  const manualHours = jobManualHours(job)
   let billingWorkedHrs: number | null = null
   if (job.actual_start_time && job.actual_finish_time) {
     const withBreak = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0, roundToBlock)
@@ -266,7 +281,9 @@ function buildCasualPayroll(job: CalendarJob): Array<{ name: string; rate_per_ho
     .map(r => {
       const hasTime = r.start_time?.length === 5 && r.finish_time?.length === 5
       let hours: number
-      if (hasTime) {
+      if (manualHours !== null) {
+        hours = Math.max(MIN_CALL, manualHours) + (r.cof_share ? cofFinalHrs : 0)
+      } else if (hasTime) {
         const rawHours = calcHoursFromTimes(r.start_time!, r.finish_time!, Number(job.break_minutes) || 0, roundToBlock)
         hours = (rawHours > 0 ? Math.max(MIN_CALL, rawHours) : 0) + (r.cof_share ? cofFinalHrs : 0)
       } else if (billingWorkedHrs !== null) {
@@ -290,6 +307,7 @@ function buildExtraMenPayroll(
   casualWorkers: Array<{ id: string; name: string; rate_per_hour: number }>
 ): Array<{ employee_id: string; hours: number; hourly_rate?: number; employee_name?: string; cof_share: boolean; client_charge: number }> {
   const roundToBlock = jobRoundUp(job)
+  const manualHours = jobManualHours(job)
   const liveWorkedHrs = (() => {
     if (!job.actual_start_time || !job.actual_finish_time) return null
     const hrs = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0, roundToBlock)
@@ -300,7 +318,9 @@ function buildExtraMenPayroll(
     .map((r) => {
       const hasTime = r.start_time?.length === 5 && r.finish_time?.length === 5
       let hours: number
-      if (hasTime) {
+      if (manualHours !== null) {
+        hours = Math.max(2, manualHours)
+      } else if (hasTime) {
         hours = calcHoursFromTimes(r.start_time!, r.finish_time!, Number(job.break_minutes) || 0, roundToBlock)
       } else if (liveWorkedHrs !== null) {
         hours = Math.max(2, liveWorkedHrs)
@@ -418,7 +438,7 @@ export default function DashboardPage() {
         .from('jobs')
         .select(`
           id, job_number, date, status, source, notes, cof, cof_final, additional_hours,
-          additional_rate, rate_card_key, formula_vars, extra_men_hours, break_minutes, discount, heavy_item_charge,
+          additional_rate, rate_card_key, formula_vars, extra_men_hours, break_minutes, manual_hours_override, discount, heavy_item_charge,
           actual_start_time, actual_finish_time, scheduled_time, override_revenue, malibu_revenue, client_billing_config,
           subcontractor_rate_id, contract_rate_id, google_review, google_review_employee_ids,
           subcontractor:subcontractors(*),
