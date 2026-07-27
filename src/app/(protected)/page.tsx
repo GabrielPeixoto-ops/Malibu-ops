@@ -91,6 +91,7 @@ interface CalendarJob {
   manual_hours_override: number | null
   discount: number
   heavy_item_charge: number | null
+  client_cof_manual_charge: number | null
   override_revenue: number | null
   malibu_revenue: number | null
   scheduled_time: string | null
@@ -187,7 +188,7 @@ function calcJobRevenue(job: CalendarJob): number | null {
   // What we charge the client for each Extra Man — separate from what the
   // extra man is paid, and independent of source (subcontract/private/contract).
   const extraMenRevenue = (job.job_extra_men ?? []).reduce((s, em) => s + (Number(em.client_charge_amount) || 0), 0)
-  const total = base + materialsRevenue + (Number(job.heavy_item_charge) || 0) + extraMenRevenue - (Number(job.discount) || 0) + clientExpenses
+  const total = base + materialsRevenue + (Number(job.heavy_item_charge) || 0) + (Number(job.client_cof_manual_charge) || 0) + extraMenRevenue - (Number(job.discount) || 0) + clientExpenses
   return total > 0 ? total : null
 }
 
@@ -445,7 +446,7 @@ export default function DashboardPage() {
         .from('jobs')
         .select(`
           id, job_number, date, status, source, notes, cof, cof_final, additional_hours,
-          additional_rate, rate_card_key, formula_vars, extra_men_hours, break_minutes, manual_hours_override, discount, heavy_item_charge,
+          additional_rate, rate_card_key, formula_vars, extra_men_hours, break_minutes, manual_hours_override, discount, heavy_item_charge, client_cof_manual_charge,
           actual_start_time, actual_finish_time, scheduled_time, override_revenue, malibu_revenue, client_billing_config,
           subcontractor_rate_id, contract_rate_id, google_review, google_review_employee_ids,
           subcontractor:subcontractors(*),
