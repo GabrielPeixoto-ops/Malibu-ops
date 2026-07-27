@@ -2216,7 +2216,7 @@ const filteredCustomers = useMemo(
     // disappear — this is a warning (the main job row did save), but the
     // person needs to know something didn't persist so they can retry.
     if (persistWarnings.length > 0) {
-      setError(`Job salvo, mas isto NÃO foi salvo corretamente — tente salvar de novo: ${persistWarnings.join(' | ')}`)
+      setError(`Job saved, but this did NOT save correctly — please save again: ${persistWarnings.join(' | ')}`)
     }
 
     if (!isEdit) {
@@ -4015,7 +4015,7 @@ const filteredCustomers = useMemo(
                         onClick={() => setField('client_cof_manual_charge', '')}
                         className={`px-2 py-0.5 rounded-md border ${form.client_cof_manual_charge.trim() === '' ? 'border-gold-ring bg-gold/10 text-gold' : 'border-wire text-dim'}`}
                       >
-                        Horas
+                        Hours
                       </button>
                       <button
                         type="button"
@@ -4023,7 +4023,7 @@ const filteredCustomers = useMemo(
                         onClick={() => setField('client_cof_manual_charge', form.client_cof_manual_charge.trim() || '0')}
                         className={`px-2 py-0.5 rounded-md border ${form.client_cof_manual_charge.trim() !== '' ? 'border-gold-ring bg-gold/10 text-gold' : 'border-wire text-dim'}`}
                       >
-                        Valor ($)
+                        Amount ($)
                       </button>
                     </div>
                     {form.client_cof_manual_charge.trim() === '' ? (
@@ -4057,7 +4057,7 @@ const filteredCustomers = useMemo(
                           className="w-28 px-2 py-1 text-sm border border-wire rounded-lg focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring disabled:bg-surface"
                         />
                         <span className="text-xs text-dim">
-                          valor fixo, substitui o cálculo por horas
+                          fixed amount, overrides the hours calculation
                         </span>
                       </div>
                     )}
