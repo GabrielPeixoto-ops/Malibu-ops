@@ -1,0 +1,11 @@
+-- migration_v54: manual $ override for the client-facing Call Out charge
+--
+-- jobs.client_cof_manual_charge: optional flat dollar amount charged to the
+-- client for the Call Out Fee, replacing the hours × rate calculation for
+-- that portion. Some Call Out charges aren't a clean multiple of the rate
+-- (e.g. a negotiated flat/broken amount), so the office needs to type the
+-- exact dollar figure instead of reverse-engineering an hours value that
+-- happens to produce it. When set, this is added on top of revenue exactly
+-- like heavy_item_charge (see billing.ts, Dashboard, Invoices) instead of
+-- being folded into the hours-based Client Call Out (hrs) field.
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS client_cof_manual_charge numeric;
