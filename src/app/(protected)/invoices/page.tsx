@@ -901,10 +901,10 @@ function InvoicesPageContent() {
     paid: 'bg-emerald-100 text-emerald-900 border border-emerald-300',
   }
   const REVIEW_BADGE_LABEL: Record<InvoiceReview['status'], string> = {
-    reviewed: 'Revisado',
-    pending_approval: 'Pendente Aprovação',
-    approved: 'Aprovado',
-    paid: 'Pago',
+    reviewed: 'Reviewed',
+    pending_approval: 'Pending Approval',
+    approved: 'Approved',
+    paid: 'Paid',
   }
 
   // Inline note+attachment editor state, keyed by "subjectType:subjectId" so
@@ -936,7 +936,7 @@ function InvoicesPageContent() {
         if (!attachment) return // upload failed, alert already shown
       } else if (existing?.attachment_url) {
         // Keep the previously uploaded attachment if the person didn't replace it.
-        attachment = { url: existing.attachment_url, name: existing.attachment_name ?? 'Anexo' }
+        attachment = { url: existing.attachment_url, name: existing.attachment_name ?? 'Attachment' }
       }
       // Editing an existing 'reviewed' record just to add/change a note keeps
       // it 'reviewed' — only a brand-new note (no prior review) starts as
@@ -965,7 +965,7 @@ function InvoicesPageContent() {
             <textarea
               value={pendingNoteText}
               onChange={(e) => setPendingNoteText(e.target.value)}
-              placeholder="Nota (ex: invoice não bate, falta aprovação do boss...)"
+              placeholder="Note (e.g. invoice doesn't match, waiting on boss's approval...)"
               className="w-full text-xs px-2 py-1.5 rounded border border-wire bg-surface text-parchment focus:outline-none focus:border-gold-ring resize-none"
               rows={3}
             />
@@ -975,7 +975,7 @@ function InvoicesPageContent() {
                 onClick={() => noteFileInputRef.current?.click()}
                 className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-wire text-dim hover:text-warm hover:border-gold-ring transition-colors"
               >
-                <Paperclip size={12} /> {pendingNoteFile ? pendingNoteFile.name.slice(0, 18) : 'Anexar'}
+                <Paperclip size={12} /> {pendingNoteFile ? pendingNoteFile.name.slice(0, 18) : 'Attach'}
               </button>
               <input
                 ref={noteFileInputRef}
@@ -986,7 +986,7 @@ function InvoicesPageContent() {
               />
               <div className="flex items-center gap-1.5">
                 <button type="button" onClick={closeNoteEditor} className="text-xs px-2 py-1 rounded text-dim hover:text-warm transition-colors">
-                  Cancelar
+                  Cancel
                 </button>
                 <button
                   type="button"
@@ -994,7 +994,7 @@ function InvoicesPageContent() {
                   onClick={() => submitPendingApproval(subjectType, subjectId, subjectName)}
                   className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200 transition-colors disabled:opacity-50"
                 >
-                  {uploadingNote === key ? 'Enviando…' : 'Salvar'}
+                  {uploadingNote === key ? 'Uploading…' : 'Save'}
                 </button>
               </div>
             </div>
@@ -1007,19 +1007,19 @@ function InvoicesPageContent() {
             type="button"
             disabled={!periodClosed}
             onClick={() => upsertReview(subjectType, subjectId, subjectName, 'reviewed', '', null)}
-            title={!periodClosed ? "Não é possível revisar um período que ainda não fechou" : undefined}
+            title={!periodClosed ? "Can't review a period that hasn't closed yet" : undefined}
             className="text-xs px-2 py-1 rounded-full border border-wire text-dim hover:text-warm hover:border-gold-ring transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            Revisado
+            Reviewed
           </button>
           <button
             type="button"
             disabled={!periodClosed}
             onClick={() => openNoteEditor(key)}
-            title={!periodClosed ? "Não é possível revisar um período que ainda não fechou" : undefined}
+            title={!periodClosed ? "Can't review a period that hasn't closed yet" : undefined}
             className="text-xs px-2 py-1 rounded-full border border-amber-300 text-amber-800 hover:bg-amber-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            Pendente Aprovação
+            Pending Approval
           </button>
         </div>
       )
@@ -1042,7 +1042,7 @@ function InvoicesPageContent() {
             rel="noopener noreferrer"
             className="flex items-center gap-1 px-2 py-1 rounded-full bg-gold/15 text-gold font-semibold underline underline-offset-2 hover:bg-gold/25 hover:text-gold-bright transition-colors"
           >
-            <Paperclip size={12} /> Ver anexo{review.attachment_name ? ` (${review.attachment_name})` : ''}
+            <Paperclip size={12} /> View attachment{review.attachment_name ? ` (${review.attachment_name})` : ''}
           </a>
         )}
       </div>
@@ -1054,7 +1054,7 @@ function InvoicesPageContent() {
           <textarea
             value={pendingNoteText}
             onChange={(e) => setPendingNoteText(e.target.value)}
-            placeholder="Nota (ex: invoice não bate, falta aprovação do boss...)"
+            placeholder="Note (e.g. invoice doesn't match, waiting on boss's approval...)"
             className="w-full text-xs px-2 py-1.5 rounded border border-wire bg-surface text-parchment focus:outline-none focus:border-gold-ring resize-none"
             rows={3}
           />
@@ -1096,21 +1096,21 @@ function InvoicesPageContent() {
         {noteBlock}
         {badge}
         {(review.status === 'reviewed' || review.status === 'pending_approval') && (
-          <button type="button" onClick={() => openNoteEditor(key, review.note)} title="Editar nota/anexo" className="text-dim hover:text-warm text-xs px-1">
+          <button type="button" onClick={() => openNoteEditor(key, review.note)} title="Edit note/attachment" className="text-dim hover:text-warm text-xs px-1">
             <Paperclip size={12} />
           </button>
         )}
         {(review.status === 'reviewed' || review.status === 'pending_approval') && (
           <button type="button" onClick={() => markApproved(review)} className="text-xs px-2 py-1 rounded-full border border-violet-300 text-violet-800 hover:bg-violet-50 transition-colors">
-            Aprovar
+            Approve
           </button>
         )}
         {review.status === 'approved' && (
           <button type="button" onClick={() => markPaid(review)} className="text-xs px-2 py-1 rounded-full border border-emerald-300 text-emerald-800 hover:bg-emerald-50 transition-colors">
-            PAGO
+            PAID
           </button>
         )}
-        <button type="button" onClick={() => undoReview(review)} title="Voltar / desfazer" className="text-dim hover:text-danger text-xs px-1">
+        <button type="button" onClick={() => undoReview(review)} title="Undo / revert" className="text-dim hover:text-danger text-xs px-1">
           ✕
         </button>
       </div>
