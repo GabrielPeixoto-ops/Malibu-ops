@@ -228,9 +228,13 @@ function jobRoundUp(job: { source: string; subcontractor: { round_up_hours: bool
 // crew member / casual / extra man on the job — used when TMAAT's own
 // rounding can't be reconstructed from start/finish times. See JobForm.tsx
 // for the matching UI and same-priority logic.
-function jobManualHours(job: { source: string; subcontractor: { round_up_hours: boolean | null } | null; manual_hours_override: number | null }): number | null {
+function jobManualHours(job: { source: string; subcontractor: { round_up_hours: boolean | null } | null; manual_hours_override: number | null; break_minutes?: number | null }): number | null {
   if (jobRoundUp(job)) return null
-  return job.manual_hours_override ?? null
+  if (job.manual_hours_override == null) return null
+  // Same as computed hours: the job's break must be deducted from the raw
+  // override value the office typed in (TMAAT's billed hours), not applied on
+  // top of it.
+  return Math.max(0, job.manual_hours_override - Math.max(0, job.break_minutes ?? 0) / 60)
 }
 
 function buildStaffPayrollCrew(job: CalendarJob, crew: CrewRow[]): Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; heavy_item?: boolean }> {
