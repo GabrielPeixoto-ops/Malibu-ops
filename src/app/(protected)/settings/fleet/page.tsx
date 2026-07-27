@@ -2,14 +2,46 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useEffect, useState } from 'react'
-import { Plus, Pencil, ChevronDown, ChevronUp } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Plus, Pencil, ChevronDown, ChevronUp, Fuel } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import type { Fleet } from '@/types/database'
+import type { Fleet, FleetFuelLog } from '@/types/database'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 import Select from '@/components/ui/Select'
 import Modal from '@/components/ui/Modal'
+
+function emptyFuelForm(): FuelForm {
+  return { date: new Date().toISOString().slice(0, 10), litres: '', cost: '', odometer_km: '', filled_by: '', notes: '' }
+}
+
+interface FuelForm {
+  date: string
+  litres: string
+  cost: string
+  odometer_km: string
+  filled_by: string
+  notes: string
+}
+
+// Average L/100km across all consecutive fill-ups that have an odometer
+// reading, assuming each fill-up tops the tank back up (standard "full to
+// full" method) — so the litres put in at fill-up N roughly covers the
+// distance driven since fill-up N-1. Needs at least 2 logs with odometer.
+function estimateConsumption(logs: FleetFuelLog[]): number | null {
+  const withOdo = logs.filter((l) => l.odometer_km != null).sort((a, b) => (a.odometer_km ?? 0) - (b.odometer_km ?? 0))
+  if (withOdo.length < 2) return null
+  let totalKm = 0
+  let totalLitres = 0
+  for (let i = 1; i < withOdo.length; i++) {
+    const km = (withOdo[i].odometer_km ?? 0) - (withOdo[i - 1].odometer_km ?? 0)
+    if (km <= 0) continue
+    totalKm += km
+    totalLitres += withOdo[i].litres
+  }
+  if (totalKm <= 0) return null
+  return (totalLitres / totalKm) * 100
+}
 
 const sizeOptions = [
   { value: 'small', label: 'Small' },
@@ -75,13 +107,69 @@ export default function FleetPage() {
   const [error, setError] = useState('')
   const [expandedNotes, setExpandedNotes] = useState<Set<string>>(new Set())
 
+  // ── Fuel logging (migration_v52) ──────────────────────────────────────────
+  const [fuelLogs, setFuelLogs] = useState<FleetFuelLog[]>([])
+  const [fuelModalOpen, setFuelModalOpen] = useState(false)
+  const [fuelTruck, setFuelTruck] = useState<Fleet | null>(null)
+  const [fuelForm, setFuelForm] = useState<FuelForm>(emptyFuelForm())
+  const [fuelSaving, setFuelSaving] = useState(false)
+  const [expandedFuel, setExpandedFuel] = useState<Set<string>>(new Set())
+
   async function load() {
     const { data } = await supabase.from('fleet').select('*').order('name')
     setTrucks((data ?? []) as unknown as Fleet[])
+    try {
+      const { data: fuel } = await supabase.from('fleet_fuel_logs').select('*').order('date', { ascending: false })
+      setFuelLogs((fuel ?? []) as unknown as FleetFuelLog[])
+    } catch { /* migration not yet applied */ }
     setLoading(false)
   }
 
   useEffect(() => { load() }, [])
+
+  const fuelByTruck = useMemo(() => {
+    const map = new Map<string, FleetFuelLog[]>()
+    for (const log of fuelLogs) {
+      const list = map.get(log.fleet_id) ?? []
+      list.push(log)
+      map.set(log.fleet_id, list)
+    }
+    return map
+  }, [fuelLogs])
+
+  function openFuelLog(t: Fleet) {
+    setFuelTruck(t)
+    setFuelForm(emptyFuelForm())
+    setFuelModalOpen(true)
+  }
+
+  function toggleFuelHistory(id: string) {
+    setExpandedFuel((s) => {
+      const next = new Set(s)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  async function handleSaveFuel() {
+    if (!fuelTruck) return
+    const litres = parseFloat(fuelForm.litres)
+    const cost = parseFloat(fuelForm.cost)
+    if (!fuelForm.date || !(litres > 0) || !(cost > 0)) return
+    setFuelSaving(true)
+    await supabase.from('fleet_fuel_logs').insert({
+      fleet_id: fuelTruck.id,
+      date: fuelForm.date,
+      litres,
+      cost,
+      odometer_km: parseFloat(fuelForm.odometer_km) || null,
+      filled_by: fuelForm.filled_by.trim() || null,
+      notes: fuelForm.notes.trim() || null,
+    })
+    setFuelSaving(false)
+    setFuelModalOpen(false)
+    load()
+  }
 
   function openCreate() {
     setEditing(null)
@@ -236,7 +324,63 @@ export default function FleetPage() {
                   </div>
                 )}
 
-                <div className="mt-auto pt-2 border-t border-wire flex justify-end">
+                {/* Fuel (migration_v52) — manual log until we have Quik/QuikTrak API
+                    access to pull km driven automatically. */}
+                {(() => {
+                  const logs = fuelByTruck.get(t.id) ?? []
+                  const thirtyDaysAgo = new Date()
+                  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+                  const recent = logs.filter((l) => new Date(l.date) >= thirtyDaysAgo)
+                  const recentCost = recent.reduce((s, l) => s + l.cost, 0)
+                  const recentLitres = recent.reduce((s, l) => s + l.litres, 0)
+                  const avgConsumption = estimateConsumption(logs)
+                  const fuelOpen = expandedFuel.has(t.id)
+                  return (
+                    <div className="mt-auto pt-2 border-t border-wire">
+                      <div className="flex items-center justify-between mb-1">
+                        <button
+                          onClick={() => toggleFuelHistory(t.id)}
+                          className="flex items-center gap-1 text-xs text-dim hover:text-warm transition-colors"
+                        >
+                          <Fuel className="w-3 h-3" />
+                          Combustível
+                          {logs.length > 0 && (fuelOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
+                        </button>
+                        <button
+                          onClick={() => openFuelLog(t)}
+                          className="text-xs font-medium text-gold hover:text-gold-bright"
+                        >
+                          + Lançar
+                        </button>
+                      </div>
+                      {logs.length === 0 ? (
+                        <p className="text-xs text-dim">Nenhum abastecimento lançado ainda.</p>
+                      ) : (
+                        <div className="text-xs text-warm space-y-0.5">
+                          <p>
+                            Últimos 30 dias: <span className="font-semibold text-parchment">${recentCost.toFixed(2)}</span>
+                            {recentLitres > 0 && <span className="text-dim"> ({recentLitres.toFixed(0)}L)</span>}
+                          </p>
+                          {avgConsumption != null && (
+                            <p className="text-dim">Média: <span className="font-semibold text-parchment">{avgConsumption.toFixed(1)} L/100km</span></p>
+                          )}
+                        </div>
+                      )}
+                      {fuelOpen && logs.length > 0 && (
+                        <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
+                          {logs.slice(0, 8).map((l) => (
+                            <div key={l.id} className="flex items-center justify-between text-xs text-dim">
+                              <span>{l.date} {l.filled_by ? `· ${l.filled_by}` : ''}</span>
+                              <span className="font-mono">{l.litres.toFixed(0)}L · ${l.cost.toFixed(2)}{l.odometer_km != null ? ` · ${l.odometer_km.toFixed(0)}km` : ''}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
+
+                <div className="pt-2 border-t border-wire flex justify-end">
                   <button
                     onClick={() => toggleActive(t)}
                     className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
@@ -293,6 +437,44 @@ export default function FleetPage() {
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={fuelModalOpen} onClose={() => setFuelModalOpen(false)} title={fuelTruck ? `Abastecimento — ${fuelTruck.name}` : 'Abastecimento'}>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Data" type="date" value={fuelForm.date} onChange={(e) => setFuelForm((f) => ({ ...f, date: e.target.value }))} />
+            <Input label="Quem abasteceu" value={fuelForm.filled_by} onChange={(e) => setFuelForm((f) => ({ ...f, filled_by: e.target.value }))} placeholder="Nome do motorista" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Litros" type="number" min="0" step="0.01" value={fuelForm.litres} onChange={(e) => setFuelForm((f) => ({ ...f, litres: e.target.value }))} placeholder="80" />
+            <Input label="Custo ($)" type="number" min="0" step="0.01" value={fuelForm.cost} onChange={(e) => setFuelForm((f) => ({ ...f, cost: e.target.value }))} placeholder="150.00" />
+          </div>
+          <Input
+            label="Odômetro (km) — opcional"
+            type="number"
+            min="0"
+            value={fuelForm.odometer_km}
+            onChange={(e) => setFuelForm((f) => ({ ...f, odometer_km: e.target.value }))}
+            placeholder="120500"
+          />
+          <p className="text-xs text-dim -mt-2">
+            Preenchendo o odômetro em cada abastecimento a gente consegue calcular a média de L/100km do truck automaticamente.
+          </p>
+          <div>
+            <label className="block text-xs font-semibold text-dim uppercase tracking-wide mb-1">Notas</label>
+            <textarea
+              rows={2}
+              value={fuelForm.notes}
+              onChange={(e) => setFuelForm((f) => ({ ...f, notes: e.target.value }))}
+              placeholder="Posto, observações…"
+              className="w-full px-3 py-2 text-sm border border-wire rounded-lg bg-panel text-parchment focus:outline-none focus:border-gold-ring focus:ring-1 focus:ring-gold-ring"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" onClick={() => setFuelModalOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveFuel} disabled={fuelSaving}>{fuelSaving ? 'Salvando…' : 'Salvar'}</Button>
           </div>
         </div>
       </Modal>
