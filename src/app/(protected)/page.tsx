@@ -70,7 +70,7 @@ function getMonthGrid(ref: Date): Date[] {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface EmbeddedEmployee { id: string; name: string; hourly_rate: number }
-interface CrewRow { employee_id: string; hours: number; cof_share: boolean; cof_hours: number; heavy_item: boolean; start_time: string | null; end_time: string | null; employee: EmbeddedEmployee | null }
+interface CrewRow { employee_id: string; hours: number; cof_share: boolean; cof_hours: number; heavy_item: boolean; start_time: string | null; end_time: string | null; hours_override: number | null; employee: EmbeddedEmployee | null }
 interface MaterialRow { quantity: number; cost_price: number; sale_price: number }
 
 interface CalendarJob {
@@ -109,9 +109,9 @@ interface CalendarJob {
   job_crew: CrewRow[]
   job_materials: MaterialRow[]
   job_expenses: Array<{ amount: number; is_client_expense: boolean }>
-  job_casual_crew: Array<{ name: string; rate_per_hour: number; heavy_item: boolean; cof_share: boolean; start_time: string | null; finish_time: string | null; casual_worker_id: string | null }>
+  job_casual_crew: Array<{ name: string; rate_per_hour: number; heavy_item: boolean; cof_share: boolean; start_time: string | null; finish_time: string | null; casual_worker_id: string | null; hours_override: number | null }>
   job_commissions: Array<{ employee_id: string | null; casual_worker_id: string | null; rate_per_hour: number; hours: number }>
-  job_extra_men: Array<{ employee_id: string | null; name: string | null; rate_per_hour: number | null; start_time: string | null; finish_time: string | null; cof_share: boolean; client_charge_amount: number; minimum_hours: number | null }>
+  job_extra_men: Array<{ employee_id: string | null; name: string | null; rate_per_hour: number | null; start_time: string | null; finish_time: string | null; cof_share: boolean; client_charge_amount: number; minimum_hours: number | null; hours_override: number | null }>
   job_trucks: Array<{ fleet: { name: string; registration: string | null } | null }>
   subcontractor_rate_ph: number | null
   contract_rate_ph: number | null
@@ -230,7 +230,6 @@ function jobRoundUp(job: { source: string; subcontractor: { round_up_hours: bool
 // rounding can't be reconstructed from start/finish times. See JobForm.tsx
 // for the matching UI and same-priority logic.
 function jobManualHours(job: { source: string; subcontractor: { round_up_hours: boolean | null } | null; manual_hours_override: number | null; break_minutes?: number | null }): number | null {
-  if (jobRoundUp(job)) return null
   if (job.manual_hours_override == null) return null
   // Same as computed hours: the job's break must be deducted from the raw
   // override value the office typed in (TMAAT's billed hours), not applied on
@@ -250,7 +249,9 @@ function buildStaffPayrollCrew(job: CalendarJob, crew: CrewRow[]): Array<{ emplo
   return crew.map(r => {
     const hasIndividualTime = r.start_time?.length === 5 && r.end_time?.length === 5
     let hours: number
-    if (manualHours !== null) {
+    if (r.hours_override != null && r.hours_override > 0) {
+      hours = Math.max(2, r.hours_override)
+    } else if (manualHours !== null) {
       hours = Math.max(2, manualHours)
     } else if (hasIndividualTime) {
       // Individual times: recompute live from start/end, same rounding rule
@@ -286,7 +287,9 @@ function buildCasualPayroll(job: CalendarJob): Array<{ name: string; rate_per_ho
     .map(r => {
       const hasTime = r.start_time?.length === 5 && r.finish_time?.length === 5
       let hours: number
-      if (manualHours !== null) {
+      if (r.hours_override != null && r.hours_override > 0) {
+        hours = Math.max(MIN_CALL, r.hours_override) + (r.cof_share ? cofFinalHrs : 0)
+      } else if (manualHours !== null) {
         hours = Math.max(MIN_CALL, manualHours) + (r.cof_share ? cofFinalHrs : 0)
       } else if (hasTime) {
         const rawHours = calcHoursFromTimes(r.start_time!, r.finish_time!, Number(job.break_minutes) || 0, roundToBlock)
@@ -325,7 +328,9 @@ function buildExtraMenPayroll(
       // Raw (uncapped) hours here — the 2h (or per-person, migration_v51)
       // minimum call is applied once, downstream, by calculatePayroll.
       let hours: number
-      if (manualHours !== null) {
+      if (r.hours_override != null && r.hours_override > 0) {
+        hours = r.hours_override
+      } else if (manualHours !== null) {
         hours = manualHours
       } else if (hasTime) {
         hours = calcHoursFromTimes(r.start_time!, r.finish_time!, Number(job.break_minutes) || 0, roundToBlock)
@@ -453,12 +458,12 @@ export default function DashboardPage() {
           customer:customers(name, billing_type, billing_config),
           contract:contracts(name, billing_type, billing_config, color_hex),
           contract_client:contract_clients(name),
-          job_crew(employee_id, hours, cof_share, cof_hours, heavy_item, start_time, end_time, employee:employees(id, name, hourly_rate)),
+          job_crew(employee_id, hours, cof_share, cof_hours, heavy_item, start_time, end_time, hours_override, employee:employees(id, name, hourly_rate)),
           job_materials(quantity, cost_price, sale_price),
           job_expenses(amount, is_client_expense),
-          job_casual_crew(name, rate_per_hour, heavy_item, cof_share, start_time, finish_time, casual_worker_id),
+          job_casual_crew(name, rate_per_hour, heavy_item, cof_share, start_time, finish_time, casual_worker_id, hours_override),
           job_commissions(employee_id, casual_worker_id, rate_per_hour, hours),
-          job_extra_men(employee_id, name, rate_per_hour, start_time, finish_time, cof_share, client_charge_amount, minimum_hours)
+          job_extra_men(employee_id, name, rate_per_hour, start_time, finish_time, cof_share, client_charge_amount, minimum_hours, hours_override)
         `)
         .gte('date', start)
         .lte('date', end)
