@@ -286,6 +286,11 @@ export interface JobCrew {
   role: string | null
   start_time: string | null
   end_time: string | null
+  // Per-person manual hours override (migration_v55) — takes priority over
+  // both this row's own start/end time AND the job-level manual_hours_override,
+  // letting the office correct one crew member's hours without affecting
+  // everyone else on the job. NULL = no override, use computed hours as usual.
+  hours_override: number | null
   employee?: Employee
 }
 
@@ -309,6 +314,8 @@ export interface JobExtraMan {
   // promises a guaranteed minimum payout (e.g. 4h) even if they end up
   // working less. NULL falls back to the standard 2h minimum.
   minimum_hours: number | null
+  // Per-person manual hours override (migration_v55) — see JobCrew.hours_override.
+  hours_override: number | null
   created_at?: string
 }
 
@@ -329,6 +336,8 @@ export interface JobCasualCrew {
   heavy_item: boolean
   start_time: string | null
   finish_time: string | null
+  // Per-person manual hours override (migration_v55) — see JobCrew.hours_override.
+  hours_override: number | null
   created_at?: string
 }
 
