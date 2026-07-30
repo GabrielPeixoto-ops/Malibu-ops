@@ -245,6 +245,11 @@ export function calculatePayroll(
 export interface PrivateRateInput {
   rate_per_hour: number
   cofHours: number
+  // Fixed Rate mode (e.g. "2 Packers, 4hr minimum — flat $X"): when set, this
+  // flat dollar amount IS the private job's revenue, completely bypassing the
+  // rate_per_hour × cofHours multiplication below. Crew payroll is untouched —
+  // this only ever affects what the client is billed.
+  fixedAmount?: number | null
 }
 
 // A job whose crew/truck size changes mid-way (e.g. starts 1 truck + 3 men,
@@ -317,7 +322,7 @@ export function calculateJobSummary(
   } else if (source === 'subcontract') {
     subRevenue = sub ? calculateJobRevenue(job, sub, rateOptions?.subcontractorRatePerHour) : 0
   } else if (source === 'private' && privateRate) {
-    subRevenue = privateRate.rate_per_hour * privateRate.cofHours
+    subRevenue = privateRate.fixedAmount != null ? privateRate.fixedAmount : privateRate.rate_per_hour * privateRate.cofHours
   } else if (clientEntity) {
     subRevenue = calculateClientRevenue(
       { ...job, client_billing_config: job.client_billing_config ?? null },
