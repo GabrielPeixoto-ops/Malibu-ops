@@ -127,23 +127,31 @@ function calcRevenue(job: InvoiceJob): number | null {
       base = job.malibu_revenue
     } else {
       const entity = job.contract
-      if (!entity?.billing_type || !entity?.billing_config) return null
-      base = calculateClientRevenue(
-        { ...job, client_billing_config: job.client_billing_config as SubcontractorConfig | null },
-        entity.billing_type,
-        entity.billing_config as unknown as SubcontractorConfig,
-        job.contract_rate_ph
-      )
+      if (entity?.billing_type && entity?.billing_config) {
+        base = calculateClientRevenue(
+          { ...job, client_billing_config: job.client_billing_config as SubcontractorConfig | null },
+          entity.billing_type,
+          entity.billing_config as unknown as SubcontractorConfig,
+          job.contract_rate_ph
+        )
+      }
     }
   }
 
-  if (base === null) return null
+  // IMPORTANT: base can legitimately be null (e.g. a private job with no rate
+  // selected yet, or a percent-billed subcontract with no malibu_revenue saved
+  // yet). Previously that nulled out the ENTIRE job here, which silently hid
+  // heavy_item_charge, client_cof_manual_charge, materials, extra men and client
+  // expenses too — the bug reported as "heavy item nao esta refletindo na
+  // invoice". Treat a null base as 0 instead, so these other charges can still
+  // surface; the total>0 check below still hides genuinely zero-revenue jobs.
+  const effectiveBase = base ?? 0
   const clientExpenses = (job.job_expenses ?? []).filter((e) => e.is_client_expense).reduce((s, e) => s + e.amount, 0)
   const materialsRevenue = (job.job_materials ?? []).reduce((s, m) => s + Number(m.quantity) * Number(m.sale_price), 0)
   // What we charge the client for each Extra Man — pure company revenue,
   // independent of what the extra man is actually paid.
   const extraMenRevenue = (job.job_extra_men ?? []).reduce((s, em) => s + (Number(em.client_charge_amount) || 0), 0)
-  const total = base + materialsRevenue + (Number(job.heavy_item_charge) || 0) + (Number(job.client_cof_manual_charge) || 0) + extraMenRevenue - (Number(job.discount) || 0) + clientExpenses
+  const total = effectiveBase + materialsRevenue + (Number(job.heavy_item_charge) || 0) + (Number(job.client_cof_manual_charge) || 0) + extraMenRevenue - (Number(job.discount) || 0) + clientExpenses
   return total > 0 ? total : null
 }
 
