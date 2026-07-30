@@ -237,6 +237,15 @@ export interface Job {
   private_rate_custom: boolean
   private_rate_custom_desc: string | null
   private_rate_custom_price: number | null
+  private_rate_custom_gst_exclusive: boolean
+  // Fixed Rate mode (migration_v56): a single flat $ amount billed to the
+  // client for the whole job (e.g. "2 Packers, 4hr minimum"), independent of
+  // hours worked. Mutually exclusive with private_rate_id/private_rate_custom.
+  // Never affects crew payroll — see calculatePayroll in billing.ts.
+  private_rate_fixed: boolean
+  private_rate_fixed_desc: string | null
+  private_rate_fixed_price: number | null
+  private_rate_fixed_gst_exclusive: boolean
   google_review: boolean
   google_review_employee_ids: string[]
   payment_date: string | null
