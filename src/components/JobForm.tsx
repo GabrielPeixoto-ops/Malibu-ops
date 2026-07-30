@@ -266,6 +266,15 @@ interface FormState {
   // the effective inclusive rate used everywhere downstream is price × 1.1,
   // so GST is applied once here and never subtracted twice at Net Revenue.
   private_rate_custom_gst_exclusive: boolean
+  // Fixed Rate mode (e.g. "2 Packers, 4hr minimum — flat $X"): a single flat
+  // dollar amount billed to the client for the whole job, independent of
+  // hours worked. Mutually exclusive with private_rate_id/private_rate_custom.
+  // Crew payroll is entirely unaffected by this — see calculatePayroll, which
+  // never reads any private-rate field.
+  private_rate_fixed: boolean
+  private_rate_fixed_desc: string
+  private_rate_fixed_price: string
+  private_rate_fixed_gst_exclusive: boolean
   google_review: boolean
   google_review_employee_ids: string[]
   // Payment
@@ -389,6 +398,10 @@ function defaultForm(): FormState {
     private_rate_custom_desc: '',
     private_rate_custom_price: '',
     private_rate_custom_gst_exclusive: false,
+    private_rate_fixed: false,
+    private_rate_fixed_desc: '',
+    private_rate_fixed_price: '',
+    private_rate_fixed_gst_exclusive: false,
     google_review: false,
     google_review_employee_ids: [],
     payment_date: '',
@@ -621,6 +634,9 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             private_rate_id: string | null; private_rate_custom: boolean
             private_rate_custom_desc: string | null; private_rate_custom_price: number | null
             private_rate_custom_gst_exclusive: boolean | null
+            private_rate_fixed: boolean | null
+            private_rate_fixed_desc: string | null; private_rate_fixed_price: number | null
+            private_rate_fixed_gst_exclusive: boolean | null
             google_review: boolean; google_review_employee_ids: string[]
             payment_date: string | null; payment_methods: string[]
             payment_cash_amount: number; payment_transfer_amount: number; payment_card_amount: number
@@ -701,6 +717,10 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             private_rate_custom_desc: j.private_rate_custom_desc ?? '',
             private_rate_custom_price: j.private_rate_custom_price != null ? j.private_rate_custom_price.toString() : '',
             private_rate_custom_gst_exclusive: j.private_rate_custom_gst_exclusive ?? false,
+            private_rate_fixed: j.private_rate_fixed ?? false,
+            private_rate_fixed_desc: j.private_rate_fixed_desc ?? '',
+            private_rate_fixed_price: j.private_rate_fixed_price != null ? j.private_rate_fixed_price.toString() : '',
+            private_rate_fixed_gst_exclusive: j.private_rate_fixed_gst_exclusive ?? false,
             google_review: j.google_review ?? false,
             google_review_employee_ids: j.google_review_employee_ids ?? [],
             payment_date: j.payment_date ?? '',
@@ -1119,6 +1139,15 @@ const filteredCustomers = useMemo(
     const cofHours = workedHrs !== null
       ? Math.max(2, workedHrs) + effectiveClientCof
       : effectiveClientCof
+    // Fixed Rate: a flat $ amount for the whole job, independent of hours —
+    // e.g. "2 Packers, 4hr minimum — $X flat". Crew are still paid normally
+    // from their own start/end times; this only changes what the client owes.
+    if (form.private_rate_fixed) {
+      const price = parseFloat(form.private_rate_fixed_price)
+      if (!price) return null
+      const effectivePrice = form.private_rate_fixed_gst_exclusive ? price * 1.1 : price
+      return { rate_per_hour: 0, cofHours: 0, fixedAmount: effectivePrice }
+    }
     if (form.private_rate_custom) {
       const price = parseFloat(form.private_rate_custom_price)
       if (!price) return null
@@ -1132,7 +1161,7 @@ const filteredCustomers = useMemo(
     const rate = privateRates.find((r) => r.id === form.private_rate_id)
     if (!rate) return null
     return { rate_per_hour: rate.rate_per_hour, cofHours }
-  }, [form.source, form.private_rate_custom, form.private_rate_custom_price, form.private_rate_custom_gst_exclusive, form.private_rate_id, form.cof_final, form.cof, form.client_cof_override, form.client_cof_hours, form.client_cof_manual_charge, form.actual_start_time, form.actual_finish_time, form.break_minutes, privateRates])
+  }, [form.source, form.private_rate_custom, form.private_rate_custom_price, form.private_rate_custom_gst_exclusive, form.private_rate_fixed, form.private_rate_fixed_price, form.private_rate_fixed_gst_exclusive, form.private_rate_id, form.cof_final, form.cof, form.client_cof_override, form.client_cof_hours, form.client_cof_manual_charge, form.actual_start_time, form.actual_finish_time, form.break_minutes, privateRates])
 
   const summary = useMemo<JobSummary | null>(() => {
     if (form.source === 'subcontract' && !selectedSub) return null
@@ -1784,6 +1813,15 @@ const filteredCustomers = useMemo(
       : (parseFloat(form.cof_final) || 0)
     const computedPrivateRevenue = (() => {
       if (form.source !== 'private') return null
+      // Fixed Rate (e.g. "2 Packers, 4hr minimum — flat $X"): a single flat
+      // dollar amount for the whole job, independent of hours worked — crew
+      // payroll is completely unaffected, this only changes what the CLIENT
+      // is billed. Never multiplied by hours, unlike every other rate mode.
+      if (form.private_rate_fixed) {
+        const price = parseFloat(form.private_rate_fixed_price)
+        if (!price) return null
+        return price * (form.private_rate_fixed_gst_exclusive ? 1.1 : 1)
+      }
       const ratePerHour = form.private_rate_custom && parseFloat(form.private_rate_custom_price) > 0
         ? parseFloat(form.private_rate_custom_price) * (form.private_rate_custom_gst_exclusive ? 1.1 : 1)
         : (privateRates.find((r) => r.id === form.private_rate_id)?.rate_per_hour ?? null)
@@ -1866,11 +1904,15 @@ const filteredCustomers = useMemo(
       scheduled_time: form.scheduled_time || null,
       scheduled_finish_time: form.scheduled_finish_time || null,
       reference_number: form.reference_number.trim() || null,
-      private_rate_id: form.source === 'private' && !form.private_rate_custom ? (form.private_rate_id || null) : null,
-      private_rate_custom: form.source === 'private' ? form.private_rate_custom : false,
-      private_rate_custom_desc: form.source === 'private' && form.private_rate_custom ? (form.private_rate_custom_desc.trim() || null) : null,
-      private_rate_custom_price: form.source === 'private' && form.private_rate_custom ? (parseFloat(form.private_rate_custom_price) || null) : null,
-      private_rate_custom_gst_exclusive: form.source === 'private' && form.private_rate_custom ? form.private_rate_custom_gst_exclusive : false,
+      private_rate_id: form.source === 'private' && !form.private_rate_custom && !form.private_rate_fixed ? (form.private_rate_id || null) : null,
+      private_rate_custom: form.source === 'private' && !form.private_rate_fixed ? form.private_rate_custom : false,
+      private_rate_custom_desc: form.source === 'private' && form.private_rate_custom && !form.private_rate_fixed ? (form.private_rate_custom_desc.trim() || null) : null,
+      private_rate_custom_price: form.source === 'private' && form.private_rate_custom && !form.private_rate_fixed ? (parseFloat(form.private_rate_custom_price) || null) : null,
+      private_rate_custom_gst_exclusive: form.source === 'private' && form.private_rate_custom && !form.private_rate_fixed ? form.private_rate_custom_gst_exclusive : false,
+      private_rate_fixed: form.source === 'private' ? form.private_rate_fixed : false,
+      private_rate_fixed_desc: form.source === 'private' && form.private_rate_fixed ? (form.private_rate_fixed_desc.trim() || null) : null,
+      private_rate_fixed_price: form.source === 'private' && form.private_rate_fixed ? (parseFloat(form.private_rate_fixed_price) || null) : null,
+      private_rate_fixed_gst_exclusive: form.source === 'private' && form.private_rate_fixed ? form.private_rate_fixed_gst_exclusive : false,
       google_review: form.google_review,
       google_review_employee_ids: form.google_review_employee_ids,
       payment_date: form.payment_date || null,
@@ -2485,9 +2527,11 @@ const filteredCustomers = useMemo(
               {selectedCustomer?.phone && (
                 <p className="text-xs text-dim">{selectedCustomer.phone}</p>
               )}
-              {(form.private_rate_id || form.private_rate_custom) && (
+              {(form.private_rate_id || form.private_rate_custom || form.private_rate_fixed) && (
                 <p className="text-xs text-dim">
-                  {form.private_rate_custom
+                  {form.private_rate_fixed
+                    ? `Fixed Rate — $${form.private_rate_fixed_price}${form.private_rate_fixed_gst_exclusive ? ' + GST' : ' incl. GST'}${form.private_rate_fixed_desc ? ` (${form.private_rate_fixed_desc})` : ''}`
+                    : form.private_rate_custom
                     ? `Custom — $${form.private_rate_custom_price}/hr${form.private_rate_custom_gst_exclusive ? ' + GST' : ' incl. GST'}${form.private_rate_custom_desc ? ` (${form.private_rate_custom_desc})` : ''}`
                     : privateRates.find((r) => r.id === form.private_rate_id)?.name ?? '—'}
                 </p>
@@ -2547,12 +2591,18 @@ const filteredCustomers = useMemo(
               <div>
                 <label className="block text-sm font-medium text-warm mb-1">Rate <span className="text-danger">*</span></label>
                 <select
-                  value={form.private_rate_custom ? 'custom' : (form.private_rate_id ?? '')}
+                  value={form.private_rate_fixed ? 'fixed' : form.private_rate_custom ? 'custom' : (form.private_rate_id ?? '')}
                   onChange={(e) => {
-                    if (e.target.value === 'custom') {
+                    if (e.target.value === 'fixed') {
+                      setField('private_rate_fixed', true)
+                      setField('private_rate_custom', false)
+                      setField('private_rate_id', '')
+                    } else if (e.target.value === 'custom') {
+                      setField('private_rate_fixed', false)
                       setField('private_rate_custom', true)
                       setField('private_rate_id', '')
                     } else {
+                      setField('private_rate_fixed', false)
                       setField('private_rate_custom', false)
                       setField('private_rate_id', e.target.value)
                       setField('private_rate_custom_gst_exclusive', false)
@@ -2574,6 +2624,7 @@ const filteredCustomers = useMemo(
                   })}
                   <optgroup label="— Custom —">
                     <option value="custom">Custom price…</option>
+                    <option value="fixed">Fixed rate (flat $, not per hour)…</option>
                   </optgroup>
                 </select>
               </div>
@@ -2609,6 +2660,47 @@ const filteredCustomers = useMemo(
                       {form.private_rate_custom_gst_exclusive
                         ? `= $${(parseFloat(form.private_rate_custom_price) * 1.1).toFixed(2)}/hr incl. GST`
                         : `$${form.private_rate_custom_price}/hr already includes GST`}
+                    </p>
+                  )}
+                </>
+              )}
+
+              {/* Fixed Rate fields — one flat $ amount for the whole job,
+                  e.g. "2 Packers (4 hours minimum) — Fixed Rate". This never
+                  multiplies by hours worked, and never affects crew payroll —
+                  crew are still paid normally from their own start/end times.
+                  Only what the client is billed changes. */}
+              {form.private_rate_fixed && (
+                <>
+                  <Input
+                    label="Description"
+                    value={form.private_rate_fixed_desc ?? ''}
+                    onChange={(e) => setField('private_rate_fixed_desc', e.target.value)}
+                    placeholder="e.g. 2 Packers (4 hours minimum) — Fixed Rate"
+                  />
+                  <Input
+                    label="Fixed Amount ($)"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.private_rate_fixed_price ?? ''}
+                    onChange={(e) => setField('private_rate_fixed_price', e.target.value)}
+                    placeholder="0.00"
+                  />
+                  <label className="flex items-center gap-2 text-sm text-warm">
+                    <input
+                      type="checkbox"
+                      checked={form.private_rate_fixed_gst_exclusive}
+                      onChange={(e) => setField('private_rate_fixed_gst_exclusive', e.target.checked)}
+                    />
+                    + GST (amount above is before GST — 10% is added on top)
+                  </label>
+                  {form.private_rate_fixed_price && (
+                    <p className="text-xs text-dim">
+                      {form.private_rate_fixed_gst_exclusive
+                        ? `= $${(parseFloat(form.private_rate_fixed_price) * 1.1).toFixed(2)} incl. GST`
+                        : `$${form.private_rate_fixed_price} already includes GST`}
+                      {' — flat amount, does not change based on hours worked'}
                     </p>
                   )}
                 </>
