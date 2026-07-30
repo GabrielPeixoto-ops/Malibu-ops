@@ -77,10 +77,10 @@ interface InvoiceJob {
   contract_client: { name: string } | null
   actual_start_time: string | null
   actual_finish_time: string | null
-  job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; start_time: string | null; end_time: string | null }>
-  job_casual_crew: Array<{ casual_worker_id: string | null; name: string; rate_per_hour: number; hours: number; cof_share: boolean; heavy_item: boolean; start_time: string | null; finish_time: string | null }>
+  job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; start_time: string | null; end_time: string | null; hours_override: number | null }>
+  job_casual_crew: Array<{ casual_worker_id: string | null; name: string; rate_per_hour: number; hours: number; cof_share: boolean; heavy_item: boolean; start_time: string | null; finish_time: string | null; hours_override: number | null }>
   job_commissions: Array<{ employee_id: string | null; casual_worker_id: string | null; rate_per_hour: number; hours: number; commission_type: { name: string } | null }>
-  job_extra_men: Array<{ employee_id: string | null; name: string | null; rate_per_hour: number | null; start_time: string | null; finish_time: string | null; cof_share: boolean; client_charge_amount: number; minimum_hours: number | null }>
+  job_extra_men: Array<{ employee_id: string | null; name: string | null; rate_per_hour: number | null; start_time: string | null; finish_time: string | null; cof_share: boolean; client_charge_amount: number; minimum_hours: number | null; hours_override: number | null }>
   job_materials: Array<{ quantity: number; cost_price: number; sale_price: number }>
   job_expenses: Array<{ amount: number; is_client_expense: boolean }>
   job_employee_expenses: Array<{ employee_id: string | null; casual_worker_id: string | null; description: string | null; amount: number }>
@@ -231,7 +231,6 @@ function jobRoundUp(job: { source: string; subcontractor?: { round_up_hours?: bo
 // rounding can't be reconstructed from start/finish times. See JobForm.tsx
 // for the matching UI and same-priority logic.
 function jobManualHours(job: { source: string; subcontractor?: { round_up_hours?: boolean | null } | null; manual_hours_override: number | null; break_minutes?: number | null }): number | null {
-  if (jobRoundUp(job)) return null
   if (job.manual_hours_override == null) return null
   // Same as computed hours: the job's break must be deducted from the raw
   // override value the office typed in (TMAAT's billed hours), not applied on
@@ -363,12 +362,12 @@ function InvoicesPageContent() {
         customer:customers(id, name, billing_type, billing_config),
         contract:contracts(id, name, billing_type, billing_config),
         contract_client:contract_clients(name),
-        job_crew(employee_id, hours, cof_share, cof_hours, start_time, end_time),
-        job_casual_crew(casual_worker_id, name, rate_per_hour, hours, cof_share, heavy_item, start_time, finish_time),
+        job_crew(employee_id, hours, cof_share, cof_hours, start_time, end_time, hours_override),
+        job_casual_crew(casual_worker_id, name, rate_per_hour, hours, cof_share, heavy_item, start_time, finish_time, hours_override),
         job_commissions(employee_id, casual_worker_id, rate_per_hour, hours, commission_type:commission_types(name)),
         job_materials(quantity, cost_price, sale_price),
         job_expenses(amount, is_client_expense),
-        job_extra_men(employee_id, name, rate_per_hour, start_time, finish_time, cof_share, client_charge_amount, minimum_hours),
+        job_extra_men(employee_id, name, rate_per_hour, start_time, finish_time, cof_share, client_charge_amount, minimum_hours, hours_override),
         job_employee_expenses(employee_id, casual_worker_id, description, amount)
       `)
       .gte('date', dateFrom)
@@ -537,14 +536,15 @@ function InvoicesPageContent() {
           const hasTime = row.start_time?.length === 5 && row.end_time?.length === 5
           const roundToBlock = jobRoundUp(job)
           const manualHours = jobManualHours(job)
+          const rowOverride = row.hours_override
           const jobLevelHours = (() => {
             if (!job.actual_start_time || !job.actual_finish_time) return null
             const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0, roundToBlock)
             return raw > 0 ? raw : null
           })()
-          const workedHours = manualHours ?? (hasTime
+          const workedHours = (rowOverride != null && rowOverride > 0) ? rowOverride : (manualHours ?? (hasTime
             ? calcHoursFromTimes(row.start_time!, row.end_time!, Number(job.break_minutes) || 0, roundToBlock)
-            : (jobLevelHours ?? row.hours))
+            : (jobLevelHours ?? row.hours)))
           const cofHours = row.cof_share ? (row.cof_hours > 0 ? row.cof_hours : Number(job.cof_final ?? job.cof ?? 0)) : 0
           const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
           const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus
@@ -559,12 +559,13 @@ function InvoicesPageContent() {
           const hasTime = em.start_time?.length === 5 && em.finish_time?.length === 5
           const roundToBlock = jobRoundUp(job)
           const manualHours = jobManualHours(job)
+          const emOverride = em.hours_override
           const jobLevelHours = (() => {
             if (!job.actual_start_time || !job.actual_finish_time) return null
             const raw = calcHoursFromTimes(job.actual_start_time, job.actual_finish_time, Number(job.break_minutes) || 0, roundToBlock)
             return raw > 0 ? raw : null
           })()
-          const workedHours = manualHours ?? (hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0, roundToBlock) : (jobLevelHours ?? 0))
+          const workedHours = (emOverride != null && emOverride > 0) ? emOverride : (manualHours ?? (hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0, roundToBlock) : (jobLevelHours ?? 0)))
           if (workedHours <= 0) continue
           const cofHours = em.cof_share ? Number(job.cof_final ?? job.cof ?? 0) : 0
           const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
@@ -650,8 +651,11 @@ function InvoicesPageContent() {
         const name = row.name.trim()
         if (!name || row.rate_per_hour <= 0) continue
         const hasTime = row.start_time?.length === 5 && row.finish_time?.length === 5
+        const rowOverride = row.hours_override
         let rawHours: number
-        if (manualHours !== null) {
+        if (rowOverride != null && rowOverride > 0) {
+          rawHours = rowOverride
+        } else if (manualHours !== null) {
           rawHours = manualHours
         } else if (hasTime) {
           rawHours = calcHoursFromTimes(row.start_time!, row.finish_time!, Number(job.break_minutes) || 0, roundToBlock)
