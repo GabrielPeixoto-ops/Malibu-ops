@@ -248,6 +248,9 @@ interface FormState {
   extra_man_employee_id: string
   break_minutes: string
   manual_hours_override: string
+  // Pending Approval flag (migration_v57) — purely visual on the Dashboard,
+  // never changes `status`. See JobForm's checkbox + Dashboard's quick toggle.
+  hours_pending_approval: boolean
   discount: string
   notes: string
   completion_notes: string
@@ -385,6 +388,7 @@ function defaultForm(): FormState {
     extra_man_employee_id: '',
     break_minutes: '',
     manual_hours_override: '',
+    hours_pending_approval: false,
     discount: '',
     notes: '',
     completion_notes: '',
@@ -628,6 +632,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             rate_card_key: string | null; formula_vars: Record<string, number> | null
             extra_men_hours: number; extra_man_employee_id: string | null; break_minutes: number
             manual_hours_override: number | null
+            hours_pending_approval: boolean | null
             discount: number; notes: string | null; completion_notes: string | null
             actual_start_time: string | null; actual_finish_time: string | null
             scheduled_time: string | null; scheduled_finish_time: string | null; reference_number: string | null
@@ -704,6 +709,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             extra_man_employee_id: j.extra_man_employee_id ?? '',
             break_minutes: j.break_minutes > 0 ? j.break_minutes.toString() : '',
             manual_hours_override: j.manual_hours_override != null ? j.manual_hours_override.toString() : '',
+            hours_pending_approval: j.hours_pending_approval ?? false,
             discount: j.discount?.toString() ?? '',
             notes: j.notes ?? '',
             completion_notes: j.completion_notes ?? '',
@@ -1184,12 +1190,16 @@ const filteredCustomers = useMemo(
       .map((r) => {
         const match = resolveExtraMan(r.name)
         const rowOverride = parseFloat(r.hours_override) || 0
+        // Manual override (per-row or job-level) is the FINAL paid hours — no
+        // Call Out Fee hours stack on top of it in crew payroll. The client is
+        // still charged COF separately via job.cof/cof_final (untouched here).
+        const isOverride = rowOverride > 0 || manualOverrideHours !== null
         return {
           employee_id: match?.id ?? '',
           hours: Math.max(0, rowOverride > 0 ? rowOverride : (manualOverrideHours ?? calcCrewHours(r.start_time, r.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp))),
           hourly_rate: parseFloat(r.rate_per_hour) || match?.rate,
           employee_name: r.name.trim(),
-          cof_share: r.cof_share,
+          cof_share: isOverride ? false : r.cof_share,
           client_charge: parseFloat(r.client_charge) || 0,
           client_rate_per_hour: parseFloat(r.client_rate_per_hour) || 0,
         }
@@ -1275,11 +1285,15 @@ const filteredCustomers = useMemo(
       } else {
         hours = parseFloat(r.hours) || 0
       }
+      // Manual override (per-row or job-level) is the FINAL paid hours — no
+      // Call Out Fee hours stack on top of it in crew payroll. The client is
+      // still charged COF separately via job.cof/cof_final (untouched here).
+      const isOverride = rowOverride > 0 || manualOverrideHours !== null
       return {
         employee_id: r.employee_id,
         hours,
-        cof_share: r.cof_share,
-        cof_hours: r.cof_share ? (cofFinalHrs ?? 0) : 0,
+        cof_share: isOverride ? false : r.cof_share,
+        cof_hours: isOverride ? 0 : (r.cof_share ? (cofFinalHrs ?? 0) : 0),
         heavy_item: r.heavy_item,
       }
     })
@@ -1294,10 +1308,13 @@ const filteredCustomers = useMemo(
         const hasTime = r.start_time.length === 5 && r.finish_time.length === 5
         let hours: number
         const rowOverride = parseFloat(r.hours_override) || 0
+        // Manual override (per-row or job-level) is the FINAL paid hours — no
+        // Call Out Fee hours stack on top of it. Client COF billing (job.cof/
+        // cof_final) is untouched.
         if (rowOverride > 0) {
-          hours = Math.max(2, rowOverride) + (r.cof_share ? (cofFinalHrs ?? 0) : 0)
+          hours = Math.max(2, rowOverride)
         } else if (manualOverrideHours !== null) {
-          hours = Math.max(2, manualOverrideHours) + (r.cof_share ? (cofFinalHrs ?? 0) : 0)
+          hours = Math.max(2, manualOverrideHours)
         } else if (hasTime) {
           const rawHours = Math.max(0, calcCrewHours(r.start_time, r.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp))
           hours = (rawHours > 0 ? Math.max(2, rawHours) : 0) + (r.cof_share ? (cofFinalHrs ?? 0) : 0)
@@ -1893,6 +1910,7 @@ const filteredCustomers = useMemo(
       extra_man_employee_id: form.extra_man_employee_id || null,
       break_minutes: parseFloat(form.break_minutes) || 0,
       manual_hours_override: form.manual_hours_override.trim() ? (parseFloat(form.manual_hours_override) || null) : null,
+      hours_pending_approval: form.hours_pending_approval,
       discount: parseFloat(form.discount) || 0,
       deposit: parseFloat(form.deposit) || null,
       heavy_item_charge: parseFloat(form.heavy_item_charge) || null,
@@ -1940,11 +1958,13 @@ const filteredCustomers = useMemo(
 
     const crewRows = crew.filter((r) => r.employee_id).map((r) => {
       let hours: number
+      // Manual override (per-row or job-level) is the FINAL paid hours — no
+      // Call Out Fee stacks on top of it in crew payroll.
       const rowOverride = parseFloat(r.hours_override) || 0
       if (rowOverride > 0) {
-        hours = Math.max(2, rowOverride) + (r.cof_share ? (cofFinalVal ?? 0) : 0)
+        hours = Math.max(2, rowOverride)
       } else if (manualOverrideHours !== null) {
-        hours = Math.max(2, manualOverrideHours) + (r.cof_share ? (cofFinalVal ?? 0) : 0)
+        hours = Math.max(2, manualOverrideHours)
       } else if (crewHasTime(r)) {
         hours = calcCrewHours(r.start_time, r.end_time, parseFloat(form.break_minutes) || 0, subRoundUp)
       } else if (workedHrsForSave !== null) {
@@ -4136,6 +4156,26 @@ const filteredCustomers = useMemo(
               </p>
             </div>
 
+            {/* Pending Approval (migration_v57) — purely visual flag for the
+                Dashboard: the owner needs to review/approve this job's hours
+                before it's final. Never changes `status`; also toggleable
+                directly from the job card on the Dashboard. */}
+            <div className="mb-3">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={form.hours_pending_approval}
+                  disabled={isReviewed}
+                  onChange={(e) => setField('hours_pending_approval', e.target.checked)}
+                  className="w-4 h-4 rounded accent-gold"
+                />
+                <span className="text-sm text-parchment">Pending owner approval (minutos)</span>
+              </label>
+              <p className="text-xs text-dim mt-1">
+                Marks this job on the Dashboard with a different color so the owner knows to review/approve the hours. Doesn&apos;t change the job status.
+              </p>
+            </div>
+
             {/* Heavy Item Charge — job-level client charge (inc. GST, same as expenses) */}
             <div className="mb-3">
               <Input
@@ -4280,7 +4320,9 @@ const filteredCustomers = useMemo(
                       const manual = parseFloat(r.hours) || 0
                       return manual > 0 ? Math.max(2, manual) : 0
                     })()
-                    const cofHrs = r.cof_share ? cofFinalDisplay : 0
+                    // Manual override (per-row or job-level) is the FINAL paid
+                    // hours — no Call Out Fee stacks on top in crew payroll.
+                    const cofHrs = (rHoursOverride > 0 || manualOverrideHours !== null) ? 0 : (r.cof_share ? cofFinalDisplay : 0)
                     const hiHrs = r.heavy_item ? 0.5 : 0
                     const reviewHrs = (form.google_review && r.employee_id && form.google_review_employee_ids.includes(r.employee_id)) ? 0.5 : 0
                     const totalHrs = baseHrs + cofHrs + hiHrs + reviewHrs
@@ -4353,7 +4395,9 @@ const filteredCustomers = useMemo(
                       }
                       return 0
                     })()
-                    const cofHrs = r.cof_share ? cofFinalDisplay : 0
+                    // Manual override (per-row or job-level) is the FINAL paid
+                    // hours — no Call Out Fee stacks on top in crew payroll.
+                    const cofHrs = (rHoursOverride > 0 || manualOverrideHours !== null) ? 0 : (r.cof_share ? cofFinalDisplay : 0)
                     const hiHrs = r.heavy_item ? 0.5 : 0
                     const casualWorkerId = casualWorkers.find((cw) => cw.name.toLowerCase() === r.name.trim().toLowerCase())?.id
                     const reviewHrs = (form.google_review && casualWorkerId && form.google_review_employee_ids.includes(casualWorkerId)) ? 0.5 : 0
@@ -4487,7 +4531,10 @@ const filteredCustomers = useMemo(
                   const rawComputed = rowHrsOverride > 0 ? Math.max(0, rowHrsOverride) : (manualOverrideHours ?? (hasTime ? Math.max(0, calcCrewHours(row.start_time, row.finish_time, parseFloat(form.break_minutes) || 0, subRoundUp)) : null))
                   const baseHrs = rawComputed !== null && rawComputed > 0 ? Math.max(extraManMinHours(row), rawComputed) : rawComputed
                   const cofFinalDisplay = form.cof_final.trim() ? (parseFloat(form.cof_final) || 0) : 0
-                  const cofHrs = (baseHrs !== null && row.cof_share) ? cofFinalDisplay : 0
+                  // Manual override (per-row or job-level) is the FINAL paid
+                  // hours — no Call Out Fee stacks on top in crew payroll.
+                  const isRowOverride = rowHrsOverride > 0 || manualOverrideHours !== null
+                  const cofHrs = (baseHrs !== null && row.cof_share && !isRowOverride) ? cofFinalDisplay : 0
                   const matchedId = resolveExtraMan(row.name)?.id
                   const reviewHrs = (baseHrs && form.google_review && matchedId && form.google_review_employee_ids.includes(matchedId)) ? 0.5 : 0
                   const totalHrs = baseHrs !== null ? baseHrs + cofHrs + reviewHrs : null
