@@ -531,6 +531,7 @@ function InvoicesPageContent() {
         paidHours: number
         pay: number
         googleReviewBonus: boolean
+        heavyItem: boolean
         label?: string
       }> = []
       for (const job of filtered) {
@@ -564,7 +565,7 @@ function InvoicesPageContent() {
           // column at all, so it was silently dropped for staff employees here.
           const heavyItemBonus = row.heavy_item ? HEAVY_ITEM_BONUS : 0
           const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus + heavyItemBonus
-          entries.push({ job, workedHours, cofHours, paidHours, pay: paidHours * emp.hourly_rate, googleReviewBonus: reviewBonus > 0 })
+          entries.push({ job, workedHours, cofHours, paidHours, pay: paidHours * emp.hourly_rate, googleReviewBonus: reviewBonus > 0, heavyItem: heavyItemBonus > 0 })
         }
         // Extra Men who resolve to this staff employee — same hours/COF/review
         // treatment as regular crew. Prefer the per-job rate captured at save
@@ -594,12 +595,12 @@ function InvoicesPageContent() {
           const minCall = em.minimum_hours && em.minimum_hours > 0 ? em.minimum_hours : MIN_CALL
           const paidHours = Math.max(workedHours, minCall) + cofHours + reviewBonus
           const rate = em.rate_per_hour || emp.hourly_rate
-          entries.push({ job, workedHours, cofHours, paidHours, pay: paidHours * rate, googleReviewBonus: reviewBonus > 0 })
+          entries.push({ job, workedHours, cofHours, paidHours, pay: paidHours * rate, googleReviewBonus: reviewBonus > 0, heavyItem: false })
         }
         // Legacy single-extra-man fields, kept only for any historical jobs
         // saved before the job_extra_men table existed.
         if (job.extra_man_employee_id === emp.id && job.extra_men_hours > 0 && !(job.job_extra_men ?? []).some((em) => em.employee_id === emp.id)) {
-          entries.push({ job, workedHours: job.extra_men_hours, cofHours: 0, paidHours: job.extra_men_hours, pay: job.extra_men_hours * emp.hourly_rate, googleReviewBonus: false })
+          entries.push({ job, workedHours: job.extra_men_hours, cofHours: 0, paidHours: job.extra_men_hours, pay: job.extra_men_hours * emp.hourly_rate, googleReviewBonus: false, heavyItem: false })
         }
         for (const com of (job.job_commissions ?? [])) {
           if (com.employee_id === emp.id && com.hours > 0 && com.rate_per_hour > 0) {
@@ -610,6 +611,7 @@ function InvoicesPageContent() {
               paidHours: com.hours,
               pay: com.hours * com.rate_per_hour,
               googleReviewBonus: false,
+              heavyItem: false,
               label: com.commission_type?.name ?? 'Commission',
             })
           }
@@ -625,6 +627,7 @@ function InvoicesPageContent() {
               paidHours: 0,
               pay: rb.amount,
               googleReviewBonus: false,
+              heavyItem: false,
               label: rb.description?.trim() ? `Reimbursement: ${rb.description.trim()}` : 'Reimbursement',
             })
           }
@@ -1265,7 +1268,7 @@ function InvoicesPageContent() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-wire">
-                      {entries.map(({ job, paidHours, pay, googleReviewBonus, label }, i) => (
+                      {entries.map(({ job, paidHours, pay, googleReviewBonus, heavyItem, label }, i) => (
                         <tr key={`${job.id}-${i}`} className="hover:bg-panel transition-colors cursor-pointer" onClick={() => router.push(`/jobs/${job.id}/edit`)}>
                           <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
                           <td className="px-4 py-2">
@@ -1279,6 +1282,7 @@ function InvoicesPageContent() {
                               {STATUS_STYLE[job.status] && (
                                 <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${STATUS_STYLE[job.status]}`}>{job.status}</span>
                               )}
+                              {heavyItem && <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-300 font-medium">Heavy item +0.5h</span>}
                               {googleReviewBonus && <span className="text-xs px-1.5 py-0.5 rounded-full bg-gold/15 text-gold font-medium">★ +0.5h</span>}
                             </div>
                           </td>
