@@ -46,6 +46,7 @@ interface PayrollCrewRow {
   hours: number
   cof_share: boolean
   cof_hours: number
+  heavy_item: boolean
   start_time: string | null
   end_time: string | null
   // Per-person manual hours override (migration_v55) — takes priority over
@@ -122,6 +123,7 @@ interface EmployeeEntry {
 }
 
 const MIN_CALL = 2
+const HEAVY_ITEM_BONUS = 0.5
 
 const STATUS_PILL: Partial<Record<JobStatus, string>> = {
   reviewed: 'bg-cyan-500/10 text-cyan-300',
@@ -168,7 +170,7 @@ export default function PayrollPage() {
         customer:customers(name),
         contract:contracts(name),
         contract_client:contract_clients(name),
-        job_crew(employee_id, hours, cof_share, cof_hours, start_time, end_time, hours_override),
+        job_crew(employee_id, hours, cof_share, cof_hours, heavy_item, start_time, end_time, hours_override),
         job_extra_men(employee_id, rate_per_hour, start_time, finish_time, cof_share, minimum_hours, hours_override)
       `)
       .in('status', ['reviewed', 'invoiced', 'paid'])
@@ -210,7 +212,11 @@ export default function PayrollPage() {
             const isOverride = (rowOverride != null && rowOverride > 0) || manualHours !== null
             const cofHours = isOverride ? 0 : (row.cof_share ? (row.cof_hours > 0 ? row.cof_hours : Number(job.cof_final ?? job.cof ?? 0)) : 0)
             const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
-            const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus
+            // Heavy Item bonus — job_crew query didn't select this column at
+            // all, so the +0.5h paid for a heavy item was silently dropped
+            // here for staff employees (Invoices page had the same bug).
+            const heavyItemBonus = row.heavy_item ? HEAVY_ITEM_BONUS : 0
+            const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus + heavyItemBonus
             const workedTime = (row.start_time && row.end_time)
               ? `${row.start_time.slice(0, 5)}–${row.end_time.slice(0, 5)}`
               : null
