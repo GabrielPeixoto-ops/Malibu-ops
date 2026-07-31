@@ -204,7 +204,11 @@ export default function PayrollPage() {
             const workedHours = (rowOverride != null && rowOverride > 0) ? rowOverride : (manualHours ?? (hasTime
               ? calcHoursFromTimes(row.start_time!, row.end_time!, Number(job.break_minutes) || 0, roundToBlock)
               : (jobLevelHours ?? row.hours)))
-            const cofHours = row.cof_share ? (row.cof_hours > 0 ? row.cof_hours : Number(job.cof_final ?? job.cof ?? 0)) : 0
+            // Manual override (per-row or job-level) is the FINAL paid hours —
+            // no Call Out Fee stacks on top of it. Client-side COF billing is
+            // untouched (computed separately in Invoices from job.cof/cof_final).
+            const isOverride = (rowOverride != null && rowOverride > 0) || manualHours !== null
+            const cofHours = isOverride ? 0 : (row.cof_share ? (row.cof_hours > 0 ? row.cof_hours : Number(job.cof_final ?? job.cof ?? 0)) : 0)
             const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
             const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus
             const workedTime = (row.start_time && row.end_time)
@@ -225,7 +229,10 @@ export default function PayrollPage() {
             })()
             const workedHours = (emOverride != null && emOverride > 0) ? emOverride : (manualHours ?? (hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0, roundToBlock) : (jobLevelHours ?? 0)))
             if (workedHours <= 0) continue
-            const cofHours = em.cof_share ? Number(job.cof_final ?? job.cof ?? 0) : 0
+            // Manual override (per-row or job-level) is the FINAL paid hours —
+            // no Call Out Fee stacks on top of it.
+            const emIsOverride = (emOverride != null && emOverride > 0) || manualHours !== null
+            const cofHours = emIsOverride ? 0 : (em.cof_share ? Number(job.cof_final ?? job.cof ?? 0) : 0)
             const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
             // Per-person minimum (migration_v51) — e.g. a guaranteed 4h
             // "sweetener" for a far/late job — overrides the standard 2h
