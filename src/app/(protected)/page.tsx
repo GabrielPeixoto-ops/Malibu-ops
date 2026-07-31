@@ -89,6 +89,7 @@ interface CalendarJob {
   extra_men_hours: number
   break_minutes: number
   manual_hours_override: number | null
+  hours_pending_approval: boolean
   discount: number
   heavy_item_charge: number | null
   client_cof_manual_charge: number | null
@@ -276,7 +277,10 @@ function buildStaffPayrollCrew(job: CalendarJob, crew: CrewRow[]): Array<{ emplo
     // Let calculatePayroll add Call Out Fee hours from cof_share/cof_hours,
     // same as JobForm does — never bake COF into `hours` here, or it gets lost
     // for crew with individual times (that branch doesn't touch cofFinalHrs at all).
-    return { employee_id: r.employee_id, hours, cof_share: r.cof_share, cof_hours: r.cof_share ? cofFinalHrs : 0, heavy_item: r.heavy_item }
+    // Manual override (per-row or job-level) is the FINAL paid hours — no COF
+    // stacks on top of it in crew payroll (client COF billing is untouched).
+    const isOverride = (r.hours_override != null && r.hours_override > 0) || manualHours !== null
+    return { employee_id: r.employee_id, hours, cof_share: isOverride ? false : r.cof_share, cof_hours: isOverride ? 0 : (r.cof_share ? cofFinalHrs : 0), heavy_item: r.heavy_item }
   })
 }
 
@@ -295,10 +299,12 @@ function buildCasualPayroll(job: CalendarJob): Array<{ name: string; rate_per_ho
     .map(r => {
       const hasTime = r.start_time?.length === 5 && r.finish_time?.length === 5
       let hours: number
+      // Manual override (per-row or job-level) is the FINAL paid hours — no
+      // Call Out Fee stacks on top of it.
       if (r.hours_override != null && r.hours_override > 0) {
-        hours = Math.max(MIN_CALL, r.hours_override) + (r.cof_share ? cofFinalHrs : 0)
+        hours = Math.max(MIN_CALL, r.hours_override)
       } else if (manualHours !== null) {
-        hours = Math.max(MIN_CALL, manualHours) + (r.cof_share ? cofFinalHrs : 0)
+        hours = Math.max(MIN_CALL, manualHours)
       } else if (hasTime) {
         const rawHours = calcHoursFromTimes(r.start_time!, r.finish_time!, Number(job.break_minutes) || 0, roundToBlock)
         hours = (rawHours > 0 ? Math.max(MIN_CALL, rawHours) : 0) + (r.cof_share ? cofFinalHrs : 0)
@@ -352,12 +358,15 @@ function buildExtraMenPayroll(
       // lookup for rows saved before those columns existed.
       const staffEmp = employees.find((e) => e.id === r.employee_id)
       const casualWorker = staffEmp ? null : casualWorkers.find((cw) => cw.id === r.employee_id)
+      // Manual override (per-row or job-level) is the FINAL paid hours — no
+      // Call Out Fee stacks on top of it in crew payroll.
+      const isOverride = (r.hours_override != null && r.hours_override > 0) || manualHours !== null
       return {
         employee_id: r.employee_id ?? '',
         hours,
         hourly_rate: r.rate_per_hour ?? staffEmp?.hourly_rate ?? casualWorker?.rate_per_hour,
         employee_name: (r.name && r.name.trim()) || staffEmp?.name || casualWorker?.name,
-        cof_share: r.cof_share,
+        cof_share: isOverride ? false : r.cof_share,
         client_charge: Number(r.client_charge_amount) || 0,
         minimum_hours: r.minimum_hours,
       }
@@ -403,6 +412,18 @@ export default function DashboardPage() {
 
   function openStart(jobId: string) { setModal({ type: 'start', jobId, time: nowHHMM() }) }
   function openFinish(jobId: string) { setModal({ type: 'finish', jobId, time: nowHHMM() }) }
+
+  // Quick toggle for the Pending Approval flag (migration_v57) directly from
+  // the Dashboard job card — purely visual, never touches `status`. The same
+  // flag is also editable as a checkbox inside JobForm.
+  async function handleTogglePendingApproval(jobId: string, next: boolean) {
+    setJobs((prev) => prev.map((j) => j.id === jobId ? { ...j, hours_pending_approval: next } : j))
+    const { error } = await supabase.from('jobs').update({ hours_pending_approval: next }).eq('id', jobId)
+    if (error) {
+      setJobs((prev) => prev.map((j) => j.id === jobId ? { ...j, hours_pending_approval: !next } : j))
+      alert(`Failed to update Pending Approval: ${error.message}`)
+    }
+  }
 
   async function handleJobDrop(newDate: string) {
     if (!draggingJobId) return
@@ -459,7 +480,7 @@ export default function DashboardPage() {
         .from('jobs')
         .select(`
           id, job_number, date, status, source, notes, cof, cof_final, additional_hours,
-          additional_rate, rate_card_key, formula_vars, extra_men_hours, break_minutes, manual_hours_override, discount, heavy_item_charge, client_cof_manual_charge,
+          additional_rate, rate_card_key, formula_vars, extra_men_hours, break_minutes, manual_hours_override, hours_pending_approval, discount, heavy_item_charge, client_cof_manual_charge,
           actual_start_time, actual_finish_time, scheduled_time, override_revenue, malibu_revenue, client_billing_config,
           subcontractor_rate_id, contract_rate_id, google_review, google_review_employee_ids,
           subcontractor:subcontractors(*),
@@ -629,7 +650,7 @@ export default function DashboardPage() {
       {loading ? (
         <p className="text-warm text-sm py-8 text-center">Loading…</p>
       ) : view === 'day' ? (
-        <DayView jobs={jobsByDate.get(toISO(dayRef)) ?? []} today={today} onJobClick={(id) => router.push(`/jobs/${id}/edit`)} onStart={openStart} onFinish={openFinish} privateColor={privateColor} />
+        <DayView jobs={jobsByDate.get(toISO(dayRef)) ?? []} today={today} onJobClick={(id) => router.push(`/jobs/${id}/edit`)} onStart={openStart} onFinish={openFinish} privateColor={privateColor} onTogglePendingApproval={handleTogglePendingApproval} />
       ) : view === 'week' ? (
         <WeekView
           days={weekDays}
@@ -647,6 +668,7 @@ export default function DashboardPage() {
           privateColor={privateColor}
           allEmployees={allEmployees}
           allCasualWorkers={allCasualWorkers}
+          onTogglePendingApproval={handleTogglePendingApproval}
         />
       ) : (
         <MonthView
@@ -723,7 +745,7 @@ function SourceBadge({ source }: { source: JobSource }) {
 function WeekView({
   days, jobsByDate, today, onJobClick, onStart, onFinish,
   draggingJobId, dragOverDate, onDragStart, onDragEnd, onDragOver, onDrop, privateColor,
-  allEmployees, allCasualWorkers,
+  allEmployees, allCasualWorkers, onTogglePendingApproval,
 }: {
   days: Date[]
   jobsByDate: Map<string, CalendarJob[]>
@@ -740,6 +762,7 @@ function WeekView({
   privateColor: string | null
   allEmployees: Employee[]
   allCasualWorkers: Array<{ id: string; name: string; rate_per_hour: number }>
+  onTogglePendingApproval: (jobId: string, next: boolean) => void
 }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-wire bg-surface">
@@ -793,6 +816,7 @@ function WeekView({
                     privateColor={privateColor}
                     allEmployees={allEmployees}
                     allCasualWorkers={allCasualWorkers}
+                    onTogglePendingApproval={onTogglePendingApproval}
                   />
                 ))}
               </div>
@@ -865,7 +889,11 @@ function MonthView({
 
               <div className="space-y-0.5">
                 {dayJobs.slice(0, 3).map((job) => {
-                  const s = STATUS_CARD[job.status]
+                  // Pending Approval overrides status color here too — purely
+                  // visual, `status` itself is untouched.
+                  const s = job.hours_pending_approval
+                    ? { bg: 'bg-purple-500/15', text: 'text-purple-200' }
+                    : STATUS_CARD[job.status]
                   const ec = getEntityColor(job, privateColor)
                   return (
                     <button
@@ -880,7 +908,7 @@ function MonthView({
                         opacity: draggingJobId === job.id ? 0.4 : 1,
                       }}
                     >
-                      #{job.job_number} {entityLabel(job)}
+                      {job.hours_pending_approval ? '⏳ ' : ''}#{job.job_number} {entityLabel(job)}
                     </button>
                   )
                 })}
@@ -899,7 +927,7 @@ function MonthView({
 // ─── Job card (week view) ─────────────────────────────────────────────────────
 function JobCard({
   job, today, onClick, onStart, onFinish, isDragging, onDragStart, onDragEnd, privateColor,
-  allEmployees, allCasualWorkers,
+  allEmployees, allCasualWorkers, onTogglePendingApproval,
 }: {
   job: CalendarJob
   today: string
@@ -912,8 +940,14 @@ function JobCard({
   privateColor: string | null
   allEmployees: Employee[]
   allCasualWorkers: Array<{ id: string; name: string; rate_per_hour: number }>
+  onTogglePendingApproval: (jobId: string, next: boolean) => void
 }) {
-  const s = STATUS_CARD[job.status]
+  // Pending Approval (migration_v57) overrides the status-driven card color —
+  // purely visual, signals the owner needs to review/approve this job's
+  // hours. `status` itself is never touched by this flag.
+  const s = job.hours_pending_approval
+    ? { bg: 'bg-purple-500/15', text: 'text-purple-200', dot: 'bg-purple-400' }
+    : STATUS_CARD[job.status]
   const revenue = calcJobRevenue(job)
   const entityColor = getEntityColor(job, privateColor)
   const jobProfit = (() => {
@@ -973,6 +1007,7 @@ function JobCard({
         <div className="flex items-center gap-1 mt-0.5">
           <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
           <span className="opacity-70 capitalize">{job.status.replace('_', ' ')}</span>
+          {job.hours_pending_approval && <span className="opacity-90">⏳ Pending approval</span>}
         </div>
         {(job.job_trucks ?? []).length > 0 && (
           <div className="mt-0.5 font-mono opacity-60 text-[10px]">
@@ -1003,6 +1038,19 @@ function JobCard({
           )}
         </div>
       )}
+      <div className="px-1.5 pb-1.5">
+        <button
+          onClick={(e) => { e.stopPropagation(); onTogglePendingApproval(job.id, !job.hours_pending_approval) }}
+          title="Toggle Pending Approval — doesn't change job status"
+          className={`w-full text-center text-[10px] font-semibold py-0.5 rounded ${
+            job.hours_pending_approval
+              ? 'bg-purple-500/25 hover:bg-purple-500/35 text-purple-200'
+              : 'bg-transparent hover:bg-white/5 opacity-60 hover:opacity-100'
+          }`}
+        >
+          {job.hours_pending_approval ? '⏳ Pending — click to clear' : 'Mark Pending Approval'}
+        </button>
+      </div>
     </div>
   )
 }
@@ -1025,6 +1073,7 @@ function DayView({
   onStart,
   onFinish,
   privateColor,
+  onTogglePendingApproval,
 }: {
   jobs: CalendarJob[]
   today: string
@@ -1032,6 +1081,7 @@ function DayView({
   onStart: (id: string) => void
   onFinish: (id: string) => void
   privateColor: string | null
+  onTogglePendingApproval: (jobId: string, next: boolean) => void
 }) {
   if (jobs.length === 0) {
     return (
@@ -1058,7 +1108,7 @@ function DayView({
         )
 
         return (
-          <div key={job.id} className="flex items-stretch gap-0">
+          <div key={job.id} className={`flex items-stretch gap-0 ${job.hours_pending_approval ? 'bg-purple-500/10' : ''}`}>
             {ec && <div className="w-1 shrink-0 rounded-l-xl" style={{ backgroundColor: ec }} />}
             <div className="flex-1 p-4">
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -1070,6 +1120,11 @@ function DayView({
                       <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
                       {job.status.replace('_', ' ')}
                     </span>
+                    {job.hours_pending_approval && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-500/20 text-purple-300">
+                        ⏳ Pending approval
+                      </span>
+                    )}
                     {time && <span className="text-xs text-dim font-mono">@ {time}</span>}
                   </div>
                   <div className="mt-1 text-sm text-parchment font-medium">{entityLabel(job)}</div>
@@ -1111,6 +1166,17 @@ function DayView({
                       className="px-3 py-1 text-xs font-semibold rounded-lg border border-wire text-warm hover:bg-panel hover:text-parchment transition-colors"
                     >
                       Open
+                    </button>
+                    <button
+                      onClick={() => onTogglePendingApproval(job.id, !job.hours_pending_approval)}
+                      title="Toggle Pending Approval — doesn't change job status"
+                      className={`px-3 py-1 text-xs font-semibold rounded-lg border transition-colors ${
+                        job.hours_pending_approval
+                          ? 'bg-purple-500/20 border-purple-400/40 text-purple-300 hover:bg-purple-500/30'
+                          : 'border-wire text-warm hover:bg-panel hover:text-parchment'
+                      }`}
+                    >
+                      {job.hours_pending_approval ? '⏳ Pending' : 'Mark Pending'}
                     </button>
                   </div>
                 </div>
