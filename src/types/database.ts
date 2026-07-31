@@ -275,6 +275,11 @@ export interface Job {
   // Added on top of revenue exactly like heavy_item_charge, never folded into
   // the hours-based client_cof_hours field.
   client_cof_manual_charge: number | null
+  // Pending Approval flag (migration_v57) — purely visual: signals on the
+  // Dashboard that the owner needs to review/approve this job's hours before
+  // it's finalized. Never changes `status`; toggleable from JobForm (checkbox)
+  // or directly from the Dashboard job card (quick toggle).
+  hours_pending_approval: boolean
   malibu_revenue: number | null
   created_at?: string
   subcontractor?: Subcontractor
