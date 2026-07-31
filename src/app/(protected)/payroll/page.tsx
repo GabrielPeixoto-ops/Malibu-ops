@@ -120,6 +120,7 @@ interface EmployeeEntry {
   pay: number
   isExtraMan?: boolean
   googleReviewBonus?: boolean
+  heavyItem?: boolean
 }
 
 const MIN_CALL = 2
@@ -220,7 +221,7 @@ export default function PayrollPage() {
             const workedTime = (row.start_time && row.end_time)
               ? `${row.start_time.slice(0, 5)}–${row.end_time.slice(0, 5)}`
               : null
-            entries.push({ job, workedHours, workedTime, cofHours, paidHours, pay: paidHours * emp.hourly_rate, googleReviewBonus: reviewBonus > 0 })
+            entries.push({ job, workedHours, workedTime, cofHours, paidHours, pay: paidHours * emp.hourly_rate, googleReviewBonus: reviewBonus > 0, heavyItem: heavyItemBonus > 0 })
           }
           for (const em of job.job_extra_men ?? []) {
             if (em.employee_id !== emp.id) continue
@@ -355,7 +356,7 @@ export default function PayrollPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-wire">
-                      {entries.map(({ job, workedHours, workedTime, cofHours, paidHours, pay, isExtraMan, googleReviewBonus }) => (
+                      {entries.map(({ job, workedHours, workedTime, cofHours, paidHours, pay, isExtraMan, googleReviewBonus, heavyItem }) => (
                         <tr key={`${job.id}-${isExtraMan ? 'em' : 'crew'}`} className="hover:bg-panel transition-colors">
                           <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
                           <td className="px-4 py-2">
@@ -365,6 +366,9 @@ export default function PayrollPage() {
                                 <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${STATUS_PILL[job.status]}`}>
                                   {job.status}
                                 </span>
+                              )}
+                              {heavyItem && (
+                                <span className="text-xs px-1.5 py-0.5 rounded-full font-medium bg-blue-500/15 text-blue-300">Heavy item +0.5h</span>
                               )}
                               {googleReviewBonus && (
                                 <span className="text-xs px-1.5 py-0.5 rounded-full font-medium bg-gold/15 text-gold">★ +0.5h</span>
