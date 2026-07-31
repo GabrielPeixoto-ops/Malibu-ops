@@ -553,7 +553,11 @@ function InvoicesPageContent() {
           const workedHours = (rowOverride != null && rowOverride > 0) ? rowOverride : (manualHours ?? (hasTime
             ? calcHoursFromTimes(row.start_time!, row.end_time!, Number(job.break_minutes) || 0, roundToBlock)
             : (jobLevelHours ?? row.hours)))
-          const cofHours = row.cof_share ? (row.cof_hours > 0 ? row.cof_hours : Number(job.cof_final ?? job.cof ?? 0)) : 0
+          // Manual override (per-row or job-level) is the FINAL paid hours —
+          // no Call Out Fee stacks on top of it. Client-side COF billing
+          // (job.cof/cof_final revenue) stays unaffected.
+          const isOverride = (rowOverride != null && rowOverride > 0) || manualHours !== null
+          const cofHours = isOverride ? 0 : (row.cof_share ? (row.cof_hours > 0 ? row.cof_hours : Number(job.cof_final ?? job.cof ?? 0)) : 0)
           const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
           const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus
           entries.push({ job, workedHours, cofHours, paidHours, pay: paidHours * emp.hourly_rate, googleReviewBonus: reviewBonus > 0 })
@@ -575,7 +579,10 @@ function InvoicesPageContent() {
           })()
           const workedHours = (emOverride != null && emOverride > 0) ? emOverride : (manualHours ?? (hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0, roundToBlock) : (jobLevelHours ?? 0)))
           if (workedHours <= 0) continue
-          const cofHours = em.cof_share ? Number(job.cof_final ?? job.cof ?? 0) : 0
+          // Manual override (per-row or job-level) is the FINAL paid hours —
+          // no Call Out Fee stacks on top of it.
+          const emIsOverride = (emOverride != null && emOverride > 0) || manualHours !== null
+          const cofHours = emIsOverride ? 0 : (em.cof_share ? Number(job.cof_final ?? job.cof ?? 0) : 0)
           const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
           // Per-person minimum (migration_v51) — e.g. a guaranteed 4h
           // "sweetener" for a far/late job — overrides the standard 2h
@@ -673,7 +680,10 @@ function InvoicesPageContent() {
           rawHours = 0
         }
         const workedHours = rawHours > 0 ? Math.max(MIN_CALL, rawHours) : 0
-        const cofHours = row.cof_share ? cofFinalHrs : 0
+        // Manual override (per-row or job-level) is the FINAL paid hours — no
+        // Call Out Fee stacks on top of it.
+        const isCcOverride = (rowOverride != null && rowOverride > 0) || manualHours !== null
+        const cofHours = isCcOverride ? 0 : (row.cof_share ? cofFinalHrs : 0)
         const hasReviewBonus = row.casual_worker_id ? reviewSet.has(row.casual_worker_id) : false
         const paidHours = workedHours + cofHours + (row.heavy_item ? HEAVY_ITEM_BONUS : 0) + (hasReviewBonus ? REVIEW_BONUS : 0)
         if (paidHours <= 0) continue
@@ -729,13 +739,17 @@ function InvoicesPageContent() {
         const rate = em.rate_per_hour || cw?.rate_per_hour || 0
         if (rate <= 0) continue
         const hasTime = em.start_time?.length === 5 && em.finish_time?.length === 5
-        const rawHours = manualHours ?? (hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0, roundToBlock) : (jobLevelHours ?? 0))
+        const emOverride = em.hours_override
+        const rawHours = (emOverride != null && emOverride > 0) ? emOverride : (manualHours ?? (hasTime ? calcHoursFromTimes(em.start_time!, em.finish_time!, Number(job.break_minutes) || 0, roundToBlock) : (jobLevelHours ?? 0)))
         // Per-person minimum (migration_v51) — e.g. a guaranteed 4h
         // "sweetener" for a far/late job — overrides the standard 2h minimum
         // call when set on this extra man row.
         const minCall = em.minimum_hours && em.minimum_hours > 0 ? em.minimum_hours : MIN_CALL
         const workedHours = rawHours > 0 ? Math.max(minCall, rawHours) : 0
-        const cofHours = em.cof_share ? cofFinalHrs : 0
+        // Manual override (per-row or job-level) is the FINAL paid hours — no
+        // Call Out Fee stacks on top of it.
+        const emIsOverride = (emOverride != null && emOverride > 0) || manualHours !== null
+        const cofHours = emIsOverride ? 0 : (em.cof_share ? cofFinalHrs : 0)
         const hasReviewBonus = cw ? reviewSet.has(cw.id) : false
         const paidHours = workedHours + cofHours + (hasReviewBonus ? REVIEW_BONUS : 0)
         if (paidHours <= 0) continue
