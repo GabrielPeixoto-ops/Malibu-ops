@@ -1885,6 +1885,26 @@ const filteredCustomers = useMemo(
         + saveEffectiveClientCof * (parseFloat(rateBlocksPersistRows[rateBlocksPersistRows.length - 1].rate_per_hour) || 0)
       : null
 
+    // Prune Google Review credit to only people still actually on this job.
+    // Without this, an id checked while someone was on the crew stays in
+    // google_review_employee_ids forever even after they're removed/swapped
+    // out — so next time the box is (re)checked for anyone, that stale id
+    // silently still gets the +0.5h bonus on the invoice. Recomputed fresh
+    // from current crew/casual/extra-men on every save.
+    const validReviewIds = new Set<string>()
+    crew.forEach((r) => { if (r.employee_id) validReviewIds.add(r.employee_id) })
+    casualCrew.forEach((r) => {
+      const cw = casualWorkers.find((c) => c.name.toLowerCase() === r.name.trim().toLowerCase())
+      if (cw?.id) validReviewIds.add(cw.id)
+    })
+    extraMen.forEach((r) => {
+      const match = resolveExtraMan(r.name)
+      if (match?.id) validReviewIds.add(match.id)
+    })
+    const prunedGoogleReviewIds = form.google_review
+      ? form.google_review_employee_ids.filter((id) => validReviewIds.has(id))
+      : []
+
     const payload = {
       job_number: form.job_number.trim(),
       date: form.date,
@@ -1932,7 +1952,7 @@ const filteredCustomers = useMemo(
       private_rate_fixed_price: form.source === 'private' && form.private_rate_fixed ? (parseFloat(form.private_rate_fixed_price) || null) : null,
       private_rate_fixed_gst_exclusive: form.source === 'private' && form.private_rate_fixed ? form.private_rate_fixed_gst_exclusive : false,
       google_review: form.google_review,
-      google_review_employee_ids: form.google_review_employee_ids,
+      google_review_employee_ids: prunedGoogleReviewIds,
       payment_date: form.payment_date || null,
       payment_methods: form.payment_methods,
       payment_cash_amount: parseFloat(form.payment_cash_amount) || 0,
