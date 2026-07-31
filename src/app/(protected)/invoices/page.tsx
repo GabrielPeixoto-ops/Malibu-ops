@@ -77,7 +77,7 @@ interface InvoiceJob {
   contract_client: { name: string } | null
   actual_start_time: string | null
   actual_finish_time: string | null
-  job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; start_time: string | null; end_time: string | null; hours_override: number | null }>
+  job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; heavy_item: boolean; start_time: string | null; end_time: string | null; hours_override: number | null }>
   job_casual_crew: Array<{ casual_worker_id: string | null; name: string; rate_per_hour: number; hours: number; cof_share: boolean; heavy_item: boolean; start_time: string | null; finish_time: string | null; hours_override: number | null }>
   job_commissions: Array<{ employee_id: string | null; casual_worker_id: string | null; rate_per_hour: number; hours: number; commission_type: { name: string } | null }>
   job_extra_men: Array<{ employee_id: string | null; name: string | null; rate_per_hour: number | null; start_time: string | null; finish_time: string | null; cof_share: boolean; client_charge_amount: number; minimum_hours: number | null; hours_override: number | null }>
@@ -370,7 +370,7 @@ function InvoicesPageContent() {
         customer:customers(id, name, billing_type, billing_config),
         contract:contracts(id, name, billing_type, billing_config),
         contract_client:contract_clients(name),
-        job_crew(employee_id, hours, cof_share, cof_hours, start_time, end_time, hours_override),
+        job_crew(employee_id, hours, cof_share, cof_hours, heavy_item, start_time, end_time, hours_override),
         job_casual_crew(casual_worker_id, name, rate_per_hour, hours, cof_share, heavy_item, start_time, finish_time, hours_override),
         job_commissions(employee_id, casual_worker_id, rate_per_hour, hours, commission_type:commission_types(name)),
         job_materials(quantity, cost_price, sale_price),
@@ -559,7 +559,11 @@ function InvoicesPageContent() {
           const isOverride = (rowOverride != null && rowOverride > 0) || manualHours !== null
           const cofHours = isOverride ? 0 : (row.cof_share ? (row.cof_hours > 0 ? row.cof_hours : Number(job.cof_final ?? job.cof ?? 0)) : 0)
           const reviewBonus = (job.google_review && job.google_review_employee_ids?.includes(emp.id)) ? 0.5 : 0
-          const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus
+          // Heavy Item bonus — same +0.5h paid to staff crew as casuals already
+          // got (job_casual_crew below). The job_crew query didn't select this
+          // column at all, so it was silently dropped for staff employees here.
+          const heavyItemBonus = row.heavy_item ? HEAVY_ITEM_BONUS : 0
+          const paidHours = Math.max(workedHours, MIN_CALL) + cofHours + reviewBonus + heavyItemBonus
           entries.push({ job, workedHours, cofHours, paidHours, pay: paidHours * emp.hourly_rate, googleReviewBonus: reviewBonus > 0 })
         }
         // Extra Men who resolve to this staff employee — same hours/COF/review
