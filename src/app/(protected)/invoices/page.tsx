@@ -635,7 +635,6 @@ function InvoicesPageContent() {
   // Casual crew / packers — grouped by name (trimmed, case-insensitive), since
   // ad-hoc casuals may not have a persistent casual_workers record.
   const casualData = useMemo(() => {
-    const reviewSet = new Set<string>()
     const byKey = new Map<string, {
       name: string
       entries: Array<{
@@ -651,8 +650,6 @@ function InvoicesPageContent() {
     }>()
 
     for (const job of filtered) {
-      if (job.google_review) for (const id of job.google_review_employee_ids ?? []) reviewSet.add(id)
-
       const roundToBlock = jobRoundUp(job)
       const manualHours = jobManualHours(job)
       const jobLevelHours = (() => {
@@ -684,7 +681,13 @@ function InvoicesPageContent() {
         // Call Out Fee stacks on top of it.
         const isCcOverride = (rowOverride != null && rowOverride > 0) || manualHours !== null
         const cofHours = isCcOverride ? 0 : (row.cof_share ? cofFinalHrs : 0)
-        const hasReviewBonus = row.casual_worker_id ? reviewSet.has(row.casual_worker_id) : false
+        // Must be scoped to THIS job — job.google_review_employee_ids only
+        // ever means anything when job.google_review is true for THIS job.
+        // (Previously checked against a Set built across every job in the
+        // date range, which credited someone's Google Review bonus from one
+        // job onto every other job they worked in the same period — even
+        // jobs with no review at all.)
+        const hasReviewBonus = row.casual_worker_id ? !!(job.google_review && job.google_review_employee_ids?.includes(row.casual_worker_id)) : false
         const paidHours = workedHours + cofHours + (row.heavy_item ? HEAVY_ITEM_BONUS : 0) + (hasReviewBonus ? REVIEW_BONUS : 0)
         if (paidHours <= 0) continue
         const key = name.toLowerCase()
@@ -750,7 +753,8 @@ function InvoicesPageContent() {
         // Call Out Fee stacks on top of it.
         const emIsOverride = (emOverride != null && emOverride > 0) || manualHours !== null
         const cofHours = emIsOverride ? 0 : (em.cof_share ? cofFinalHrs : 0)
-        const hasReviewBonus = cw ? reviewSet.has(cw.id) : false
+        // Scoped to THIS job — see note above in the job_casual_crew loop.
+        const hasReviewBonus = cw ? !!(job.google_review && job.google_review_employee_ids?.includes(cw.id)) : false
         const paidHours = workedHours + cofHours + (hasReviewBonus ? REVIEW_BONUS : 0)
         if (paidHours <= 0) continue
         const key = name.toLowerCase()
