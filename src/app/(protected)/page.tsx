@@ -892,7 +892,7 @@ function MonthView({
                   // Pending Approval overrides status color here too — purely
                   // visual, `status` itself is untouched.
                   const s = job.hours_pending_approval
-                    ? { bg: 'bg-purple-500/15', text: 'text-purple-200' }
+                    ? { bg: 'bg-rose-950/70', text: 'text-rose-300' }
                     : STATUS_CARD[job.status]
                   const ec = getEntityColor(job, privateColor)
                   return (
@@ -945,8 +945,13 @@ function JobCard({
   // Pending Approval (migration_v57) overrides the status-driven card color —
   // purely visual, signals the owner needs to review/approve this job's
   // hours. `status` itself is never touched by this flag.
+  // Deliberately not purple — that's already "invoiced" in STATUS_CARD, and
+  // the old bg-purple-500/15 (15% opacity) was almost transparent, so light
+  // text on a light page background was nearly unreadable (looked like a
+  // rendering glitch). Rose at the same opacity level as the other statuses
+  // (…950/70) keeps it legible and visually distinct from every other card.
   const s = job.hours_pending_approval
-    ? { bg: 'bg-purple-500/15', text: 'text-purple-200', dot: 'bg-purple-400' }
+    ? { bg: 'bg-rose-950/70 border-rose-800/40', text: 'text-rose-300', dot: 'bg-rose-400' }
     : STATUS_CARD[job.status]
   const revenue = calcJobRevenue(job)
   const entityColor = getEntityColor(job, privateColor)
@@ -1044,7 +1049,7 @@ function JobCard({
           title="Toggle Pending Approval — doesn't change job status"
           className={`w-full text-center text-[10px] font-semibold py-0.5 rounded ${
             job.hours_pending_approval
-              ? 'bg-purple-500/25 hover:bg-purple-500/35 text-purple-200'
+              ? 'bg-rose-500/30 hover:bg-rose-500/40 text-rose-100'
               : 'bg-transparent hover:bg-white/5 opacity-60 hover:opacity-100'
           }`}
         >
@@ -1108,7 +1113,7 @@ function DayView({
         )
 
         return (
-          <div key={job.id} className={`flex items-stretch gap-0 ${job.hours_pending_approval ? 'bg-purple-500/10' : ''}`}>
+          <div key={job.id} className={`flex items-stretch gap-0 ${job.hours_pending_approval ? 'bg-rose-950/40' : ''}`}>
             {ec && <div className="w-1 shrink-0 rounded-l-xl" style={{ backgroundColor: ec }} />}
             <div className="flex-1 p-4">
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -1121,7 +1126,7 @@ function DayView({
                       {job.status.replace('_', ' ')}
                     </span>
                     {job.hours_pending_approval && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-500/20 text-purple-300">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-rose-950/70 text-rose-300">
                         ⏳ Pending approval
                       </span>
                     )}
@@ -1172,7 +1177,7 @@ function DayView({
                       title="Toggle Pending Approval — doesn't change job status"
                       className={`px-3 py-1 text-xs font-semibold rounded-lg border transition-colors ${
                         job.hours_pending_approval
-                          ? 'bg-purple-500/20 border-purple-400/40 text-purple-300 hover:bg-purple-500/30'
+                          ? 'bg-rose-950/70 border-rose-800/40 text-rose-300 hover:bg-rose-900/70'
                           : 'border-wire text-warm hover:bg-panel hover:text-parchment'
                       }`}
                     >
