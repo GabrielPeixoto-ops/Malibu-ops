@@ -178,8 +178,19 @@ export default function EmployeesPage() {
   useEffect(() => { loadStaff() }, [])
 
   // ── Load casual workers (lazy — on tab switch) ───────────────────────────────
-  async function loadCasual() {
-    if (casualLoaded) return
+  // fetchCasualData always hits the DB — no "already loaded" guard. loadCasual
+  // (below) is the guarded version used for the lazy on-tab-switch load; the
+  // save handler calls fetchCasualData directly.
+  //
+  // Why the split: handleSaveCasual used to do `setCasualLoaded(false)` then
+  // immediately call a guarded loadCasual() in the same tick. React batches
+  // state updates, so the guard's `if (casualLoaded) return` was still
+  // reading the OLD (true) value and bailed out without refetching — the
+  // save had actually gone through, but the list kept showing stale rate/role
+  // until the next unrelated re-render. That's exactly the "doesn't save,
+  // but works the second try" symptom: the 2nd edit re-opened the modal with
+  // the still-stale cached data, and by then the list had finally refreshed.
+  async function fetchCasualData() {
     setCasualLoading(true)
     const [cwRes, statsRes] = await Promise.all([
       supabase.from('casual_workers')
@@ -203,6 +214,10 @@ export default function EmployeesPage() {
     setCasualStats(statsMap)
     setCasualLoaded(true)
     setCasualLoading(false)
+  }
+  async function loadCasual() {
+    if (casualLoaded) return
+    await fetchCasualData()
   }
 
   useEffect(() => {
@@ -335,8 +350,7 @@ export default function EmployeesPage() {
     }
     setSavingCasual(false)
     setCasualModalOpen(false)
-    setCasualLoaded(false)
-    loadCasual()
+    await fetchCasualData()
   }
 
   async function handleDeleteCasual(cw: CasualWorker) {
