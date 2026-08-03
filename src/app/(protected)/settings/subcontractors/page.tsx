@@ -261,7 +261,15 @@ export default function SubcontractorsPage() {
 
   async function handleDelete(sub: Subcontractor) {
     if (!confirm(`Delete ${sub.name}?`)) return
-    await supabase.from('subcontractors').delete().eq('id', sub.id)
+    const { error } = await supabase.from('subcontractors').delete().eq('id', sub.id)
+    if (error) {
+      alert(
+        error.code === '23503'
+          ? `Can't delete ${sub.name} — it's linked to existing jobs.`
+          : `Failed to delete ${sub.name}: ${error.message}`
+      )
+      return
+    }
     fetchSubs()
   }
 
