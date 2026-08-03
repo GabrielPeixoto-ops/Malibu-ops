@@ -89,6 +89,7 @@ interface CalendarJob {
   extra_men_hours: number
   break_minutes: number
   manual_hours_override: number | null
+  manual_hours_client_billed: boolean
   hours_pending_approval: boolean
   discount: number
   heavy_item_charge: number | null
@@ -480,7 +481,7 @@ export default function DashboardPage() {
         .from('jobs')
         .select(`
           id, job_number, date, status, source, notes, cof, cof_final, additional_hours,
-          additional_rate, rate_card_key, formula_vars, extra_men_hours, break_minutes, manual_hours_override, hours_pending_approval, discount, heavy_item_charge, client_cof_manual_charge,
+          additional_rate, rate_card_key, formula_vars, extra_men_hours, break_minutes, manual_hours_override, manual_hours_client_billed, hours_pending_approval, discount, heavy_item_charge, client_cof_manual_charge,
           actual_start_time, actual_finish_time, scheduled_time, override_revenue, malibu_revenue, client_billing_config,
           subcontractor_rate_id, contract_rate_id, google_review, google_review_employee_ids,
           subcontractor:subcontractors(*),
