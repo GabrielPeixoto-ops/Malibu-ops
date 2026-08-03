@@ -2454,7 +2454,15 @@ const filteredCustomers = useMemo(
     if (!jobId) return
     if (!confirm('Delete this job permanently? This cannot be undone.')) return
     setDeleting(true)
-    await supabase.from('jobs').delete().eq('id', jobId)
+    const { error } = await supabase.from('jobs').delete().eq('id', jobId)
+    if (error) {
+      // Previously this navigated to '/' unconditionally even when the
+      // delete failed — the job would reappear on the dashboard with no
+      // explanation of what happened. Now we surface the error and stay put.
+      setDeleting(false)
+      alert(`Failed to delete job: ${error.message}`)
+      return
+    }
     router.push('/')
   }
 
