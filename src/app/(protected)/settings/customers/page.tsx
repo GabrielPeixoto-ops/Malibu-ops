@@ -153,19 +153,26 @@ export default function CustomersPage() {
       billing_config: buildBillingConfig(billing),
       google_review_bonus: form.google_review_bonus,
     }
-    if (editing) {
-      await supabase.from('customers').update(payload).eq('id', editing.id)
-    } else {
-      await supabase.from('customers').insert(payload)
-    }
+    const { error } = editing
+      ? await supabase.from('customers').update(payload).eq('id', editing.id)
+      : await supabase.from('customers').insert(payload)
     setSaving(false)
+    if (error) { setError(error.message); return }
     setModalOpen(false)
     fetchCustomers()
   }
 
   async function handleDelete(c: Customer) {
     if (!confirm(`Delete ${c.name}?`)) return
-    await supabase.from('customers').delete().eq('id', c.id)
+    const { error } = await supabase.from('customers').delete().eq('id', c.id)
+    if (error) {
+      alert(
+        error.code === '23503'
+          ? `Can't delete ${c.name} — they're linked to existing jobs.`
+          : `Failed to delete ${c.name}: ${error.message}`
+      )
+      return
+    }
     setCustomers((prev) => prev.filter((x) => x.id !== c.id))
   }
 
