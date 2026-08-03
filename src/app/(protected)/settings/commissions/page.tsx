@@ -54,25 +54,39 @@ export default function CommissionsSettingsPage() {
     const d = drafts[idx]
     if (!d.name.trim() || !d.rate_per_hour) return
     setDrafts((arr) => arr.map((row, i) => i === idx ? { ...row, saving: true } : row))
-    await supabase.from('commission_types').insert({
+    const { error } = await supabase.from('commission_types').insert({
       name: d.name.trim(),
       rate_per_hour: parseFloat(d.rate_per_hour),
       is_active: d.is_active,
       sort_order: d.sort_order,
     })
+    if (error) {
+      alert(`Failed to save commission type: ${error.message}`)
+      setDrafts((arr) => arr.map((row, i) => i === idx ? { ...row, saving: false } : row))
+      return
+    }
     setDrafts((arr) => arr.filter((_, i) => i !== idx))
     load()
   }
 
   async function updateType(type: CommissionType, changes: Partial<CommissionType>) {
-    await supabase.from('commission_types').update(changes).eq('id', type.id)
+    const { error } = await supabase.from('commission_types').update(changes).eq('id', type.id)
+    if (error) { alert(`Failed to update "${type.name}": ${error.message}`); return }
     setTypes((arr) => arr.map((t) => t.id === type.id ? { ...t, ...changes } : t))
   }
 
   async function deleteType(id: string) {
     setDeleteId(id)
-    await supabase.from('commission_types').delete().eq('id', id)
+    const { error } = await supabase.from('commission_types').delete().eq('id', id)
     setDeleteId(null)
+    if (error) {
+      alert(
+        error.code === '23503'
+          ? `Can't delete this commission type — it's linked to existing jobs.`
+          : `Failed to delete: ${error.message}`
+      )
+      return
+    }
     load()
   }
 
