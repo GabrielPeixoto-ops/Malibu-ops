@@ -59,6 +59,7 @@ interface InvoiceJob {
   extra_man_employee_id: string | null
   break_minutes: number
   manual_hours_override: number | null
+  manual_hours_client_billed: boolean
   discount: number
   heavy_item_charge: number
   client_cof_manual_charge: number | null
@@ -374,7 +375,7 @@ function InvoicesPageContent() {
       .select(`
         id, job_number, date, status, source,
         cof, cof_final, additional_hours, additional_rate, rate_card_key, formula_vars,
-        extra_men_hours, extra_man_employee_id, break_minutes, manual_hours_override, discount, heavy_item_charge, client_cof_manual_charge, override_revenue, malibu_revenue, client_billing_config,
+        extra_men_hours, extra_man_employee_id, break_minutes, manual_hours_override, manual_hours_client_billed, discount, heavy_item_charge, client_cof_manual_charge, override_revenue, malibu_revenue, client_billing_config,
         google_review, google_review_employee_ids, actual_start_time, actual_finish_time,
         subcontractor_rate_id, contract_rate_id,
         subcontractor:subcontractors(*),
@@ -1308,6 +1309,14 @@ function InvoicesPageContent() {
                               )}
                               {heavyItem && <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-300 font-medium">Heavy item +0.5h</span>}
                               {googleReviewBonus && <span className="text-xs px-1.5 py-0.5 rounded-full bg-gold/15 text-gold font-medium">★ +0.5h</span>}
+                              {job.manual_hours_override != null && !job.manual_hours_client_billed && (
+                                <span
+                                  className="text-xs px-1.5 py-0.5 rounded-full bg-amber-950/70 text-amber-300 font-medium"
+                                  title="Manual hours override paid to crew but not charged to the subcontractor/client — absorbed cost."
+                                >
+                                  Absorbed cost
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="px-4 py-2 text-dim text-xs hidden sm:table-cell">{entityLabel(job)}</td>
@@ -1390,6 +1399,14 @@ function InvoicesPageContent() {
                               )}
                               {heavyItem && <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-300 font-medium">Heavy item +0.5h</span>}
                               {googleReviewBonus && <span className="text-xs px-1.5 py-0.5 rounded-full bg-gold/15 text-gold font-medium">★ +0.5h</span>}
+                              {job.manual_hours_override != null && !job.manual_hours_client_billed && (
+                                <span
+                                  className="text-xs px-1.5 py-0.5 rounded-full bg-amber-950/70 text-amber-300 font-medium"
+                                  title="Manual hours override paid to crew but not charged to the subcontractor/client — absorbed cost."
+                                >
+                                  Absorbed cost
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="px-4 py-2 text-dim text-xs hidden sm:table-cell">{entityLabel(job)}</td>
@@ -1597,6 +1614,14 @@ function InvoicesPageContent() {
                                 TT
                               </span>
                             )}
+                            {job.manual_hours_override != null && !job.manual_hours_client_billed && (
+                              <span
+                                className="ml-2 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-950/70 text-amber-300 align-middle"
+                                title="Manual hours override paid to crew but not charged to this subcontractor — absorbed cost."
+                              >
+                                Absorbed cost
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-2">
                             <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[job.status] ?? 'bg-wire/50 text-warm'}`}>
@@ -1656,7 +1681,17 @@ function InvoicesPageContent() {
                       {cj.map(({ job, revenue }) => (
                         <tr key={job.id} className="hover:bg-panel transition-colors cursor-pointer" onClick={() => router.push(`/jobs/${job.id}/edit`)}>
                           <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
-                          <td className="px-4 py-2 font-mono text-parchment">#{job.job_number}</td>
+                          <td className="px-4 py-2 font-mono text-parchment">
+                            #{job.job_number}
+                            {job.manual_hours_override != null && !job.manual_hours_client_billed && (
+                              <span
+                                className="ml-2 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-950/70 text-amber-300 align-middle"
+                                title="Manual hours override paid to crew but not charged to this client — absorbed cost."
+                              >
+                                Absorbed cost
+                              </span>
+                            )}
+                          </td>
                           <td className="px-4 py-2 text-dim text-xs hidden sm:table-cell">{job.contract_client?.name ?? '—'}</td>
                           <td className="px-4 py-2">
                             <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[job.status] ?? 'bg-wire/50 text-warm'}`}>
