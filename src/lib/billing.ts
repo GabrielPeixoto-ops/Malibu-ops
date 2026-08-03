@@ -65,13 +65,24 @@ function applyBillingConfig(
   return 0
 }
 
-function jobVars(job: Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'additional_rate' | 'rate_card_key' | 'formula_vars' | 'extra_men_hours' | 'break_minutes'>) {
+function jobVars(job: Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'additional_rate' | 'rate_card_key' | 'formula_vars' | 'extra_men_hours' | 'break_minutes'> & { manual_hours_override?: number | null; manual_hours_client_billed?: boolean }) {
+  const breakHrs = Number(job.break_minutes) / 60
+  // A Manual Hours Override marked as billed to the subcontractor/client
+  // (migration_v58; undefined/missing treated as billed, matching the DB
+  // default) takes priority over the separately-typed "Call Out Fee — Crew
+  // (hrs)" field as the base billable hours — keeps revenue in sync with
+  // what the crew is actually being paid for, instead of requiring the
+  // office to duplicate the number into two places. Break is already net
+  // of the override (same rule as payroll), so it's not subtracted again.
+  const overrideBillable = (job.manual_hours_override != null && job.manual_hours_override > 0 && job.manual_hours_client_billed !== false)
+    ? Math.max(0, job.manual_hours_override - breakHrs)
+    : null
   return {
-    cofHours: Number(job.cof_final ?? job.cof) || 0,
+    cofHours: overrideBillable ?? (Number(job.cof_final ?? job.cof) || 0),
     additionalHours: Number(job.additional_hours) || 0,
     additionalRate: Number(job.additional_rate) || 0,
     extraMenHours: Number(job.extra_men_hours) || 0,
-    breakHours: Number(job.break_minutes) / 60,
+    breakHours: overrideBillable != null ? 0 : breakHrs,
   }
 }
 
@@ -79,7 +90,7 @@ function jobVars(job: Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'addi
 
 /** Revenue Malibu receives FROM a subcontractor (source = 'subcontract') */
 export function calculateJobRevenue(
-  job: Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'additional_rate' | 'rate_card_key' | 'formula_vars' | 'extra_men_hours' | 'break_minutes' | 'override_revenue'>,
+  job: Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'additional_rate' | 'rate_card_key' | 'formula_vars' | 'extra_men_hours' | 'break_minutes' | 'override_revenue'> & { manual_hours_override?: number | null; manual_hours_client_billed?: boolean },
   sub: Subcontractor,
   ratePerHour?: number | null
 ): number {
@@ -93,7 +104,7 @@ export function calculateJobRevenue(
 
 /** Revenue Malibu charges TO a client (source = 'private' or 'contract') */
 export function calculateClientRevenue(
-  job: Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'additional_rate' | 'rate_card_key' | 'formula_vars' | 'extra_men_hours' | 'break_minutes' | 'override_revenue'> & { client_billing_config?: SubcontractorConfig | null },
+  job: Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'additional_rate' | 'rate_card_key' | 'formula_vars' | 'extra_men_hours' | 'break_minutes' | 'override_revenue'> & { client_billing_config?: SubcontractorConfig | null; manual_hours_override?: number | null; manual_hours_client_billed?: boolean },
   entityBillingType: string,
   entityBillingConfig: SubcontractorConfig,
   ratePerHour?: number | null
@@ -286,6 +297,8 @@ export interface JobSummary {
 }
 
 type JobSummaryInput = Pick<Job, 'cof' | 'cof_final' | 'additional_hours' | 'additional_rate' | 'rate_card_key' | 'formula_vars' | 'discount' | 'deposit' | 'heavy_item_charge' | 'client_cof_manual_charge' | 'extra_men_hours' | 'break_minutes' | 'override_revenue'> & {
+  manual_hours_override?: number | null
+  manual_hours_client_billed?: boolean
   source?: JobSource
   client_billing_config?: SubcontractorConfig | null
   google_review?: boolean
