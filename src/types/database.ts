@@ -222,6 +222,16 @@ export interface Job {
   // finish times (see migration_v50). NULL means no override — hours are
   // computed live from times as usual.
   manual_hours_override: number | null
+  // Whether the Manual Hours Override hours are ALSO charged to the
+  // subcontractor/client (true, default — preserves prior behavior for every
+  // historical job), or a payroll-only cost absorbed by Malibu and never
+  // passed on (false) — e.g. a 4h minimum call guaranteed to casual crew
+  // that the subcontractor only agreed to pay for the actual hours worked.
+  // Lets the office tell "this job is a loss because we chose to eat a
+  // minimum-call cost" apart from "this job is a loss due to a pricing
+  // mistake" (migration_v58). Only meaningful when manual_hours_override
+  // is set.
+  manual_hours_client_billed: boolean
   discount: number
   notes: string | null
   completion_notes: string | null
