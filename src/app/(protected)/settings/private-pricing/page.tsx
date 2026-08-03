@@ -83,19 +83,26 @@ export default function PrivatePricingPage() {
       is_active: form.is_active,
       sort_order: parseInt(form.sort_order) || 0,
     }
-    if (editing) {
-      await supabase.from('private_rates').update(payload).eq('id', editing.id)
-    } else {
-      await supabase.from('private_rates').insert(payload)
-    }
+    const { error } = editing
+      ? await supabase.from('private_rates').update(payload).eq('id', editing.id)
+      : await supabase.from('private_rates').insert(payload)
     setSaving(false)
+    if (error) { setError(error.message); return }
     setModalOpen(false)
     load()
   }
 
   async function handleDelete(r: PrivateRate) {
     if (!confirm(`Delete "${r.name}"?`)) return
-    await supabase.from('private_rates').delete().eq('id', r.id)
+    const { error } = await supabase.from('private_rates').delete().eq('id', r.id)
+    if (error) {
+      alert(
+        error.code === '23503'
+          ? `Can't delete "${r.name}" — it's linked to existing jobs.`
+          : `Failed to delete "${r.name}": ${error.message}`
+      )
+      return
+    }
     load()
   }
 
