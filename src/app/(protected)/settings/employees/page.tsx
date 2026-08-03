@@ -270,19 +270,32 @@ export default function EmployeesPage() {
       emergency_contact_phone: empForm.emergency_contact_phone.trim() || null,
       emergency_contact_relation: empForm.emergency_contact_relation.trim() || null,
     }
-    if (editing) {
-      await supabase.from('employees').update(payload).eq('id', editing.id)
-    } else {
-      await supabase.from('employees').insert(payload)
-    }
+    const { error } = editing
+      ? await supabase.from('employees').update(payload).eq('id', editing.id)
+      : await supabase.from('employees').insert(payload)
     setSaving(false)
+    if (error) { setEmpError(error.message); return }
     setModalOpen(false)
     loadStaff()
   }
 
   async function handleDeleteEmp(emp: Employee) {
     if (!confirm(`Delete ${emp.name}?`)) return
-    await supabase.from('employees').delete().eq('id', emp.id)
+    // Previously the error from this delete was silently swallowed — if the
+    // employee has any linked records (job_crew, job_extra_men, commissions,
+    // reimbursements, etc.), Postgres rejects the delete with a foreign-key
+    // violation, but the code updated local state anyway. That made the row
+    // vanish from the screen for this session, then reappear on next load —
+    // "doesn't persist". Now we check the error and tell the user why.
+    const { error } = await supabase.from('employees').delete().eq('id', emp.id)
+    if (error) {
+      alert(
+        error.code === '23503'
+          ? `Can't delete ${emp.name} — they're linked to existing jobs/payroll records (e.g. past crew hours). Set them to Inactive instead of deleting.`
+          : `Failed to delete ${emp.name}: ${error.message}`
+      )
+      return
+    }
     setEmployees((prev) => prev.filter((e) => e.id !== emp.id))
   }
 
@@ -343,19 +356,26 @@ export default function EmployeesPage() {
       referrer_commission_per_hour: parseFloat(casualForm.referrer_commission_per_hour) || 0,
       role: casualForm.role || null,
     }
-    if (editingCasual) {
-      await supabase.from('casual_workers').update(payload).eq('id', editingCasual.id)
-    } else {
-      await supabase.from('casual_workers').insert(payload)
-    }
+    const { error } = editingCasual
+      ? await supabase.from('casual_workers').update(payload).eq('id', editingCasual.id)
+      : await supabase.from('casual_workers').insert(payload)
     setSavingCasual(false)
+    if (error) { setCasualError(error.message); return }
     setCasualModalOpen(false)
     await fetchCasualData()
   }
 
   async function handleDeleteCasual(cw: CasualWorker) {
     if (!confirm(`Delete ${cw.name}?`)) return
-    await supabase.from('casual_workers').delete().eq('id', cw.id)
+    const { error } = await supabase.from('casual_workers').delete().eq('id', cw.id)
+    if (error) {
+      alert(
+        error.code === '23503'
+          ? `Can't delete ${cw.name} — they're linked to existing jobs/payroll records. There's no "Inactive" flag for casuals yet, so for now just leave them in the list (or ask to add one).`
+          : `Failed to delete ${cw.name}: ${error.message}`
+      )
+      return
+    }
     setCasualWorkers((prev) => prev.filter((w) => w.id !== cw.id))
   }
 
