@@ -1130,7 +1130,13 @@ const filteredCustomers = useMemo(
   const selectedPrivateRateInput = useMemo<PrivateRateInput | null>(() => {
     if (form.source !== 'private') return null
     // Net worked hours from actual times (15-min rounding, same as _billingWorkedHrs)
+    // — UNLESS a Manual Hours Override is set and marked as billed to the
+    // client (migration_v58): the crew is being paid that many hours, and
+    // since it's also being charged to the client, revenue must reflect it
+    // too instead of silently staying pinned to the raw actual-time
+    // calculation. Mirrors the same rule save-time uses (workedHrsForSave).
     const workedHrs = (() => {
+      if (manualOverrideHours !== null && form.manual_hours_client_billed) return manualOverrideHours
       if (!form.actual_start_time || !form.actual_finish_time) return null
       const [sh, sm] = form.actual_start_time.split(':').map(Number)
       const [eh, em] = form.actual_finish_time.split(':').map(Number)
@@ -1173,7 +1179,7 @@ const filteredCustomers = useMemo(
     const rate = privateRates.find((r) => r.id === form.private_rate_id)
     if (!rate) return null
     return { rate_per_hour: rate.rate_per_hour, cofHours }
-  }, [form.source, form.private_rate_custom, form.private_rate_custom_price, form.private_rate_custom_gst_exclusive, form.private_rate_fixed, form.private_rate_fixed_price, form.private_rate_fixed_gst_exclusive, form.private_rate_id, form.cof_final, form.cof, form.client_cof_override, form.client_cof_hours, form.client_cof_manual_charge, form.actual_start_time, form.actual_finish_time, form.break_minutes, privateRates])
+  }, [form.source, form.private_rate_custom, form.private_rate_custom_price, form.private_rate_custom_gst_exclusive, form.private_rate_fixed, form.private_rate_fixed_price, form.private_rate_fixed_gst_exclusive, form.private_rate_id, form.cof_final, form.cof, form.client_cof_override, form.client_cof_hours, form.client_cof_manual_charge, form.actual_start_time, form.actual_finish_time, form.break_minutes, form.manual_hours_override, form.manual_hours_client_billed, manualOverrideHours, privateRates])
 
   const summary = useMemo<JobSummary | null>(() => {
     if (form.source === 'subcontract' && !selectedSub) return null
@@ -1213,7 +1219,12 @@ const filteredCustomers = useMemo(
       .filter((r) => r.hours > 0)
     const extraMenTotalHours = extraMenForBilling.reduce((s, r) => s + r.hours, 0)
 
+    // Same billed-override rule as selectedPrivateRateInput above — a Manual
+    // Hours Override marked as charged to the subcontractor/client (migration_v58)
+    // must also drive the ratecard-sub / contract-rate revenue basis below,
+    // not just crew payroll.
     const _billingWorkedHrs = (() => {
+      if (manualOverrideHours !== null && form.manual_hours_client_billed) return manualOverrideHours
       if (!form.actual_start_time || !form.actual_finish_time) return null
       const [sh, sm] = form.actual_start_time.split(':').map(Number)
       const [eh, em] = form.actual_finish_time.split(':').map(Number)
@@ -1821,6 +1832,24 @@ const filteredCustomers = useMemo(
       return Math.ceil(rawMins / 15) * 15 / 60
     })()
 
+    // Hours basis specifically for REVENUE (as opposed to workedHrsForSave,
+    // used for crew payroll below, which must always reflect the override
+    // since the crew gets paid it regardless). When the override is marked
+    // as an absorbed cost (manual_hours_client_billed = false, migration_v58),
+    // revenue falls back to the actual computed hours instead — the extra
+    // minimum-call hours are paid to the crew but never billed onward.
+    const revenueHrsForSave = (manualOverrideHours !== null && !form.manual_hours_client_billed)
+      ? (() => {
+          if (!form.actual_start_time || !form.actual_finish_time) return null
+          const [sh, sm] = form.actual_start_time.split(':').map(Number)
+          const [eh, em] = form.actual_finish_time.split(':').map(Number)
+          const rawMins = (eh * 60 + em) - (sh * 60 + sm) - (parseFloat(form.break_minutes) || 0)
+          if (rawMins <= 0) return null
+          if (!subRoundUp) return Math.round((rawMins / 60) * 100) / 100
+          return Math.ceil(rawMins / 15) * 15 / 60
+        })()
+      : workedHrsForSave
+
     const isPercentSub = form.source === 'subcontract' && selectedSub?.billing_type === 'percent'
     const isRatecardSub = form.source === 'subcontract' && selectedSub?.billing_type === 'ratecard'
     const computedMalibuRevenue = isPercentSub && form.gross_job_value
@@ -1849,8 +1878,8 @@ const filteredCustomers = useMemo(
         ? parseFloat(form.private_rate_custom_price) * (form.private_rate_custom_gst_exclusive ? 1.1 : 1)
         : (privateRates.find((r) => r.id === form.private_rate_id)?.rate_per_hour ?? null)
       if (!ratePerHour) return null
-      const totalHours = workedHrsForSave !== null
-        ? Math.max(2, workedHrsForSave) + saveEffectiveClientCof
+      const totalHours = revenueHrsForSave !== null
+        ? Math.max(2, revenueHrsForSave) + saveEffectiveClientCof
         : saveEffectiveClientCof
       if (!totalHours) return null
       return ratePerHour * totalHours
@@ -1860,26 +1889,26 @@ const filteredCustomers = useMemo(
     // Flat-rate jobs (rates[key]) are correctly calculated on-the-fly by the dashboard
     // via applyBillingConfig, so only rateList jobs need to be persisted here.
     const computedRatecardRevenue = (() => {
-      if (!isRatecardSub || !selectedSub || workedHrsForSave === null) return null
+      if (!isRatecardSub || !selectedSub || revenueHrsForSave === null) return null
       const ratePerHour = (selectedSub.config as RateCardConfig).rateList?.find(
         (r) => r.id === form.subcontractor_rate_id
       )?.rate_per_hour ?? null
       if (!ratePerHour) return null
       const additionalHrs = parseFloat(form.additional_hours) || 0
       const extraMenRevenue = computedExtraMenHours * (parseFloat(form.additional_rate) || 0)
-      return ratePerHour * (Math.max(2, workedHrsForSave) + saveEffectiveClientCof + additionalHrs) + extraMenRevenue
+      return ratePerHour * (Math.max(2, revenueHrsForSave) + saveEffectiveClientCof + additionalHrs) + extraMenRevenue
     })()
 
     // Revenue for contract jobs with a rate selected: rate_per_hour × (max(2, workedHrs) + clientCof)
     const computedContractRevenue = (() => {
-      if (form.source !== 'contract' || workedHrsForSave === null) return null
+      if (form.source !== 'contract' || revenueHrsForSave === null) return null
       const ratePerHour = form.contract_rate_custom && parseFloat(form.contract_rate_custom_price) > 0
         ? parseFloat(form.contract_rate_custom_price) * (form.contract_rate_custom_gst_exclusive ? 1.1 : 1)
         : (contractRates.find((r) => r.id === form.contract_rate_id)?.rate_per_hour ?? null)
       if (!ratePerHour) return null
       const additionalHrs = parseFloat(form.additional_hours) || 0
       const extraMenRevenue = computedExtraMenHours * (parseFloat(form.additional_rate) || 0)
-      return ratePerHour * (Math.max(2, workedHrsForSave) + saveEffectiveClientCof + additionalHrs) + extraMenRevenue
+      return ratePerHour * (Math.max(2, revenueHrsForSave) + saveEffectiveClientCof + additionalHrs) + extraMenRevenue
     })()
 
     // Rate Changes — when the crew/truck size changed mid-day, the job was
