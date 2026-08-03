@@ -126,10 +126,12 @@ export default function ResourcesPage() {
         file_name,
       }
       if (editing) {
-        await supabase.from('resources').update(payload).eq('id', editing.id)
+        const { error } = await supabase.from('resources').update(payload).eq('id', editing.id)
+        if (error) throw error
       } else {
         const sort_order = resources.filter((r) => r.category === activeCategory).length
-        await supabase.from('resources').insert({ ...payload, sort_order })
+        const { error } = await supabase.from('resources').insert({ ...payload, sort_order })
+        if (error) throw error
       }
       setModalOpen(false)
       load()
@@ -142,7 +144,8 @@ export default function ResourcesPage() {
 
   async function handleDelete(r: Resource) {
     if (!confirm(`Delete "${r.title}"?`)) return
-    await supabase.from('resources').delete().eq('id', r.id)
+    const { error } = await supabase.from('resources').delete().eq('id', r.id)
+    if (error) { alert(`Failed to delete "${r.title}": ${error.message}`); return }
     load()
   }
 
