@@ -155,6 +155,17 @@ function calcRevenue(job: InvoiceJob): number | null {
   return total > 0 ? total : null
 }
 
+// TMAAT and TMAAT TT are the same company billed as a single invoice — only
+// their JobForm service modality (and %) differs. Group them together here
+// so the office sends one invoice to TMAAT, with each job tagged TT/non-TT.
+function isTmaatFamily(name: string): boolean {
+  const n = name.trim().toUpperCase()
+  return n === 'TMAAT' || n === 'TMAAT TT'
+}
+function isTmaatTT(name: string): boolean {
+  return name.trim().toUpperCase() === 'TMAAT TT'
+}
+
 function entityLabel(job: InvoiceJob): string {
   if (job.source === 'private') return job.customer?.name ?? '—'
   if (job.source === 'contract') {
@@ -836,11 +847,15 @@ function InvoicesPageContent() {
 
   const subcontractorData = useMemo(() => {
     const subJobs = filtered.filter((j) => j.source === 'subcontract' && j.subcontractor)
-    const byId = new Map<string, { name: string; jobs: Array<{ job: InvoiceJob; revenue: number | null }> }>()
+    const byId = new Map<string, { name: string; jobs: Array<{ job: InvoiceJob; revenue: number | null; isTT: boolean }> }>()
     for (const job of subJobs) {
       const sub = job.subcontractor!
-      if (!byId.has(sub.id)) byId.set(sub.id, { name: sub.name, jobs: [] })
-      byId.get(sub.id)!.jobs.push({ job, revenue: calcRevenue(job) })
+      // TMAAT and TMAAT TT bill as one company/one invoice — merge their groups.
+      const merged = isTmaatFamily(sub.name)
+      const key = merged ? 'tmaat-combined' : sub.id
+      const name = merged ? 'TMAAT' : sub.name
+      if (!byId.has(key)) byId.set(key, { name, jobs: [] })
+      byId.get(key)!.jobs.push({ job, revenue: calcRevenue(job), isTT: isTmaatTT(sub.name) })
     }
     return [...byId.entries()]
       .map(([id, { name, jobs: sj }]) => ({ id, name, jobs: sj, totalRevenue: sj.reduce((s, { revenue }) => s + (revenue ?? 0), 0) }))
@@ -1544,10 +1559,19 @@ function InvoicesPageContent() {
               {subcontractorData.length === 0 && (
                 <div className="bg-surface rounded-xl border border-wire p-12 text-center text-dim">No subcontract jobs for this period.</div>
               )}
-              {subcontractorData.filter((s) => subFilter === 'all' || s.id === subFilter).map(({ id, name, jobs: sj, totalRevenue }) => (
+              {subcontractorData.filter((s) => subFilter === 'all' || s.id === subFilter).map(({ id, name, jobs: sj, totalRevenue }) => {
+                const ttCount = sj.filter((j) => j.isTT).length
+                return (
                 <div key={id} className="bg-surface rounded-xl border border-wire overflow-hidden">
                   <div className={groupHeader}>
-                    <span className="font-semibold text-parchment">{name}</span>
+                    <div>
+                      <span className="font-semibold text-parchment">{name}</span>
+                      {id === 'tmaat-combined' && (
+                        <span className="ml-2 text-xs text-dim">
+                          ({sj.length - ttCount} standard · {ttCount} TT)
+                        </span>
+                      )}
+                    </div>
                     <div className="text-right">
                       <div className="text-sm font-mono font-bold text-gold">{fmtAUD(totalRevenue)}</div>
                       <div className="text-xs text-dim">{sj.length} job{sj.length !== 1 ? 's' : ''}</div>
@@ -1563,10 +1587,17 @@ function InvoicesPageContent() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-wire">
-                      {sj.map(({ job, revenue }) => (
+                      {sj.map(({ job, revenue, isTT }) => (
                         <tr key={job.id} className="hover:bg-panel transition-colors cursor-pointer" onClick={() => router.push(`/jobs/${job.id}/edit`)}>
                           <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
-                          <td className="px-4 py-2 font-mono text-parchment">#{job.job_number}</td>
+                          <td className="px-4 py-2 font-mono text-parchment">
+                            #{job.job_number}
+                            {isTT && (
+                              <span className="ml-2 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-950/70 text-sky-300 align-middle">
+                                TT
+                              </span>
+                            )}
+                          </td>
                           <td className="px-4 py-2">
                             <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[job.status] ?? 'bg-wire/50 text-warm'}`}>
                               {job.status.replace('_', ' ')}
@@ -1586,7 +1617,7 @@ function InvoicesPageContent() {
                     </tfoot>
                   </table>
                 </div>
-              ))}
+              )})}
               {subcontractorData.length > 0 && (
                 <div className={totalBar}>
                   <span className="text-sm font-display font-semibold text-gold">Total revenue</span>
