@@ -248,6 +248,9 @@ interface FormState {
   extra_man_employee_id: string
   break_minutes: string
   manual_hours_override: string
+  // Whether the Manual Hours Override is also charged to the subcontractor/
+  // client, vs an absorbed payroll-only cost (migration_v58).
+  manual_hours_client_billed: boolean
   // Pending Approval flag (migration_v57) — purely visual on the Dashboard,
   // never changes `status`. See JobForm's checkbox + Dashboard's quick toggle.
   hours_pending_approval: boolean
@@ -388,6 +391,7 @@ function defaultForm(): FormState {
     extra_man_employee_id: '',
     break_minutes: '',
     manual_hours_override: '',
+    manual_hours_client_billed: true,
     hours_pending_approval: false,
     discount: '',
     notes: '',
@@ -632,6 +636,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             rate_card_key: string | null; formula_vars: Record<string, number> | null
             extra_men_hours: number; extra_man_employee_id: string | null; break_minutes: number
             manual_hours_override: number | null
+            manual_hours_client_billed: boolean | null
             hours_pending_approval: boolean | null
             discount: number; notes: string | null; completion_notes: string | null
             actual_start_time: string | null; actual_finish_time: string | null
@@ -709,6 +714,7 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             extra_man_employee_id: j.extra_man_employee_id ?? '',
             break_minutes: j.break_minutes > 0 ? j.break_minutes.toString() : '',
             manual_hours_override: j.manual_hours_override != null ? j.manual_hours_override.toString() : '',
+            manual_hours_client_billed: j.manual_hours_client_billed ?? true,
             hours_pending_approval: j.hours_pending_approval ?? false,
             discount: j.discount?.toString() ?? '',
             notes: j.notes ?? '',
@@ -1930,6 +1936,7 @@ const filteredCustomers = useMemo(
       extra_man_employee_id: form.extra_man_employee_id || null,
       break_minutes: parseFloat(form.break_minutes) || 0,
       manual_hours_override: form.manual_hours_override.trim() ? (parseFloat(form.manual_hours_override) || null) : null,
+      manual_hours_client_billed: form.manual_hours_client_billed,
       hours_pending_approval: form.hours_pending_approval,
       discount: parseFloat(form.discount) || 0,
       deposit: parseFloat(form.deposit) || null,
@@ -4182,6 +4189,29 @@ const filteredCustomers = useMemo(
                   ? `Overriding: every crew member / casual / extra man on this job shows ${(manualOverrideHours ?? 0).toFixed(2)}h worked${(parseFloat(form.break_minutes) || 0) > 0 ? ` (${(parseFloat(form.manual_hours_override) || 0).toFixed(2)}h entered minus ${form.break_minutes}min break)` : ''} instead of the computed value — including anyone with their own start/end time typed. To make one person different, use their individual "Manual hrs" field below instead of editing their start/end time.`
                   : 'Type the exact hours this job actually billed/paid for (e.g. TMAAT\'s invoice, or to compensate for expenses) if the computed hours don\'t match — the job\'s break is deducted automatically. Applies to everyone on the job; use a person\'s individual "Manual hrs" field to make just them different.'}
               </p>
+              {/* Client-billed flag (migration_v58) — only relevant once an
+                  override is actually set. Distinguishes "we pay crew a
+                  minimum/override AND also bill the subcontractor/client for
+                  it" (checked, default) from "we absorb this as a payroll-only
+                  cost" (unchecked) — e.g. guaranteeing casuals a 4h minimum
+                  call that the subcontractor didn't agree to pay for. */}
+              {form.manual_hours_override.trim() && (
+                <label className="flex items-center gap-2 cursor-pointer select-none mt-2">
+                  <input
+                    type="checkbox"
+                    checked={form.manual_hours_client_billed}
+                    disabled={isReviewed}
+                    onChange={(e) => setField('manual_hours_client_billed', e.target.checked)}
+                    className="w-4 h-4 rounded accent-gold"
+                  />
+                  <span className="text-sm text-parchment">Also charged to subcontractor/client</span>
+                </label>
+              )}
+              {form.manual_hours_override.trim() && !form.manual_hours_client_billed && (
+                <p className="text-xs text-amber-600 mt-1">
+                  Marked as an absorbed cost — the crew is paid these hours but the subcontractor/client is not billed for them. This will show as flagged on the Invoices page.
+                </p>
+              )}
             </div>
 
             {/* Pending Approval (migration_v57) — purely visual flag for the
