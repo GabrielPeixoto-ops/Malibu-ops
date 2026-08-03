@@ -446,7 +446,7 @@ function InvoicesPageContent() {
     attachment: { url: string; name: string } | null
   ) {
     if (!periodClosed) return
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('invoice_reviews')
       .upsert(
         {
@@ -461,26 +461,34 @@ function InvoicesPageContent() {
       )
       .select()
       .single()
+    // These four review-status writes used to only update local state
+    // `if (data)` — on failure they'd silently do nothing, no error shown,
+    // so clicking the button just looked like it didn't work (invisible
+    // failure, same class of bug as the other unchecked deletes/updates
+    // found in this audit).
+    if (error) { alert(`Failed to save review status for ${subjectName}: ${error.message}`); return }
     if (data) setReviews((rs) => [...rs.filter((r) => r.id !== (data as InvoiceReview).id), data as InvoiceReview])
   }
 
   async function markApproved(review: InvoiceReview) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('invoice_reviews')
       .update({ status: 'approved', approved_at: new Date().toISOString() })
       .eq('id', review.id)
       .select()
       .single()
+    if (error) { alert(`Failed to mark ${review.subject_name} as approved: ${error.message}`); return }
     if (data) setReviews((rs) => rs.map((r) => (r.id === review.id ? (data as InvoiceReview) : r)))
   }
 
   async function markPaid(review: InvoiceReview) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('invoice_reviews')
       .update({ status: 'paid', paid_at: new Date().toISOString() })
       .eq('id', review.id)
       .select()
       .single()
+    if (error) { alert(`Failed to mark ${review.subject_name} as paid: ${error.message}`); return }
     if (data) setReviews((rs) => rs.map((r) => (r.id === review.id ? (data as InvoiceReview) : r)))
   }
 
@@ -498,7 +506,8 @@ function InvoicesPageContent() {
       if (data) setReviews((rs) => rs.map((r) => (r.id === review.id ? (data as InvoiceReview) : r)))
       return
     }
-    await supabase.from('invoice_reviews').delete().eq('id', review.id)
+    const { error } = await supabase.from('invoice_reviews').delete().eq('id', review.id)
+    if (error) { alert(`Failed to undo review: ${error.message}`); return }
     setReviews((rs) => rs.filter((r) => r.id !== review.id))
   }
 
