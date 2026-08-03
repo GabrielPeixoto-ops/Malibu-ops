@@ -224,7 +224,8 @@ export default function ContractsPage() {
 
   async function handleDeleteContractRate(rateId: string) {
     if (!editing) return
-    await supabase.from('contract_rates').delete().eq('id', rateId)
+    const { error } = await supabase.from('contract_rates').delete().eq('id', rateId)
+    if (error) { alert(`Failed to delete rate: ${error.message}`); return }
     fetchContractRates(editing.id)
   }
 
@@ -257,34 +258,50 @@ export default function ContractsPage() {
       notes: form.notes.trim() || null,
       is_active: form.is_active,
     }
-    if (editing) {
-      await supabase.from('contracts').update(payload).eq('id', editing.id)
-    } else {
-      await supabase.from('contracts').insert(payload)
-    }
+    const { error } = editing
+      ? await supabase.from('contracts').update(payload).eq('id', editing.id)
+      : await supabase.from('contracts').insert(payload)
     setSaving(false)
+    if (error) { setError(error.message); return }
     setModalOpen(false)
     fetchContracts()
   }
 
   async function handleDelete(c: Contract) {
     if (!confirm(`Delete contract "${c.name}"? This will also delete all its clients.`)) return
-    await supabase.from('contracts').delete().eq('id', c.id)
+    const { error } = await supabase.from('contracts').delete().eq('id', c.id)
+    if (error) {
+      alert(
+        error.code === '23503'
+          ? `Can't delete "${c.name}" — it's linked to existing jobs. Set it to Inactive instead.`
+          : `Failed to delete "${c.name}": ${error.message}`
+      )
+      return
+    }
     setContracts((prev) => prev.filter((x) => x.id !== c.id))
   }
 
   async function handleAddClient() {
     if (!newClientName.trim() || !editing) return
     setAddingClient(true)
-    await supabase.from('contract_clients').insert({ contract_id: editing.id, name: newClientName.trim() })
+    const { error } = await supabase.from('contract_clients').insert({ contract_id: editing.id, name: newClientName.trim() })
     setNewClientName('')
     setAddingClient(false)
+    if (error) { alert(`Failed to add client: ${error.message}`); return }
     fetchClients(editing.id)
   }
 
   async function handleDeleteClient(client: ContractClient) {
     if (!editing) return
-    await supabase.from('contract_clients').delete().eq('id', client.id)
+    const { error } = await supabase.from('contract_clients').delete().eq('id', client.id)
+    if (error) {
+      alert(
+        error.code === '23503'
+          ? `Can't delete "${client.name}" — it's linked to existing jobs.`
+          : `Failed to delete "${client.name}": ${error.message}`
+      )
+      return
+    }
     fetchClients(editing.id)
   }
 
