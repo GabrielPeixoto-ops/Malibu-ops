@@ -1012,8 +1012,17 @@ function JobCard({
         <div className="flex items-center gap-1 mt-0.5">
           <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
           <span className="opacity-70 capitalize">{job.status.replace('_', ' ')}</span>
-          {job.hours_pending_approval && <span className="opacity-90">⏳ Pending approval</span>}
         </div>
+        {job.hours_pending_approval && (
+          // Its own row, not squeezed into the status line — the emoji
+          // renders at native size (much taller than this text-xs card), so
+          // sharing a flex row with "Completed"/etc caused the two labels to
+          // visually overlap in narrow kanban columns.
+          <div className="mt-0.5 flex items-center gap-1 opacity-90">
+            <span className="text-[10px] leading-none">⏳</span>
+            <span>Pending approval</span>
+          </div>
+        )}
         {(job.job_trucks ?? []).length > 0 && (
           <div className="mt-0.5 font-mono opacity-60 text-[10px]">
             {(job.job_trucks ?? []).map((jt) => jt.fleet?.registration ?? jt.fleet?.name).filter(Boolean).join(' + ')}
