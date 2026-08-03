@@ -4369,7 +4369,7 @@ const filteredCustomers = useMemo(
                     <span className="text-xs text-dim font-mono">2.00h</span>
                   </div>
                 )}
-                {(parseFloat(form.cof_final) || 0) > 0 && (
+                {manualOverrideHours === null && (parseFloat(form.cof_final) || 0) > 0 && (
                   <div className="flex items-center justify-between">
                     <span className="text-dim">Call Out Fee</span>
                     <span className="font-mono text-warm">+{(parseFloat(form.cof_final) || 0).toFixed(2)}h</span>
@@ -4378,9 +4378,16 @@ const filteredCustomers = useMemo(
                 <div className="flex items-center justify-between font-semibold pt-1.5 border-t border-wire">
                   <span className="text-parchment">Total paid per crew</span>
                   <span className="font-mono text-gold">
-                    {(Math.max(2, workedHoursCalc) + (parseFloat(form.cof_final) || 0)).toFixed(2)}h
+                    {manualOverrideHours !== null
+                      ? Math.max(2, workedHoursCalc).toFixed(2)
+                      : (Math.max(2, workedHoursCalc) + (parseFloat(form.cof_final) || 0)).toFixed(2)}h
                   </span>
                 </div>
+                {manualOverrideHours !== null && (
+                  <p className="text-[11px] text-dim pt-0.5">
+                    Manual Hours Override is the final paid amount — Call Out Fee doesn&apos;t stack on top.
+                  </p>
+                )}
               </div>
             )}
 
