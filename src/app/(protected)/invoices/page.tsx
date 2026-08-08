@@ -80,7 +80,7 @@ interface InvoiceJob {
   actual_finish_time: string | null
   job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; heavy_item: boolean; start_time: string | null; end_time: string | null; hours_override: number | null }>
   job_casual_crew: Array<{ casual_worker_id: string | null; name: string; rate_per_hour: number; hours: number; cof_share: boolean; heavy_item: boolean; start_time: string | null; finish_time: string | null; hours_override: number | null }>
-  job_commissions: Array<{ employee_id: string | null; casual_worker_id: string | null; rate_per_hour: number; hours: number; commission_type: { name: string } | null }>
+  job_commissions: Array<{ employee_id: string | null; casual_worker_id: string | null; commission_type_id: string | null; rate_per_hour: number; hours: number; commission_type: { name: string } | null }>
   job_extra_men: Array<{ employee_id: string | null; name: string | null; rate_per_hour: number | null; start_time: string | null; finish_time: string | null; cof_share: boolean; client_charge_amount: number; minimum_hours: number | null; hours_override: number | null }>
   job_materials: Array<{ quantity: number; cost_price: number; sale_price: number }>
   job_expenses: Array<{ amount: number; is_client_expense: boolean }>
@@ -384,7 +384,7 @@ function InvoicesPageContent() {
         contract_client:contract_clients(name),
         job_crew(employee_id, hours, cof_share, cof_hours, heavy_item, start_time, end_time, hours_override),
         job_casual_crew(casual_worker_id, name, rate_per_hour, hours, cof_share, heavy_item, start_time, finish_time, hours_override),
-        job_commissions(employee_id, casual_worker_id, rate_per_hour, hours, commission_type:commission_types(name)),
+        job_commissions(employee_id, casual_worker_id, commission_type_id, rate_per_hour, hours, commission_type:commission_types(name)),
         job_materials(quantity, cost_price, sale_price),
         job_expenses(amount, is_client_expense),
         job_extra_men(employee_id, name, rate_per_hour, start_time, finish_time, cof_share, client_charge_amount, minimum_hours, hours_override),
@@ -623,20 +623,15 @@ function InvoicesPageContent() {
         if (job.extra_man_employee_id === emp.id && job.extra_men_hours > 0 && !(job.job_extra_men ?? []).some((em) => em.employee_id === emp.id)) {
           entries.push({ job, workedHours: job.extra_men_hours, cofHours: 0, paidHours: job.extra_men_hours, pay: job.extra_men_hours * emp.hourly_rate, googleReviewBonus: false, heavyItem: false })
         }
-        for (const com of (job.job_commissions ?? [])) {
-          if (com.employee_id === emp.id && com.hours > 0 && com.rate_per_hour > 0) {
-            entries.push({
-              job,
-              workedHours: com.hours,
-              cofHours: 0,
-              paidHours: com.hours,
-              pay: com.hours * com.rate_per_hour,
-              googleReviewBonus: false,
-              heavyItem: false,
-              label: com.commission_type?.name ?? 'Commission',
-            })
-          }
-        }
+        // NOTE: job_commissions is intentionally NOT folded in here. A
+        // commission row's employee_id/casual_worker_id identifies whose
+        // WORKED HOURS the commission amount is calculated from (e.g.
+        // Isabella worked 4.75h) — it does NOT mean Isabella is the one
+        // owed the money. The commission is owed to whoever commission_type
+        // represents (e.g. Cibele, for referring Isabella). Mixing it into
+        // this employee's own pay/hours here made her invoice total look
+        // inflated by money that isn't hers. See commissionData below,
+        // which is the correct place this shows up — grouped by recipient.
         // Money this employee paid out of pocket on the job (e.g. a parking
         // ticket) — reimbursed via their invoice, tracked hours-free.
         for (const rb of (job.job_employee_expenses ?? [])) {
@@ -726,18 +721,12 @@ function InvoicesPageContent() {
         })
       }
 
-      for (const com of job.job_commissions ?? []) {
-        if (!com.casual_worker_id || com.hours <= 0 || com.rate_per_hour <= 0) continue
-        const linked = job.job_casual_crew?.find((r) => r.casual_worker_id === com.casual_worker_id)
-        const name = (linked?.name ?? '').trim()
-        if (!name) continue
-        const key = name.toLowerCase()
-        if (!byKey.has(key)) byKey.set(key, { name, entries: [] })
-        byKey.get(key)!.entries.push({
-          job, workedHours: com.hours, cofHours: 0, paidHours: com.hours, pay: com.hours * com.rate_per_hour,
-          heavyItem: false, googleReviewBonus: false, label: com.commission_type?.name ?? 'Commission',
-        })
-      }
+      // NOTE: job_commissions is intentionally NOT folded in here — see the
+      // matching note in employeeData above. A commission row's
+      // casual_worker_id identifies whose worked hours the commission $ is
+      // calculated from (e.g. Isabella), not who is owed the money (e.g.
+      // Cibele, the referrer). It shows up in commissionData instead,
+      // grouped by the actual recipient.
 
       // Money a casual worker paid out of pocket on the job — reimbursed via
       // their invoice, tracked hours-free. Resolved by casual_worker_id since
@@ -805,32 +794,39 @@ function InvoicesPageContent() {
 
   // Commissions — dedicated view pulling every job_commissions row together
   // (staff and casual), regardless of which tab they'd otherwise surface in.
-  // Same grouping convention as casualData: keyed per person, one row per job.
+  //
+  // IMPORTANT: a job_commissions row's employee_id/casual_worker_id is the
+  // person whose WORKED HOURS the commission $ is calculated from (e.g.
+  // Isabella worked 4.75h on this job) — it is NOT who the commission money
+  // is owed to. The recipient is commission_type (e.g. a type literally
+  // named "Cibele", for referring Isabella). Grouping by employee_id/
+  // casual_worker_id here used to put the money under the WORKER's name,
+  // which made it look like Isabella earned it and — worse — got it folded
+  // into her own pay total in the Employees/Casuals tabs. Group by the
+  // recipient (commission_type) instead; each entry still shows whose hours
+  // it came from via workerName, for traceability.
   const commissionData = useMemo(() => {
     const byKey = new Map<string, {
       name: string
-      entries: Array<{ job: InvoiceJob; label: string; rate: number; hours: number; pay: number }>
+      entries: Array<{ job: InvoiceJob; workerName: string; rate: number; hours: number; pay: number }>
     }>()
     for (const job of filtered) {
       for (const com of job.job_commissions ?? []) {
         if (com.hours <= 0 || com.rate_per_hour <= 0) continue
-        let key: string | null = null
-        let name: string | null = null
+        const key = com.commission_type_id ? `type:${com.commission_type_id}` : 'unassigned'
+        const name = com.commission_type?.name ?? 'Unassigned recipient — check commission type'
+        let workerName = 'Unknown'
         if (com.employee_id) {
-          const emp = employees.find((e) => e.id === com.employee_id)
-          key = `staff:${com.employee_id}`
-          name = emp?.name ?? 'Unknown staff'
+          workerName = employees.find((e) => e.id === com.employee_id)?.name ?? 'Unknown staff'
         } else if (com.casual_worker_id) {
           const linked = job.job_casual_crew?.find((r) => r.casual_worker_id === com.casual_worker_id)
           const cw = casualWorkers.find((c) => c.id === com.casual_worker_id)
-          key = `casual:${com.casual_worker_id}`
-          name = (linked?.name?.trim() || cw?.name) ?? 'Unknown casual'
+          workerName = (linked?.name?.trim() || cw?.name) ?? 'Unknown casual'
         }
-        if (!key || !name) continue
         if (!byKey.has(key)) byKey.set(key, { name, entries: [] })
         byKey.get(key)!.entries.push({
           job,
-          label: com.commission_type?.name ?? 'Commission',
+          workerName,
           rate: com.rate_per_hour,
           hours: com.hours,
           pay: com.hours * com.rate_per_hour,
@@ -1453,10 +1449,11 @@ function InvoicesPageContent() {
                   <div className={groupHeader}>
                     <div>
                       <span className="font-semibold text-parchment">{name}</span>
+                      <span className="ml-2 text-xs text-dim">owed to this person/company</span>
                     </div>
                     <div className="text-right">
                       <div className="text-sm font-mono font-bold text-gold">{fmtMoney(totalPay)}</div>
-                      <div className="text-xs text-dim font-mono">{fmtHours(totalHours)}</div>
+                      <div className="text-xs text-dim font-mono">{fmtHours(totalHours)} basis</div>
                     </div>
                   </div>
                   <table className="w-full text-sm">
@@ -1465,14 +1462,14 @@ function InvoicesPageContent() {
                         <th className={thCell}>Date</th>
                         <th className={thCell}>Job</th>
                         <th className={`${thCell} hidden sm:table-cell`}>Entity</th>
-                        <th className={thCell}>Type</th>
+                        <th className={thCell}>For</th>
                         <th className={`${thCell} text-right`}>Rate</th>
                         <th className={`${thCell} text-right`}>Hours</th>
                         <th className={`${thCell} text-right`}>Amount</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-wire">
-                      {entries.map(({ job, label, rate, hours, pay }, i) => (
+                      {entries.map(({ job, workerName, rate, hours, pay }, i) => (
                         <tr key={`${job.id}-${i}`} className="hover:bg-panel transition-colors cursor-pointer" onClick={() => router.push(`/jobs/${job.id}/edit`)}>
                           <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
                           <td className="px-4 py-2">
@@ -1485,7 +1482,7 @@ function InvoicesPageContent() {
                           </td>
                           <td className="px-4 py-2 text-dim text-xs hidden sm:table-cell">{entityLabel(job)}</td>
                           <td className="px-4 py-2">
-                            <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-300 font-medium">{label}</span>
+                            <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-300 font-medium" title="Whose worked hours this commission amount was calculated from">{workerName}</span>
                           </td>
                           <td className="px-4 py-2 text-right font-mono text-dim">{fmtMoney(rate)}/hr</td>
                           <td className="px-4 py-2 text-right font-mono font-medium text-parchment">{fmtHours(hours)}</td>
