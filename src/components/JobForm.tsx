@@ -316,6 +316,16 @@ interface FormState {
   client_cof_manual_charge: string
   deposit: string
   heavy_item_charge: string
+  // Fixed Price (flat $) override — available for ANY client type (Private,
+  // Subcontract, Contract), unlike private_rate_fixed above which only
+  // applies to Private. When active, this single amount becomes the whole
+  // base revenue for the job, replacing whatever the selected rate/ratecard/
+  // formula/percent-split would otherwise have computed. Crew payroll is
+  // completely unaffected — same guarantee as private_rate_fixed.
+  fixed_price: boolean
+  fixed_price_desc: string
+  fixed_price_amount: string
+  fixed_price_gst_exclusive: boolean
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -437,6 +447,10 @@ function defaultForm(): FormState {
     client_cof_manual_charge: '',
     deposit: '',
     heavy_item_charge: '',
+    fixed_price: false,
+    fixed_price_desc: '',
+    fixed_price_amount: '',
+    fixed_price_gst_exclusive: false,
   }
 }
 
@@ -669,6 +683,9 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             client_cof_manual_charge: number | null
             deposit: number | null
             heavy_item_charge: number | null
+            fixed_price: boolean | null
+            fixed_price_desc: string | null; fixed_price_amount: number | null
+            fixed_price_gst_exclusive: boolean | null
             job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; heavy_item: boolean; start_time: string | null; end_time: string | null; hours_override: number | null }>
             job_materials: Array<{ material_name: string; quantity: number; cost_price: number; sale_price: number }>
           }
@@ -763,6 +780,10 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             client_cof_manual_charge: j.client_cof_manual_charge != null ? j.client_cof_manual_charge.toString() : '',
             deposit: j.deposit != null ? j.deposit.toString() : '',
             heavy_item_charge: j.heavy_item_charge != null ? j.heavy_item_charge.toString() : '',
+            fixed_price: j.fixed_price ?? false,
+            fixed_price_desc: j.fixed_price_desc ?? '',
+            fixed_price_amount: j.fixed_price_amount != null ? j.fixed_price_amount.toString() : '',
+            fixed_price_gst_exclusive: j.fixed_price_gst_exclusive ?? false,
           })
           setDbMalibuRevenue(j.malibu_revenue)
 
@@ -1129,6 +1150,15 @@ const filteredCustomers = useMemo(
   // ── Real-time summary ──────────────────────────────────────────────────────
   const selectedPrivateRateInput = useMemo<PrivateRateInput | null>(() => {
     if (form.source !== 'private') return null
+    // Generic Fixed Price (any client type) takes priority over everything
+    // else here — the actual $ figure is irrelevant to this return value
+    // since calculateJobSummary short-circuits on job.override_revenue
+    // before ever reading privateRate.fixedAmount. This only exists so the
+    // live JOB SUMMARY preview doesn't hide itself for lack of a selected
+    // rate while Fixed Price is active.
+    if (form.fixed_price && parseFloat(form.fixed_price_amount) > 0) {
+      return { rate_per_hour: 0, cofHours: 0, fixedAmount: 0 }
+    }
     // Net worked hours from actual times (15-min rounding, same as _billingWorkedHrs)
     // — UNLESS a Manual Hours Override is set and marked as billed to the
     // client (migration_v58): the crew is being paid that many hours, and
@@ -1179,12 +1209,18 @@ const filteredCustomers = useMemo(
     const rate = privateRates.find((r) => r.id === form.private_rate_id)
     if (!rate) return null
     return { rate_per_hour: rate.rate_per_hour, cofHours }
-  }, [form.source, form.private_rate_custom, form.private_rate_custom_price, form.private_rate_custom_gst_exclusive, form.private_rate_fixed, form.private_rate_fixed_price, form.private_rate_fixed_gst_exclusive, form.private_rate_id, form.cof_final, form.cof, form.client_cof_override, form.client_cof_hours, form.client_cof_manual_charge, form.actual_start_time, form.actual_finish_time, form.break_minutes, form.manual_hours_override, form.manual_hours_client_billed, manualOverrideHours, privateRates])
+  }, [form.source, form.private_rate_custom, form.private_rate_custom_price, form.private_rate_custom_gst_exclusive, form.private_rate_fixed, form.private_rate_fixed_price, form.private_rate_fixed_gst_exclusive, form.private_rate_id, form.fixed_price, form.fixed_price_amount, form.cof_final, form.cof, form.client_cof_override, form.client_cof_hours, form.client_cof_manual_charge, form.actual_start_time, form.actual_finish_time, form.break_minutes, form.manual_hours_override, form.manual_hours_client_billed, manualOverrideHours, privateRates])
 
   const summary = useMemo<JobSummary | null>(() => {
-    if (form.source === 'subcontract' && !selectedSub) return null
-    if (form.source === 'private' && !selectedPrivateRateInput) return null
-    if (form.source === 'contract' && !selectedEntity) return null
+    // Fixed Price is a job-level override that doesn't need a rate/entity
+    // selected at all — skip these "nothing picked yet" guards while it's
+    // active so the live preview still renders.
+    const fixedPriceActive = form.fixed_price && parseFloat(form.fixed_price_amount) > 0
+    if (!fixedPriceActive) {
+      if (form.source === 'subcontract' && !selectedSub) return null
+      if (form.source === 'private' && !selectedPrivateRateInput) return null
+      if (form.source === 'contract' && !selectedEntity) return null
+    }
 
     // Most subcontractors round hours up to the next 15-min block, same as
     // Malibu's own private/contract jobs. A few (e.g. TMAAT) report exact
@@ -1284,7 +1320,11 @@ const filteredCustomers = useMemo(
       client_billing_config: overrideOpen ? buildOverrideConfig(overrideBilling) as unknown as SubcontractorConfig : null,
       google_review: form.google_review,
       google_review_employee_ids: form.google_review_employee_ids,
-      override_revenue: malibuRevenue ?? null,
+      // Fixed Price (flat $, any client type) always wins over the percent-
+      // subcontractor gross-value calc (malibuRevenue) when both are set.
+      override_revenue: (form.fixed_price && parseFloat(form.fixed_price_amount) > 0)
+        ? parseFloat(form.fixed_price_amount) * (form.fixed_price_gst_exclusive ? 1.1 : 1)
+        : (malibuRevenue ?? null),
     }
     const cofFinalHrs = form.cof_final.trim() ? (parseFloat(form.cof_final) || null) : null
     const crewData = crew.filter((r) => r.employee_id).map((r) => {
@@ -1856,6 +1896,15 @@ const filteredCustomers = useMemo(
       ? (parseFloat(form.gross_job_value) || 0) * (selectedSub!.config as PercentConfig).percent
       : null
 
+    // Fixed Price (flat $) — works for ANY client type (Private, Subcontract,
+    // Contract). Takes priority over every other revenue source below,
+    // including the percent-subcontractor gross-value calc above. Crew
+    // payroll is entirely unaffected — see calculatePayroll, which never
+    // reads any rate/price field.
+    const computedFixedPriceRevenue = form.fixed_price && parseFloat(form.fixed_price_amount) > 0
+      ? parseFloat(form.fixed_price_amount) * (form.fixed_price_gst_exclusive ? 1.1 : 1)
+      : null
+
     // Revenue for private jobs: rate × (max(2, workedHrs) + effectiveClientCof)
     const clientCofDollarModeSave = form.client_cof_override && form.client_cof_manual_charge.trim() !== ''
     const saveEffectiveClientCof = clientCofDollarModeSave
@@ -2007,9 +2056,13 @@ const filteredCustomers = useMemo(
       contract_rate_custom_gst_exclusive: form.source === 'contract' && form.contract_rate_custom ? form.contract_rate_custom_gst_exclusive : false,
       contractor_job_id: form.source === 'subcontract' ? (form.contractor_job_id.trim() || null) : null,
       gross_job_value: isPercentSub ? (parseFloat(form.gross_job_value) || null) : null,
-      malibu_revenue: computedMalibuRevenue ?? computedRateBlocksRevenue ?? computedPrivateRevenue ?? computedRatecardRevenue ?? computedContractRevenue ?? null,
+      malibu_revenue: computedFixedPriceRevenue ?? computedMalibuRevenue ?? computedRateBlocksRevenue ?? computedPrivateRevenue ?? computedRatecardRevenue ?? computedContractRevenue ?? null,
       client_cof_override: form.client_cof_override,
       client_cof_hours: form.client_cof_override ? (parseFloat(form.client_cof_hours) || null) : null,
+      fixed_price: form.fixed_price,
+      fixed_price_desc: form.fixed_price ? (form.fixed_price_desc.trim() || null) : null,
+      fixed_price_amount: form.fixed_price ? (parseFloat(form.fixed_price_amount) || null) : null,
+      fixed_price_gst_exclusive: form.fixed_price ? form.fixed_price_gst_exclusive : false,
     }
 
     const crewRows = crew.filter((r) => r.employee_id).map((r) => {
@@ -2541,6 +2594,69 @@ const filteredCustomers = useMemo(
             </span>
           </div>
         )}
+
+        {/* FIXED PRICE — flat $ override, available for ANY client type
+            (Private, Subcontract, or Contract). When active, this single
+            amount becomes the entire base revenue for the job, replacing
+            whatever the rate/ratecard/formula/percent-split below would
+            otherwise have computed. Crew payroll is completely unaffected —
+            crew are still paid normally from their own hours; this only
+            changes what the client/subcontractor relationship bills. */}
+        <div className={locked && !form.fixed_price ? '' : 'mb-3 pb-3 border-b border-wire'}>
+          {locked ? (
+            form.fixed_price && (
+              <p className="text-xs text-dim">
+                Fixed Price — ${form.fixed_price_amount}{form.fixed_price_gst_exclusive ? ' + GST' : ' incl. GST'}{form.fixed_price_desc ? ` (${form.fixed_price_desc})` : ''}
+              </p>
+            )
+          ) : (
+            <>
+              <label className="flex items-center gap-2 text-sm font-medium text-warm">
+                <input
+                  type="checkbox"
+                  checked={form.fixed_price}
+                  onChange={(e) => setField('fixed_price', e.target.checked)}
+                />
+                Fixed Price (flat $ — overrides the rate below)
+              </label>
+              {form.fixed_price && (
+                <div className="mt-2 space-y-2">
+                  <Input
+                    label="Description"
+                    value={form.fixed_price_desc}
+                    onChange={(e) => setField('fixed_price_desc', e.target.value)}
+                    placeholder="e.g. Agreed flat rate for the whole job"
+                  />
+                  <Input
+                    label="Fixed Amount ($)"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.fixed_price_amount}
+                    onChange={(e) => setField('fixed_price_amount', e.target.value)}
+                    placeholder="0.00"
+                  />
+                  <label className="flex items-center gap-2 text-sm text-warm">
+                    <input
+                      type="checkbox"
+                      checked={form.fixed_price_gst_exclusive}
+                      onChange={(e) => setField('fixed_price_gst_exclusive', e.target.checked)}
+                    />
+                    + GST (amount above is before GST — 10% is added on top)
+                  </label>
+                  {form.fixed_price_amount && (
+                    <p className="text-xs text-dim">
+                      {form.fixed_price_gst_exclusive
+                        ? `= ${(parseFloat(form.fixed_price_amount) * 1.1).toFixed(2)} incl. GST`
+                        : `${form.fixed_price_amount} already includes GST`}
+                      {' — flat amount, does not change based on hours worked'}
+                    </p>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
 
         {/* SUBCONTRACT */}
         {form.source === 'subcontract' && (
