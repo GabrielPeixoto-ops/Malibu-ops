@@ -324,7 +324,16 @@ export function calculateJobSummary(
 
   let subRevenue = 0
   const useRateBlocks = (source === 'private' || source === 'contract') && rateBlocksInput && rateBlocksInput.blocks.length > 0
-  if (useRateBlocks) {
+  if (job.override_revenue != null && job.override_revenue > 0) {
+    // Job-level override (e.g. a Fixed Price / flat $ override, or a
+    // percent-subcontractor's gross-value calc) wins over every other
+    // revenue source below, regardless of client type. calculateJobRevenue
+    // and calculateClientRevenue already check this internally for the
+    // subcontract/contract branches — checking it here too additionally
+    // covers the 'private' and rate-blocks branches, which don't otherwise
+    // see it.
+    subRevenue = job.override_revenue
+  } else if (useRateBlocks) {
     // Crew/truck size changed mid-job — bill each segment at its own rate
     // instead of one flat rate for the whole day, then add any client Call
     // Out Fee hours at the last (most recent) segment's rate.
