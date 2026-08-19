@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import {
   Briefcase, Users, Truck, UserCircle, LayoutDashboard, X, Menu, Plus,
   DollarSign, Building2, FileText, Tag, Palette, BadgeDollarSign, LogOut, Plug,
-  BookOpen, CalendarRange, ClipboardList,
+  BookOpen, CalendarRange, ClipboardList, BarChart3,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import MalibuLogo from '@/components/ui/MalibuLogo'
@@ -47,6 +47,7 @@ const NAV_SECTIONS = [
       { href: '/invoices', label: 'Invoices', icon: FileText },
       { href: '/payroll', label: 'Payroll', icon: DollarSign },
       { href: '/weekly-recap', label: 'Weekly Recap', icon: ClipboardList },
+      { href: '/reporting', label: 'Reporting', icon: BarChart3 },
     ],
   },
   {
