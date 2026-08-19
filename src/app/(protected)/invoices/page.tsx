@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
-import { ExternalLink, ChevronLeft, ChevronRight, Check, CheckCheck, Clock, DollarSign, Paperclip } from 'lucide-react'
+import { ExternalLink, ChevronLeft, ChevronRight, Check, CheckCheck, Clock, DollarSign, Paperclip, Flag } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { calculateJobRevenue, calculateClientRevenue } from '@/lib/billing'
 import type { Employee, JobSource, JobStatus, Subcontractor, SubcontractorConfig } from '@/types/database'
@@ -49,6 +49,8 @@ interface InvoiceJob {
   date: string
   status: JobStatus
   source: JobSource
+  flagged: boolean | null
+  flag_note: string | null
   cof: number | null
   cof_final: number | null
   additional_hours: number | null
@@ -373,7 +375,7 @@ function InvoicesPageContent() {
     supabase
       .from('jobs')
       .select(`
-        id, job_number, date, status, source,
+        id, job_number, date, status, source, flagged, flag_note,
         cof, cof_final, additional_hours, additional_rate, rate_card_key, formula_vars,
         extra_men_hours, extra_man_employee_id, break_minutes, manual_hours_override, manual_hours_client_billed, discount, heavy_item_charge, client_cof_manual_charge, override_revenue, malibu_revenue, client_billing_config,
         google_review, google_review_employee_ids, actual_start_time, actual_finish_time,
@@ -1294,7 +1296,11 @@ function InvoicesPageContent() {
                           <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
                           <td className="px-4 py-2">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-mono text-parchment">#{job.job_number}</span>
+                              <span className="font-mono text-parchment">#{job.job_number}{job.flagged && (
+                              <span title={job.flag_note ?? 'Needs attention'} className="inline-flex align-middle ml-1">
+                                <Flag size={12} className="text-red-400 fill-red-400/40" />
+                              </span>
+                            )}</span>
                               {label && (
                                 <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${label.startsWith('Reimbursement') ? 'bg-emerald-500/15 text-emerald-300' : 'bg-purple-500/15 text-purple-300'}`}>
                                   {label.startsWith('Reimbursement') ? label : `Commission: ${label}`}
@@ -1384,7 +1390,11 @@ function InvoicesPageContent() {
                           <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
                           <td className="px-4 py-2">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-mono text-parchment">#{job.job_number}</span>
+                              <span className="font-mono text-parchment">#{job.job_number}{job.flagged && (
+                              <span title={job.flag_note ?? 'Needs attention'} className="inline-flex align-middle ml-1">
+                                <Flag size={12} className="text-red-400 fill-red-400/40" />
+                              </span>
+                            )}</span>
                               {label && (
                                 <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${label.startsWith('Reimbursement') ? 'bg-emerald-500/15 text-emerald-300' : 'bg-purple-500/15 text-purple-300'}`}>
                                   {label.startsWith('Reimbursement') ? label : `Commission: ${label}`}
@@ -1474,7 +1484,11 @@ function InvoicesPageContent() {
                           <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
                           <td className="px-4 py-2">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-mono text-parchment">#{job.job_number}</span>
+                              <span className="font-mono text-parchment">#{job.job_number}{job.flagged && (
+                              <span title={job.flag_note ?? 'Needs attention'} className="inline-flex align-middle ml-1">
+                                <Flag size={12} className="text-red-400 fill-red-400/40" />
+                              </span>
+                            )}</span>
                               {STATUS_STYLE[job.status] && (
                                 <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${STATUS_STYLE[job.status]}`}>{job.status}</span>
                               )}
@@ -1605,7 +1619,11 @@ function InvoicesPageContent() {
                         <tr key={job.id} className="hover:bg-panel transition-colors cursor-pointer" onClick={() => router.push(`/jobs/${job.id}/edit`)}>
                           <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
                           <td className="px-4 py-2 font-mono text-parchment">
-                            #{job.job_number}
+                            #{job.job_number}{job.flagged && (
+                              <span title={job.flag_note ?? 'Needs attention'} className="inline-flex align-middle ml-1">
+                                <Flag size={12} className="text-red-400 fill-red-400/40" />
+                              </span>
+                            )}
                             {isTT && (
                               <span className="ml-2 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-950/70 text-sky-300 align-middle">
                                 TT
@@ -1679,7 +1697,11 @@ function InvoicesPageContent() {
                         <tr key={job.id} className="hover:bg-panel transition-colors cursor-pointer" onClick={() => router.push(`/jobs/${job.id}/edit`)}>
                           <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
                           <td className="px-4 py-2 font-mono text-parchment">
-                            #{job.job_number}
+                            #{job.job_number}{job.flagged && (
+                              <span title={job.flag_note ?? 'Needs attention'} className="inline-flex align-middle ml-1">
+                                <Flag size={12} className="text-red-400 fill-red-400/40" />
+                              </span>
+                            )}
                             {job.manual_hours_override != null && !job.manual_hours_client_billed && (
                               <span
                                 className="ml-2 inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-950/70 text-amber-300 align-middle"
@@ -1804,7 +1826,11 @@ function InvoicesPageContent() {
                       {cj.map(({ job, revenue }) => (
                         <tr key={job.id} className="hover:bg-panel transition-colors cursor-pointer" onClick={() => router.push(`/jobs/${job.id}/edit`)}>
                           <td className="px-4 py-2 text-warm whitespace-nowrap">{job.date}</td>
-                          <td className="px-4 py-2 font-mono text-parchment">#{job.job_number}</td>
+                          <td className="px-4 py-2 font-mono text-parchment">#{job.job_number}{job.flagged && (
+                              <span title={job.flag_note ?? 'Needs attention'} className="inline-flex align-middle ml-1">
+                                <Flag size={12} className="text-red-400 fill-red-400/40" />
+                              </span>
+                            )}</td>
                           <td className="px-4 py-2">
                             <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[job.status] ?? 'bg-wire/50 text-warm'}`}>
                               {job.status.replace('_', ' ')}
