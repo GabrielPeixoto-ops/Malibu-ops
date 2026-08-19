@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Plus, Trash2, ChevronLeft, ImagePlus, CheckCircle, Lock,
-  X, Star, Banknote, FileText, XCircle, FilePlus, Paperclip, Pencil,
+  X, Star, Banknote, FileText, XCircle, FilePlus, Paperclip, Pencil, Flag,
 } from 'lucide-react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
@@ -326,6 +326,12 @@ interface FormState {
   fixed_price_desc: string
   fixed_price_amount: string
   fixed_price_gst_exclusive: boolean
+  // Needs Attention flag — visible on Invoices + Reporting pages, for any
+  // job that needs a second look (damage, dispute, missing info, etc).
+  // Purely informational, does not affect any billing calculation.
+  flagged: boolean
+  flag_note: string
+  flagged_at: string
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -451,6 +457,9 @@ function defaultForm(): FormState {
     fixed_price_desc: '',
     fixed_price_amount: '',
     fixed_price_gst_exclusive: false,
+    flagged: false,
+    flag_note: '',
+    flagged_at: '',
   }
 }
 
@@ -685,6 +694,9 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             heavy_item_charge: number | null
             fixed_price: boolean | null
             fixed_price_desc: string | null; fixed_price_amount: number | null
+            flagged: boolean | null
+            flag_note: string | null
+            flagged_at: string | null
             fixed_price_gst_exclusive: boolean | null
             job_crew: Array<{ employee_id: string; hours: number; cof_share: boolean; cof_hours: number; heavy_item: boolean; start_time: string | null; end_time: string | null; hours_override: number | null }>
             job_materials: Array<{ material_name: string; quantity: number; cost_price: number; sale_price: number }>
@@ -784,6 +796,9 @@ export default function JobForm({ jobId }: { jobId?: string }) {
             fixed_price_desc: j.fixed_price_desc ?? '',
             fixed_price_amount: j.fixed_price_amount != null ? j.fixed_price_amount.toString() : '',
             fixed_price_gst_exclusive: j.fixed_price_gst_exclusive ?? false,
+            flagged: j.flagged ?? false,
+            flag_note: j.flag_note ?? '',
+            flagged_at: j.flagged_at ?? '',
           })
           setDbMalibuRevenue(j.malibu_revenue)
 
@@ -2063,6 +2078,9 @@ const filteredCustomers = useMemo(
       fixed_price_desc: form.fixed_price ? (form.fixed_price_desc.trim() || null) : null,
       fixed_price_amount: form.fixed_price ? (parseFloat(form.fixed_price_amount) || null) : null,
       fixed_price_gst_exclusive: form.fixed_price ? form.fixed_price_gst_exclusive : false,
+      flagged: form.flagged,
+      flag_note: form.flagged ? (form.flag_note.trim() || null) : null,
+      flagged_at: form.flagged ? (form.flagged_at || new Date().toISOString()) : null,
     }
 
     const crewRows = crew.filter((r) => r.employee_id).map((r) => {
@@ -4262,6 +4280,36 @@ const filteredCustomers = useMemo(
       </div>
 
       <div className="space-y-4">
+
+        {/* ── Needs Attention flag ─────────────────────────────────────── */}
+        <div className={`rounded-xl border px-4 py-3 transition-colors ${form.flagged ? 'border-red-500/50 bg-red-500/10' : 'border-white/10 bg-white/[0.02]'}`}>
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={form.flagged}
+              onChange={(e) => setField('flagged', e.target.checked)}
+              className="w-4 h-4 accent-red-500"
+            />
+            <span className={`text-sm font-semibold flex items-center gap-1.5 ${form.flagged ? 'text-red-300' : 'text-dim'}`}>
+              <Flag size={14} />
+              Needs Attention
+            </span>
+            {form.flagged && (
+              <span className="text-xs font-medium text-red-300 bg-red-500/10 px-2 py-0.5 rounded-full ml-1">
+                Flagged
+              </span>
+            )}
+          </label>
+          {form.flagged && (
+            <textarea
+              value={form.flag_note}
+              onChange={(e) => setField('flag_note', e.target.value)}
+              placeholder="What happened? (damage, dispute, missing info…)"
+              rows={2}
+              className="mt-2 w-full bg-black/20 border border-red-500/30 rounded-lg px-3 py-2 text-sm text-warm placeholder:text-dim/50 focus:outline-none focus:border-red-500/60"
+            />
+          )}
+        </div>
 
         {/* ── Reviewed lock banner ──────────────────────────────────────── */}
         {form.status === 'reviewed' && isViewMode && (
